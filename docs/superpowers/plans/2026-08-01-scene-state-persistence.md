@@ -6,7 +6,7 @@
 
 - `scene-state-store.js` 负责 SceneState 的序列化、原子写入和校验读取。
 - 写入前调用 `validateSceneState()`，写入内容使用规范 JSON + newline。
-- 目标文件存在时先移动到带进程/时间戳的备份名，再将临时文件移动到目标位置；新文件替换失败时尝试恢复旧文件。
+- 目标文件存在时先移动到唯一备份名，再将临时文件移动到目标位置；这是 Windows/Unix 兼容的两阶段替换，存在短暂目标路径空窗，失败时显式报告替换失败或回滚失败。
 - 读取统一使用 `parseSceneState()`，损坏 JSON 和版本错误保持 SceneState 契约错误码。
 - 宿主通过 `loadRecoveryPlan()` 决定 SceneState 与旧 recovery 的优先级，本模块不启动 Runtime。
 
@@ -22,9 +22,10 @@
 
 - [x] 实现 `saveSceneState()`。
 - [x] 实现 `loadSceneState()`。
-- [x] 实现跨 Windows/Unix 语义的目标替换与失败回滚尝试。
-- [x] 覆盖首次写入、覆盖写入、目录创建、损坏文件、目标不可替换和输入不可变。
+- [x] 实现 Windows/Unix 兼容的两阶段目标替换、唯一临时文件和同目标串行写入。
+- [x] 覆盖首次写入、覆盖写入、目录创建、损坏文件、目标不可替换、替换后失败、回滚失败、并发保存和输入不可变。
+- [x] 加载目标缺失时尝试恢复最近的有效备份，并保留失败证据。
 - [x] 导出模块并加入 `npm run check`。
-- [x] Node check、41 项 Node 测试（36 passed、5 skipped）通过。
+- [x] Node check、55 项 Node 测试（50 passed、5 skipped）通过。
 - [ ] 由宿主接入实际路径与生命周期。
-- [ ] 增加写入节流和崩溃中断后的临时文件清理策略。
+- [ ] 增加遗留临时文件的清理策略；备份恢复已覆盖目标丢失场景，但仍需由宿主决定清理时机。

@@ -32,5 +32,7 @@
 - [x] 接入 `RuntimeProcessManager`。
 - [x] 覆盖 debounce、最新快照、失败诊断、停止 flush 和空响应。
 - [x] Node check、46 项 Node 测试（41 passed、5 skipped）通过。
-- [ ] 接入插件宿主的实际配置字段和默认路径。
-- [ ] 增加真实 Runtime health → 文件写入 smoke。
+- [x] 增加显式宿主配置字段：启用开关、路径和 debounce；相对路径解析到 `dataDir`。
+- [x] 增加真实 Runtime health → 文件写入 smoke。
+- [ ] 在完整 Hana 插件生命周期中创建 RuntimeProcessManager；当前入口只提供 `createSceneStatePersistenceFromHostContext()` 工厂。
+- [ ] 处理跨实例写入锁和配置热更新。

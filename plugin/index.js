@@ -19,3 +19,4 @@ export * from './runtime/scene-state-recovery.js';
 export * from './runtime/recovery-plan.js';
 export * from './runtime/scene-state-store.js';
 export * from './runtime/scene-state-persistence.js';
+export * from './runtime/scene-state-config.js';

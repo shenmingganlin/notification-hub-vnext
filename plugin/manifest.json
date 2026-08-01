@@ -8,5 +8,37 @@
   "trust": "full-access",
   "activationEvents": [
     "onStartup"
-  ]
+  ],
+  "contributes": {
+    "configuration": {
+      "properties": {
+        "sceneStatePersistenceEnabled": {
+          "type": "boolean",
+          "title": "SceneState 快照持久化",
+          "description": "将 Runtime 回显的 SceneState 快照写入插件数据目录。",
+          "default": true
+        },
+        "sceneStatePersistencePath": {
+          "type": "string",
+          "title": "SceneState 快照路径",
+          "description": "相对 dataDir 的路径，或显式绝对路径。",
+          "default": "scene-state.json",
+          "ui": {
+            "control": "text"
+          }
+        },
+        "sceneStatePersistenceDebounceMs": {
+          "type": "integer",
+          "title": "SceneState 写入节流",
+          "description": "连续 Runtime 响应之间合并快照写入的等待时间，单位毫秒。",
+          "default": 100,
+          "minimum": 0,
+          "maximum": 60000,
+          "ui": {
+            "control": "number"
+          }
+        }
+      }
+    }
+  }
 }

@@ -41,6 +41,7 @@
 - 新增 SceneState 优先、旧 recovery snapshot fallback 的恢复计划选择器；`RuntimeProcessManager` 可选接收 SceneState，旧入口与 replay 顺序保持兼容，fallback 以结构化 diagnostic 暴露。
 - 新增独立 SceneState 原子持久化 store：校验后写入临时文件，替换失败时尝试恢复旧目标；当前不猜测宿主默认路径。
 - 新增 SceneState 快照生命周期适配器：PipeClient 发出只读 response 事件，RuntimeProcessManager 对有效 `sceneStateSnapshot` 做 debounce 写入，并在 stop 前 flush；失败通过结构化 diagnostic 暴露。
+- manifest 增加 SceneState 持久化启用开关、路径和 debounce 配置；配置工厂支持从 Hana host context 的 `dataDir/config` 解析路径，并新增真实 Runtime health 到文件落盘 smoke。
 - 重启后按快照顺序重放恢复命令，并对失败停止后续恢复、输出结构化诊断。
 - 协议 envelope 增加可选 `idempotencyKey`，Runtime 对重复请求去重并拒绝同 key 不同内容的冲突请求。
 - 建立最小 Win32 Scene Window，支持 Per-Monitor V2 DPI、非激活显示、消息泵、自动关闭和生命周期诊断。
@@ -82,4 +83,4 @@ ctest --preset debug-vs2026
 
 ## 下一步
 
-继续收口 shelf 的视觉与交互边界，并由插件宿主提供 SceneState 快照配置字段、默认路径和真实 Runtime health 写入 smoke；迁移前仍需定义派生几何与可重建输入的分离。真实多显示器拓扑、显示器热插拔刷新和多显示器 DPI 拖动验证仍待完成。
+继续收口 shelf 的视觉与交互边界，并在完整 Hana 插件生命周期中创建 RuntimeProcessManager；当前已提供配置工厂和真实 Runtime smoke，但尚未伪造宿主自动启动接入。真实多显示器拓扑、显示器热插拔刷新和多显示器 DPI 拖动验证仍待完成。

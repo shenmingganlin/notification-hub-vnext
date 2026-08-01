@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -9,6 +9,8 @@ import {
   saveSceneState,
   serializePersistedSceneState
 } from '../../plugin/runtime/scene-state-store.js';
+
+const realWriteFile = writeFile;
 
 const sceneState = {
   sceneStateVersion: 1,
@@ -74,6 +76,108 @@ test('SceneState store rejects corrupted snapshots with contract errors', async 
       loadSceneState(filePath),
       (error) => error.code === 'RUNTIME_SCENE_STATE_INVALID'
     );
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test('SceneState store serializes concurrent saves to the same target', async () => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), 'notification-hub-scene-state-'));
+  const filePath = path.join(directory, 'scene-state.json');
+  const first = { ...sceneState, updatedAt: '2026-08-01T12:02:00.000Z' };
+  const second = { ...sceneState, updatedAt: '2026-08-01T12:03:00.000Z' };
+  const delayedFs = {
+    writeFile: async (...args) => {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      return realWriteFile(...args);
+    }
+  };
+  try {
+    await Promise.all([
+      saveSceneState(first, filePath, { fsOps: delayedFs }),
+      saveSceneState(second, filePath, { fsOps: delayedFs })
+    ]);
+    assert.deepEqual(await loadSceneState(filePath), second);
+    assert.deepEqual(await readdir(directory), ['scene-state.json']);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test('SceneState store reports replacement failure and successfully restores the previous file', async () => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), 'notification-hub-scene-state-'));
+  const filePath = path.join(directory, 'scene-state.json');
+  const replacement = { ...sceneState, updatedAt: '2026-08-01T12:04:00.000Z' };
+  let replacementFailed = false;
+  const failingFs = {
+    renameFile: async (from, to) => {
+      if (!replacementFailed && String(from).includes('.tmp-')) {
+        replacementFailed = true;
+        const error = new Error('simulated replacement failure');
+        error.code = 'EIO';
+        throw error;
+      }
+      return (await import('node:fs/promises')).rename(from, to);
+    }
+  };
+  try {
+    await saveSceneState(sceneState, filePath);
+    await assert.rejects(
+      saveSceneState(replacement, filePath, { fsOps: failingFs }),
+      (error) => error.code === 'RUNTIME_SCENE_STATE_PERSIST_FAILED'
+        && Boolean(error.details.backupPath)
+        && Boolean(error.details.temporaryPath)
+    );
+    assert.deepEqual(await loadSceneState(filePath), sceneState);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test('SceneState store exposes rollback failure and leaves recovery evidence', async () => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), 'notification-hub-scene-state-'));
+  const filePath = path.join(directory, 'scene-state.json');
+  const replacement = { ...sceneState, updatedAt: '2026-08-01T12:05:00.000Z' };
+  let temporaryRenameFailed = false;
+  const failingFs = {
+    renameFile: async (from, to) => {
+      if (String(from).includes('.tmp-')) {
+        temporaryRenameFailed = true;
+        const error = new Error('simulated replacement failure');
+        error.code = 'EIO';
+        throw error;
+      }
+      if (temporaryRenameFailed && String(to) === filePath) {
+        const error = new Error('simulated rollback failure');
+        error.code = 'EBUSY';
+        throw error;
+      }
+      return (await import('node:fs/promises')).rename(from, to);
+    }
+  };
+  try {
+    await saveSceneState(sceneState, filePath);
+    await assert.rejects(
+      saveSceneState(replacement, filePath, { fsOps: failingFs }),
+      (error) => error.code === 'RUNTIME_SCENE_STATE_ROLLBACK_FAILED'
+        && error.details.rollbackCode === 'EBUSY'
+        && Boolean(error.details.backupPath)
+    );
+    const names = await readdir(directory);
+    assert.equal(names.some((name) => name.includes('.bak-')), true);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test('SceneState store recovers a valid backup when the target is missing', async () => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), 'notification-hub-scene-state-'));
+  const filePath = path.join(directory, 'scene-state.json');
+  const backupPath = `${filePath}.bak-interrupted`;
+  try {
+    await writeFile(backupPath, serializePersistedSceneState(sceneState), 'utf8');
+    assert.deepEqual(await loadSceneState(filePath), sceneState);
+    assert.deepEqual(await loadSceneState(filePath), sceneState);
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
