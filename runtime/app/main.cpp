@@ -175,6 +175,56 @@ bool visual_self_test() {
 #endif
 }
 
+bool drag_interaction_self_test() {
+#ifndef _WIN32
+    std::cerr << "INTERACTION_UNSUPPORTED: Native drag interaction requires Windows\n";
+    return false;
+#else
+    SceneWindow window(WindowConfig{
+        L"Notification Hub Drag Self Test",
+        L"Drag interaction",
+        420,
+        180,
+        true});
+    if (!window.create() || !window.show()) return false;
+
+    int start_x = 0;
+    int start_y = 0;
+    if (!window.get_window_position(start_x, start_y)) return false;
+    if (window.begin_drag_client_point(210.0f, 90.0f) == false || !window.is_dragging()) return false;
+    constexpr int delta_x = 37;
+    constexpr int delta_y = 23;
+    if (!window.update_drag_screen_point(start_x + delta_x + 210, start_y + delta_y + 90)) return false;
+
+    int moved_x = 0;
+    int moved_y = 0;
+    if (!window.get_window_position(moved_x, moved_y)
+        || moved_x != start_x + delta_x
+        || moved_y != start_y + delta_y) {
+        const auto event = create_event(
+            "interaction-drag-self-test", "drag-moved", "INTERACTION_DRAG_FAILED", "error", false,
+            "Dragged window position did not match screen delta", std::string(kTimestamp));
+        std::cerr << serialize_jsonl(event);
+        return false;
+    }
+    window.end_drag();
+    const auto close_bounds = close_button_bounds(420.0f, 180.0f);
+    if (window.begin_drag_client_point(
+            (close_bounds.left + close_bounds.right) * 0.5f,
+            (close_bounds.top + close_bounds.bottom) * 0.5f)) {
+        return false;
+    }
+    window.request_close();
+    if (window.run_message_pump(false) != 0 || window.is_created()) return false;
+
+    const auto event = create_event(
+        "interaction-drag-self-test", "drag-completed", "INTERACTION_DRAG_COMPLETED", "info", true,
+        "Window drag state and position delta completed", std::string(kTimestamp));
+    std::cout << serialize_jsonl(event);
+    return true;
+#endif
+}
+
 bool close_interaction_self_test() {
 #ifndef _WIN32
     std::cerr << "INTERACTION_UNSUPPORTED: Native close interaction requires Windows\n";
@@ -363,6 +413,11 @@ int main(int argc, char** argv) {
     if (argc > 1 && std::string_view(argv[1]) == "--hit-test-self-test") {
         const bool passed = hit_test_self_test();
         std::cout << "notification-hub-runtime hit-test self-test: " << (passed ? "ok" : "failed") << "\n";
+        return passed ? 0 : 1;
+    }
+    if (argc > 1 && std::string_view(argv[1]) == "--drag-interaction-self-test") {
+        const bool passed = drag_interaction_self_test();
+        std::cout << "notification-hub-runtime drag interaction self-test: " << (passed ? "ok" : "failed") << "\n";
         return passed ? 0 : 1;
     }
     if (argc > 1 && std::string_view(argv[1]) == "--close-interaction-self-test") {

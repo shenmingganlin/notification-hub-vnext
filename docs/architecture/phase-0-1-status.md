@@ -32,12 +32,13 @@
 - 建立共享卡片几何契约，接入 `WM_NCHITTEST`，卡片本体返回 `HTCLIENT`，卡片外区域返回 `HTTRANSPARENT`。
 - 增加右上角关闭按钮绘制、按钮区域命中、`WM_LBUTTONUP` 关闭请求和窗口销毁闭环。
 - 增加独立离屏 D2D target 的结构性像素回归，验证透明角、卡片表面、强调条和关闭按钮区域；不读取 DirectComposition surface，避免合成器回读不稳定。
+- 增加卡片拖动状态机，支持按下捕获、屏幕坐标位移、释放和捕获丢失清理。
 - Node.js 测试通过：11 项中 11 项通过，2 项需要 Runtime 参数的测试由 CTest 执行。
-- CTest 通过：10/10。
+- CTest 通过：11/11。
 
 ## 当前阶段
 
-Phase 2 已完成基础闭环，Phase 4 正在推进，Phase 5 已开始。Node.js 与 C++ Runtime 已具备协议、诊断、framing、最小 Named Pipe 通信、有限自动重连、Runtime 进程托管、幂等请求、基础恢复快照持久化、最小 Win32 窗口生命周期、Direct2D/DirectWrite 卡片绘制、DirectComposition 预乘 alpha surface、离屏结构性像素回归、基础卡片命中和关闭交互能力；整图 golden、真实桌面截图回归、透明区域桌面穿透、拖动和 Scene 状态重建尚未接入。
+Phase 2 已完成基础闭环，Phase 4 正在推进，Phase 5 已开始。Node.js 与 C++ Runtime 已具备协议、诊断、framing、最小 Named Pipe 通信、有限自动重连、Runtime 进程托管、幂等请求、基础恢复快照持久化、最小 Win32 窗口生命周期、Direct2D/DirectWrite 卡片绘制、DirectComposition 预乘 alpha surface、离屏结构性像素回归、卡片命中、关闭和基础拖动交互能力；整图 golden、真实桌面截图回归、透明区域桌面穿透和 Scene 状态重建尚未接入。
 
 ## 标准验证命令
 
@@ -60,4 +61,4 @@ ctest --preset debug-vs2026
 
 ## 下一步
 
-继续完善 Native Scene Window：增加整图 golden 与真实桌面截图回归、透明区域桌面穿透验证和拖动交互；同时继续推进持久化幂等记录和 Scene 状态迁移。
+继续完善 Native Scene Window：增加整图 golden 与真实桌面截图回归、透明区域桌面穿透验证、多显示器 DPI 拖动验证；同时继续推进持久化幂等记录和 Scene 状态迁移。

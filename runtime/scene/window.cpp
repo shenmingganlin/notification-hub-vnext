@@ -36,12 +36,35 @@ LRESULT CALLBACK window_proc(HWND hwnd, UINT message, WPARAM wparam, LPARAM lpar
             ? HTCLIENT
             : HTTRANSPARENT;
     }
+    case WM_LBUTTONDOWN:
+        if (window != nullptr) {
+            if (window->begin_drag_client_point(
+                    static_cast<float>(GET_X_LPARAM(lparam)),
+                    static_cast<float>(GET_Y_LPARAM(lparam)))) {
+                SetCapture(hwnd);
+            }
+        }
+        return 0;
+    case WM_MOUSEMOVE:
+        if (window != nullptr && window->is_dragging()) {
+            POINT point{GET_X_LPARAM(lparam), GET_Y_LPARAM(lparam)};
+            ClientToScreen(hwnd, &point);
+            window->update_drag_screen_point(point.x, point.y);
+        }
+        return 0;
     case WM_LBUTTONUP:
         if (window != nullptr) {
-            window->click_client_point(
-                static_cast<float>(GET_X_LPARAM(lparam)),
-                static_cast<float>(GET_Y_LPARAM(lparam)));
+            if (window->is_dragging()) {
+                window->end_drag();
+            } else {
+                window->click_client_point(
+                    static_cast<float>(GET_X_LPARAM(lparam)),
+                    static_cast<float>(GET_Y_LPARAM(lparam)));
+            }
         }
+        return 0;
+    case WM_CAPTURECHANGED:
+        if (window != nullptr) window->end_drag();
         return 0;
     case WM_PAINT: {
         PAINTSTRUCT paint{};
@@ -209,6 +232,79 @@ bool SceneWindow::is_close_requested() const noexcept {
     return close_requested_;
 }
 
+bool SceneWindow::is_dragging() const noexcept {
+    return drag_active_;
+}
+
+bool SceneWindow::get_window_position(int& x, int& y) const noexcept {
+#ifdef _WIN32
+    if (hwnd_ == nullptr) return false;
+    RECT bounds{};
+    if (GetWindowRect(static_cast<HWND>(hwnd_), &bounds) == FALSE) return false;
+    x = bounds.left;
+    y = bounds.top;
+    return true;
+#else
+    static_cast<void>(x);
+    static_cast<void>(y);
+    return false;
+#endif
+}
+
+bool SceneWindow::begin_drag_client_point(float x, float y) noexcept {
+#ifdef _WIN32
+    if (hwnd_ == nullptr || close_requested_ || !point_inside_card(x, y, static_cast<float>(config_.width), static_cast<float>(config_.height))
+        || point_inside_close_button(x, y, static_cast<float>(config_.width), static_cast<float>(config_.height))) {
+        return false;
+    }
+    POINT point{static_cast<LONG>(x), static_cast<LONG>(y)};
+    if (ClientToScreen(static_cast<HWND>(hwnd_), &point) == FALSE) return false;
+    int window_x = 0;
+    int window_y = 0;
+    if (!get_window_position(window_x, window_y)) return false;
+    drag_start_screen_x_ = point.x;
+    drag_start_screen_y_ = point.y;
+    drag_window_start_x_ = window_x;
+    drag_window_start_y_ = window_y;
+    drag_active_ = true;
+    return true;
+#else
+    static_cast<void>(x);
+    static_cast<void>(y);
+    return false;
+#endif
+}
+
+bool SceneWindow::update_drag_screen_point(int x, int y) noexcept {
+#ifdef _WIN32
+    if (!drag_active_ || hwnd_ == nullptr) return false;
+    const auto next_x = drag_window_start_x_ + (x - drag_start_screen_x_);
+    const auto next_y = drag_window_start_y_ + (y - drag_start_screen_y_);
+    return SetWindowPos(
+        static_cast<HWND>(hwnd_),
+        nullptr,
+        next_x,
+        next_y,
+        0,
+        0,
+        SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE) != FALSE;
+#else
+    static_cast<void>(x);
+    static_cast<void>(y);
+    return false;
+#endif
+}
+
+void SceneWindow::end_drag() noexcept {
+#ifdef _WIN32
+    if (!drag_active_) return;
+    drag_active_ = false;
+    if (hwnd_ != nullptr && GetCapture() == static_cast<HWND>(hwnd_)) ReleaseCapture();
+#else
+    drag_active_ = false;
+#endif
+}
+
 bool SceneWindow::capture_pixels() const noexcept {
     return renderer_.capture_pixels();
 }
@@ -259,6 +355,7 @@ void SceneWindow::mark_first_paint() noexcept {
 }
 
 void SceneWindow::mark_native_destroyed() noexcept {
+    drag_active_ = false;
     hwnd_ = nullptr;
     visible_ = false;
     renderer_.reset();
