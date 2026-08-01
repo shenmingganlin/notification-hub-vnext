@@ -22,12 +22,14 @@
 - 增加 Runtime 主动断开故障注入，并验证断开后的第二次 health 恢复。
 - 增加 Node `RuntimeProcessManager`，负责 Runtime 启动、ready 等待、退出监控和有限自动重启。
 - 增加 Runtime 退出故障注入，并验证进程重启后的第二次 health 恢复。
+- 建立版本化 Runtime recovery snapshot，支持 `config.update` 和 `scene.set-mode` 的有序恢复。
+- 重启后按快照顺序重放恢复命令，并对失败停止后续恢复、输出结构化诊断。
 - Node.js 测试通过：9/9，Named Pipe 和 Runtime 重启 smoke 单独由 CTest 执行。
 - CTest 通过：5/5。
 
 ## 当前阶段
 
-Phase 2 已完成基础闭环，Phase 4 正在推进。Node.js 与 C++ Runtime 已具备协议、诊断、framing、最小 Named Pipe 通信、有限自动重连和 Runtime 进程托管能力；完整 ACK 重试语义和状态重建尚未接入。
+Phase 2 已完成基础闭环，Phase 4 正在推进。Node.js 与 C++ Runtime 已具备协议、诊断、framing、最小 Named Pipe 通信、有限自动重连、Runtime 进程托管和基础恢复快照能力；完整 ACK 重试语义和 Scene 状态重建尚未接入。
 
 ## 标准验证命令
 
@@ -50,4 +52,4 @@ ctest --preset debug-vs2026
 
 ## 下一步
 
-继续完善 Named Pipe Runtime：增加重启后的状态快照与恢复、请求幂等键策略和更细粒度的故障注入。
+继续完善 Named Pipe Runtime：增加请求幂等键策略、恢复快照持久化、Scene 状态迁移和更细粒度的故障注入。

@@ -3,6 +3,7 @@ import test from 'node:test';
 
 import { PipeClient } from '../../plugin/runtime/pipe-client.js';
 import { RuntimeProcessManager } from '../../plugin/runtime/process-manager.js';
+import { addRecoveryEntry, createRecoverySnapshot } from '../../plugin/runtime/recovery-snapshot.js';
 
 const runtimePath = process.argv[2];
 
@@ -13,6 +14,12 @@ test('RuntimeProcessManager restarts Runtime after a controlled exit', async (t)
   }
 
   const pipeName = `\\\\.\\pipe\\notification-hub-vnext-restart-${process.pid}`;
+  const recoverySnapshot = createRecoverySnapshot();
+  addRecoveryEntry(recoverySnapshot, {
+    key: 'runtime-config',
+    type: 'config.update',
+    payload: { profile: 'default', displayDurationMs: 4500 }
+  });
   const manager = new RuntimeProcessManager({
     runtimePath,
     pipeName,
@@ -20,7 +27,8 @@ test('RuntimeProcessManager restarts Runtime after a controlled exit', async (t)
     restartRuntimeArgs: [],
     readyTimeoutMs: 3000,
     restartDelayMs: 10,
-    maxRestartAttempts: 2
+    maxRestartAttempts: 2,
+    recoverySnapshot
   });
   const client = new PipeClient({
     pipeName,
@@ -31,8 +39,11 @@ test('RuntimeProcessManager restarts Runtime after a controlled exit', async (t)
   });
   const managerStates = [];
   const clientStates = [];
+  const recoveryEvents = [];
   manager.on('state', (change) => managerStates.push(change));
+  manager.on('recovery-applied', (event) => recoveryEvents.push(event));
   client.on('state', (change) => clientStates.push(change));
+  manager.setRecoveryClient(client);
 
   t.after(async () => {
     await client.close();
@@ -63,6 +74,8 @@ test('RuntimeProcessManager restarts Runtime after a controlled exit', async (t)
   const recoveredHealth = await client.request('health');
   assert.equal(recoveredHealth.type, 'ack');
   assert.equal(recoveredHealth.payload.requestType, 'health');
+  assert.equal(recoveryEvents.length, 1);
+  assert.equal(recoveryEvents[0].key, 'runtime-config');
   assert.ok(clientStates.some((change) => change.state === 'reconnecting'));
   assert.ok(managerStates.some((change) => change.state === 'starting'));
   assert.ok(managerStates.some((change) => change.state === 'crashed'));

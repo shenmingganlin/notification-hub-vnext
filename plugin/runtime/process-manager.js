@@ -1,6 +1,8 @@
 import { EventEmitter } from 'node:events';
 import { spawn } from 'node:child_process';
 
+import { validateRecoverySnapshot } from './recovery-snapshot.js';
+
 function processError(code, message, details = {}) {
   return Object.assign(new Error(message), { code, details });
 }
@@ -15,6 +17,8 @@ export class RuntimeProcessManager extends EventEmitter {
     restartDelayMs = 25,
     maxRestartAttempts = 2,
     autoRestart = true,
+    recoverySnapshot,
+    recoveryClient,
     spawnOptions = {}
   } = {}) {
     super();
@@ -35,6 +39,8 @@ export class RuntimeProcessManager extends EventEmitter {
     this.restartDelayMs = restartDelayMs;
     this.maxRestartAttempts = maxRestartAttempts;
     this.autoRestart = autoRestart;
+    this.recoverySnapshot = recoverySnapshot ? validateRecoverySnapshot(recoverySnapshot) : null;
+    this.recoveryClient = recoveryClient ?? null;
     this.spawnOptions = { windowsHide: true, ...spawnOptions };
     this.child = null;
     this.startPromise = null;
@@ -153,18 +159,57 @@ export class RuntimeProcessManager extends EventEmitter {
       this.restartTimer = null;
       try {
         await this.start();
+        await this.restoreRecoverySnapshot();
         this.emit('restarted', { attempt });
       } catch (error) {
         this.emitDiagnostic(error.code ?? 'RUNTIME_START_FAILED', error.message, error.details);
-        this.scheduleRestart();
       }
     }, this.restartDelayMs);
+  }
+
+  setRecoverySnapshot(snapshot) {
+    this.recoverySnapshot = validateRecoverySnapshot(snapshot);
+    return this.recoverySnapshot;
+  }
+
+  setRecoveryClient(client) {
+    this.recoveryClient = client;
+    return client;
+  }
+
+  async restoreRecoverySnapshot(client = this.recoveryClient) {
+    if (!this.recoverySnapshot || this.recoverySnapshot.entries.length === 0) return [];
+    if (!client || typeof client.request !== 'function') {
+      throw processError('RUNTIME_RECOVERY_CLIENT_MISSING', 'Recovery requires a PipeClient-compatible client');
+    }
+
+    const results = [];
+    for (const entry of this.recoverySnapshot.entries) {
+      try {
+        const response = await client.request(entry.type, entry.payload, {
+          retryable: true,
+          maxAttempts: 2
+        });
+        results.push({ key: entry.key, type: entry.type, response });
+        this.emit('recovery-applied', { key: entry.key, type: entry.type });
+      } catch (error) {
+        const wrapped = processError(
+          'RUNTIME_RECOVERY_FAILED',
+          `Recovery entry failed: ${entry.key}`,
+          { key: entry.key, type: entry.type, cause: error.code, message: error.message }
+        );
+        this.emitDiagnostic(wrapped.code, wrapped.message, wrapped.details);
+        throw wrapped;
+      }
+    }
+    return results;
   }
 
   async restart() {
     await this.stop();
     this.restartAttempts = 0;
     await this.start();
+    await this.restoreRecoverySnapshot();
     this.emit('restarted', { attempt: 0, manual: true });
   }
 
