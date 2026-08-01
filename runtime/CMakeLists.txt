@@ -29,6 +29,7 @@ add_test(NAME runtime_window_self_test COMMAND notification-hub-runtime --window
 add_test(NAME runtime_render_self_test COMMAND notification-hub-runtime --render-self-test)
 add_test(NAME runtime_hit_test_self_test COMMAND notification-hub-runtime --hit-test-self-test)
 add_test(NAME runtime_close_interaction_self_test COMMAND notification-hub-runtime --close-interaction-self-test)
+add_test(NAME runtime_visual_self_test COMMAND notification-hub-runtime --visual-self-test)
 
 find_program(NODE_EXECUTABLE node)
 if (NODE_EXECUTABLE)

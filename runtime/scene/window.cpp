@@ -209,6 +209,14 @@ bool SceneWindow::is_close_requested() const noexcept {
     return close_requested_;
 }
 
+bool SceneWindow::capture_pixels() const noexcept {
+    return renderer_.capture_pixels();
+}
+
+bool SceneWindow::sample_pixel(int x, int y, Pixel& pixel) const noexcept {
+    return renderer_.sample_pixel(x, y, pixel);
+}
+
 bool SceneWindow::hit_test_client_point(float x, float y) const noexcept {
     return point_inside_card(x, y, static_cast<float>(config_.width), static_cast<float>(config_.height));
 }
@@ -226,10 +234,10 @@ void* SceneWindow::native_handle() const noexcept {
     return hwnd_;
 }
 
-bool SceneWindow::paint() {
+bool SceneWindow::paint(bool capture_output) {
 #ifdef _WIN32
     if (hwnd_ == nullptr || !renderer_.is_ready()) return false;
-    const bool rendered = renderer_.draw(config_.title, config_.body);
+    const bool rendered = renderer_.draw(config_.title, config_.body, capture_output);
     frame_rendered_ = frame_rendered_ || rendered;
     return rendered;
 #else

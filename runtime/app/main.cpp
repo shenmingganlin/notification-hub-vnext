@@ -5,6 +5,7 @@
 #include "../scene/window.hpp"
 
 #include <iostream>
+#include <string>
 #include <string_view>
 
 namespace {
@@ -18,6 +19,7 @@ using notification_hub::transport::FrameDecoder;
 using notification_hub::transport::FrameStatus;
 using notification_hub::transport::encode_frame;
 using notification_hub::transport::run_named_pipe_server;
+using notification_hub::scene::Pixel;
 using notification_hub::scene::SceneWindow;
 using notification_hub::scene::WindowConfig;
 using notification_hub::scene::close_button_bounds;
@@ -103,6 +105,74 @@ bool hit_test_self_test() {
         "Card and transparent-region hit testing completed", std::string(kTimestamp));
     std::cout << serialize_jsonl(event);
     return true;
+}
+
+bool visual_self_test() {
+#ifndef _WIN32
+    std::cerr << "RENDERER_UNSUPPORTED: Visual regression requires Windows\n";
+    return false;
+#else
+    SceneWindow window(WindowConfig{
+        L"Notification Hub Visual Self Test",
+        L"Structural pixel sampling",
+        420,
+        180,
+        true});
+    if (!window.create() || !window.is_renderer_ready() || !window.show() || !window.paint(true)) return false;
+    const bool pixels_captured = window.capture_pixels();
+
+    Pixel transparent{};
+    Pixel surface{};
+    Pixel accent{};
+    Pixel close_background{};
+    const auto close_bounds = close_button_bounds(420.0f, 180.0f);
+    const auto close_x = static_cast<int>((close_bounds.left + close_bounds.right) * 0.5f);
+    const auto close_y = static_cast<int>((close_bounds.top + close_bounds.bottom) * 0.5f);
+    const bool sampled = window.sample_pixel(0, 0, transparent)
+        && window.sample_pixel(200, 100, surface)
+        && window.sample_pixel(11, 90, accent)
+        && window.sample_pixel(close_x, close_y, close_background);
+    const bool transparent_corner = sampled && pixels_captured && transparent.alpha <= 16;
+    const bool opaque_surface = sampled && pixels_captured && surface.alpha >= 220 && surface.red < 80 && surface.green < 100;
+    const bool visible_accent = sampled && pixels_captured && accent.alpha >= 220 && accent.green > accent.red + 80;
+    const bool visible_close = sampled && pixels_captured && close_background.alpha >= 180
+        && close_background.red > surface.red + 20;
+
+    window.request_close();
+    const auto pump_result = window.run_message_pump(false);
+    if (!sampled || !transparent_corner || !opaque_surface || !visible_accent || !visible_close
+        || pump_result != 0 || window.is_created()) {
+        std::cerr << "visual samples: "
+                  << "sampled=" << sampled
+                  << " pixelsCaptured=" << pixels_captured
+                  << " transparent=" << static_cast<int>(transparent.red) << ","
+                  << static_cast<int>(transparent.green) << ","
+                  << static_cast<int>(transparent.blue) << ","
+                  << static_cast<int>(transparent.alpha)
+                  << " surface=" << static_cast<int>(surface.red) << ","
+                  << static_cast<int>(surface.green) << ","
+                  << static_cast<int>(surface.blue) << ","
+                  << static_cast<int>(surface.alpha)
+                  << " accent=" << static_cast<int>(accent.red) << ","
+                  << static_cast<int>(accent.green) << ","
+                  << static_cast<int>(accent.blue) << ","
+                  << static_cast<int>(accent.alpha)
+                  << " close=" << static_cast<int>(close_background.red) << ","
+                  << static_cast<int>(close_background.green) << ","
+                  << static_cast<int>(close_background.blue) << ","
+                  << static_cast<int>(close_background.alpha) << "\n";
+        const auto event = create_event(
+            "visual-self-test", "pixel-sampled", "RENDERER_VISUAL_REGRESSION_FAILED", "error", false,
+            "Structural card pixel assertions failed", std::string(kTimestamp));
+        std::cerr << serialize_jsonl(event);
+        return false;
+    }
+    const auto event = create_event(
+        "visual-self-test", "pixel-sampled", "RENDERER_VISUAL_REGRESSION_OK", "info", true,
+        "Structural card pixel assertions completed", std::string(kTimestamp));
+    std::cout << serialize_jsonl(event);
+    return true;
+#endif
 }
 
 bool close_interaction_self_test() {
@@ -298,6 +368,11 @@ int main(int argc, char** argv) {
     if (argc > 1 && std::string_view(argv[1]) == "--close-interaction-self-test") {
         const bool passed = close_interaction_self_test();
         std::cout << "notification-hub-runtime close interaction self-test: " << (passed ? "ok" : "failed") << "\n";
+        return passed ? 0 : 1;
+    }
+    if (argc > 1 && std::string_view(argv[1]) == "--visual-self-test") {
+        const bool passed = visual_self_test();
+        std::cout << "notification-hub-runtime visual self-test: " << (passed ? "ok" : "failed") << "\n";
         return passed ? 0 : 1;
     }
     if (argc > 2 && std::string_view(argv[1]) == "--pipe-server") {

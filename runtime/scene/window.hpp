@@ -34,10 +34,12 @@ public:
     bool is_renderer_ready() const noexcept;
     bool is_frame_rendered() const noexcept;
     bool is_close_requested() const noexcept;
+    bool capture_pixels() const noexcept;
+    bool sample_pixel(int x, int y, Pixel& pixel) const noexcept;
     bool hit_test_client_point(float x, float y) const noexcept;
     bool click_client_point(float x, float y) noexcept;
     void* native_handle() const noexcept;
-    bool paint();
+    bool paint(bool capture_output = false);
     bool resize_render_target(int width, int height);
     void mark_first_paint() noexcept;
     void mark_native_destroyed() noexcept;

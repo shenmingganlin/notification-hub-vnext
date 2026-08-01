@@ -1,9 +1,17 @@
 #pragma once
 
+#include <cstdint>
 #include <memory>
 #include <string_view>
 
 namespace notification_hub::scene {
+
+struct Pixel {
+    std::uint8_t red{};
+    std::uint8_t green{};
+    std::uint8_t blue{};
+    std::uint8_t alpha{};
+};
 
 class CardRenderer {
 public:
@@ -15,13 +23,16 @@ public:
 
     bool initialize(void* native_window, int width, int height);
     bool resize(int width, int height);
-    bool draw(std::wstring_view title, std::wstring_view body);
+    bool draw(std::wstring_view title, std::wstring_view body, bool capture_output = false);
+    bool capture_pixels() const noexcept;
+    bool sample_pixel(int x, int y, Pixel& pixel) const noexcept;
     void reset() noexcept;
     bool is_ready() const noexcept;
 
 private:
     struct Impl;
     bool create_composition_surface(int width, int height);
+    bool capture_offscreen(std::wstring_view title, std::wstring_view body);
     std::unique_ptr<Impl> impl_;
 };
 

@@ -15,7 +15,9 @@
 #endif
 
 #include <algorithm>
+#include <cstdint>
 #include <utility>
+#include <vector>
 
 namespace notification_hub::scene {
 
@@ -88,9 +90,11 @@ struct CardRenderer::Impl {
     ComPtr<IDCompositionTarget> composition_target;
     ComPtr<IDCompositionVisual> composition_visual;
     ComPtr<IDCompositionSurface> composition_surface;
+    ComPtr<ID2D1Bitmap1> cpu_readback_bitmap;
     HWND hwnd{};
     int width{};
     int height{};
+    std::vector<Pixel> pixels;
 #endif
     bool ready{};
 };
@@ -115,6 +119,8 @@ bool CardRenderer::create_composition_surface(int width, int height) {
     if (FAILED(impl_->composition_visual->SetContent(surface.Get()))) return false;
     if (FAILED(impl_->composition_device->Commit())) return false;
     impl_->composition_surface = std::move(surface);
+    impl_->cpu_readback_bitmap.Reset();
+    impl_->pixels.clear();
     impl_->width = width;
     impl_->height = height;
     return true;
@@ -219,7 +225,7 @@ bool CardRenderer::resize(int width, int height) {
 #endif
 }
 
-bool CardRenderer::draw(std::wstring_view title, std::wstring_view body) {
+bool CardRenderer::draw(std::wstring_view title, std::wstring_view body, bool capture_output) {
 #ifdef _WIN32
     if (!impl_->ready || impl_->composition_surface == nullptr) return false;
 
@@ -291,18 +297,147 @@ bool CardRenderer::draw(std::wstring_view title, std::wstring_view body) {
         impl_->body_brush.Get(), D2D1_DRAW_TEXT_OPTIONS_ENABLE_COLOR_FONT);
 
     result = impl_->d2d_context->EndDraw();
-    impl_->d2d_context->SetTarget(nullptr);
-    const auto surface_result = impl_->composition_surface->EndDraw();
-    if (FAILED(result) || FAILED(surface_result)) {
+    if (FAILED(result)) {
+        impl_->d2d_context->SetTarget(nullptr);
+        impl_->composition_surface->EndDraw();
         if (result == D2DERR_RECREATE_TARGET) reset();
         return false;
     }
 
+    impl_->d2d_context->SetTarget(nullptr);
+    const auto surface_result = impl_->composition_surface->EndDraw();
+    if (FAILED(surface_result)) return false;
+
     result = impl_->composition_device->Commit();
-    return SUCCEEDED(result);
+    if (FAILED(result)) return false;
+    return !capture_output || capture_offscreen(title, body);
 #else
     static_cast<void>(title);
     static_cast<void>(body);
+    static_cast<void>(capture_output);
+    return false;
+#endif
+}
+
+bool CardRenderer::capture_offscreen(std::wstring_view title, std::wstring_view body) {
+#ifdef _WIN32
+    if (!impl_->ready || impl_->d2d_context == nullptr) return false;
+
+    const auto target_properties = D2D1::BitmapProperties1(
+        D2D1_BITMAP_OPTIONS_TARGET,
+        D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_PREMULTIPLIED));
+    ComPtr<ID2D1Bitmap1> target;
+    auto result = impl_->d2d_context->CreateBitmap(
+        D2D1::SizeU(static_cast<UINT32>(impl_->width), static_cast<UINT32>(impl_->height)),
+        nullptr,
+        0,
+        &target_properties,
+        &target);
+    if (FAILED(result)) return false;
+
+    impl_->d2d_context->SetTarget(target.Get());
+    impl_->d2d_context->BeginDraw();
+    impl_->d2d_context->SetTransform(D2D1::Matrix3x2F::Identity());
+    impl_->d2d_context->Clear(color(0.0f, 0.0f, 0.0f, 0.0f));
+
+    const auto width = static_cast<float>(impl_->width);
+    const auto height = static_cast<float>(impl_->height);
+    const auto bounds = card_bounds(width, height);
+    impl_->d2d_context->FillRoundedRectangle(
+        D2D1::RoundedRect(
+            D2D1::RectF(bounds.left, bounds.top, (std::max)(20.0f, bounds.right), (std::max)(20.0f, bounds.bottom)),
+            bounds.radius,
+            bounds.radius),
+        impl_->surface_brush.Get());
+    impl_->d2d_context->FillRectangle(
+        D2D1::RectF(bounds.left, bounds.top, bounds.left + 4.0f, (std::max)(20.0f, bounds.bottom)),
+        impl_->accent_brush.Get());
+
+    const auto close_button = close_button_bounds(width, height);
+    const auto close_center_x = (close_button.left + close_button.right) * 0.5f;
+    const auto close_center_y = (close_button.top + close_button.bottom) * 0.5f;
+    const auto close_radius = (close_button.right - close_button.left) * 0.5f;
+    impl_->d2d_context->FillEllipse(
+        D2D1::Ellipse(D2D1::Point2F(close_center_x, close_center_y), close_radius, close_radius),
+        impl_->close_background_brush.Get());
+    constexpr float icon_padding = 8.0f;
+    impl_->d2d_context->DrawLine(
+        D2D1::Point2F(close_button.left + icon_padding, close_button.top + icon_padding),
+        D2D1::Point2F(close_button.right - icon_padding, close_button.bottom - icon_padding),
+        impl_->close_icon_brush.Get(), 1.5f);
+    impl_->d2d_context->DrawLine(
+        D2D1::Point2F(close_button.right - icon_padding, close_button.top + icon_padding),
+        D2D1::Point2F(close_button.left + icon_padding, close_button.bottom - icon_padding),
+        impl_->close_icon_brush.Get(), 1.5f);
+
+    impl_->d2d_context->DrawText(
+        title.data(), static_cast<UINT32>(title.size()), impl_->title_format.Get(),
+        D2D1::RectF(30.0f, 24.0f, (std::max)(36.0f, close_button.left - 8.0f), 56.0f),
+        impl_->title_brush.Get(), D2D1_DRAW_TEXT_OPTIONS_ENABLE_COLOR_FONT);
+    impl_->d2d_context->DrawText(
+        body.data(), static_cast<UINT32>(body.size()), impl_->body_format.Get(),
+        D2D1::RectF(30.0f, 62.0f, (std::max)(36.0f, width - 24.0f), (std::max)(72.0f, height - 22.0f)),
+        impl_->body_brush.Get(), D2D1_DRAW_TEXT_OPTIONS_ENABLE_COLOR_FONT);
+
+    result = impl_->d2d_context->EndDraw();
+    impl_->d2d_context->SetTarget(nullptr);
+    if (FAILED(result)) return false;
+
+    if (impl_->cpu_readback_bitmap == nullptr) {
+        const auto readback_properties = D2D1::BitmapProperties1(
+            D2D1_BITMAP_OPTIONS_CPU_READ | D2D1_BITMAP_OPTIONS_CANNOT_DRAW,
+            D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_PREMULTIPLIED));
+        result = impl_->d2d_context->CreateBitmap(
+            D2D1::SizeU(static_cast<UINT32>(impl_->width), static_cast<UINT32>(impl_->height)),
+            nullptr,
+            0,
+            &readback_properties,
+            &impl_->cpu_readback_bitmap);
+        if (FAILED(result)) return false;
+    }
+    result = impl_->cpu_readback_bitmap->CopyFromBitmap(nullptr, target.Get(), nullptr);
+    if (FAILED(result)) return false;
+
+    D2D1_MAPPED_RECT mapped{};
+    result = impl_->cpu_readback_bitmap->Map(D2D1_MAP_OPTIONS_READ, &mapped);
+    if (FAILED(result)) return false;
+    impl_->pixels.resize(static_cast<std::size_t>(impl_->width) * static_cast<std::size_t>(impl_->height));
+    for (int y = 0; y < impl_->height; ++y) {
+        const auto* row = mapped.bits + (static_cast<std::size_t>(y) * mapped.pitch);
+        for (int x = 0; x < impl_->width; ++x) {
+            const auto* bgra = row + (x * 4);
+            auto& pixel = impl_->pixels[(static_cast<std::size_t>(y) * static_cast<std::size_t>(impl_->width)) + static_cast<std::size_t>(x)];
+            pixel = Pixel{bgra[2], bgra[1], bgra[0], bgra[3]};
+        }
+    }
+    impl_->cpu_readback_bitmap->Unmap();
+    return true;
+#else
+    static_cast<void>(title);
+    static_cast<void>(body);
+    return false;
+#endif
+}
+
+bool CardRenderer::capture_pixels() const noexcept {
+#ifdef _WIN32
+    return impl_ != nullptr && !impl_->pixels.empty();
+#else
+    return false;
+#endif
+}
+
+bool CardRenderer::sample_pixel(int x, int y, Pixel& pixel) const noexcept {
+#ifdef _WIN32
+    if (impl_ == nullptr || x < 0 || y < 0 || x >= impl_->width || y >= impl_->height) return false;
+    const auto index = (static_cast<std::size_t>(y) * static_cast<std::size_t>(impl_->width)) + static_cast<std::size_t>(x);
+    if (index >= impl_->pixels.size()) return false;
+    pixel = impl_->pixels[index];
+    return true;
+#else
+    static_cast<void>(x);
+    static_cast<void>(y);
+    static_cast<void>(pixel);
     return false;
 #endif
 }
@@ -337,7 +472,9 @@ void CardRenderer::reset() noexcept {
     impl_->write_factory.Reset();
     impl_->dxgi_device.Reset();
     impl_->d3d_context.Reset();
+    impl_->cpu_readback_bitmap.Reset();
     impl_->d3d_device.Reset();
+    impl_->pixels.clear();
     impl_->hwnd = nullptr;
     impl_->width = 0;
     impl_->height = 0;
