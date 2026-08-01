@@ -6,8 +6,12 @@
 #include "../protocol/message.hpp"
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
+#include <ctime>
+#include <iomanip>
 #include <memory>
+#include <sstream>
 #include <string>
 #include <unordered_map>
 #include <utility>
@@ -40,6 +44,23 @@ std::string card_json(const SceneCardState& card) {
         + ",\"y\":" + std::to_string(card.window.y)
         + ",\"width\":" + std::to_string(card.window.width)
         + ",\"height\":" + std::to_string(card.window.height) + "}";
+}
+
+std::string scene_state_timestamp() {
+    const auto now = std::chrono::system_clock::now();
+    const auto time = std::chrono::system_clock::to_time_t(now);
+    std::tm utc{};
+#ifdef _WIN32
+    gmtime_s(&utc, &time);
+#else
+    gmtime_r(&time, &utc);
+#endif
+    const auto milliseconds = std::chrono::duration_cast<std::chrono::milliseconds>(
+        now.time_since_epoch()) % 1000;
+    std::ostringstream output;
+    output << std::put_time(&utc, "%Y-%m-%dT%H:%M:%S")
+        << '.' << std::setfill('0') << std::setw(3) << milliseconds.count() << 'Z';
+    return output.str();
 }
 
 }  // namespace
@@ -474,10 +495,62 @@ std::string RuntimeSceneController::work_area_json() const {
         + ",\"source\":" + json_string(snapshot.source) + "}";
 }
 
+std::string RuntimeSceneController::scene_state_snapshot_json() const {
+    SceneWindowState state{};
+    if (!get_window_state(state) && impl_ != nullptr) state = impl_->state;
+
+    std::string result = std::string("{\"sceneStateVersion\":1,\"protocolVersion\":1,\"updatedAt\":")
+        + json_string(scene_state_timestamp())
+        + ",\"sceneWindow\":{\"x\":" + std::to_string(state.x)
+        + ",\"y\":" + std::to_string(state.y)
+        + ",\"width\":" + std::to_string(state.width)
+        + ",\"height\":" + std::to_string(state.height) + "}"
+        + ",\"cardOrder\":[";
+
+    if (impl_ != nullptr) {
+        bool first = true;
+        for (const auto& id : impl_->card_order) {
+            if (impl_->cards.find(id) == impl_->cards.end()) continue;
+            if (!first) result += ',';
+            first = false;
+            result += json_string(id);
+        }
+    }
+    result += "],\"cards\":" + cards_json() + ",\"layout\":";
+    if (impl_ == nullptr || !impl_->has_active_layout || !valid_work_area(impl_->active_work_area)) {
+        result += "null";
+    } else {
+        const auto& options = impl_->active_layout;
+        const auto mode = options.mode == LayoutMode::Shelf ? "shelf" : "stack";
+        const auto direction = options.direction == StackDirection::Down ? "down"
+            : options.direction == StackDirection::Up ? "up"
+            : options.direction == StackDirection::Right ? "right" : "left";
+        const auto anchor = options.anchor == StackAnchor::TopLeft ? "top-left"
+            : options.anchor == StackAnchor::TopRight ? "top-right"
+            : options.anchor == StackAnchor::BottomLeft ? "bottom-left" : "bottom-right";
+        const auto& work_area = impl_->active_work_area;
+        const auto resolution = impl_->active_layout_uses_provider ? "provider" : "explicit";
+        result += std::string("{\"mode\":") + json_string(mode)
+            + ",\"direction\":" + json_string(direction)
+            + ",\"anchor\":" + json_string(anchor)
+            + ",\"spacing\":" + std::to_string(options.spacing)
+            + ",\"workArea\":{\"resolution\":" + json_string(resolution)
+            + ",\"left\":" + std::to_string(work_area.rect.left)
+            + ",\"top\":" + std::to_string(work_area.rect.top)
+            + ",\"width\":" + std::to_string(work_area.rect.width)
+            + ",\"height\":" + std::to_string(work_area.rect.height)
+            + ",\"dpiScale\":" + std::to_string(work_area.dpi_scale)
+            + ",\"isFallback\":" + (work_area.is_fallback ? "true" : "false")
+            + ",\"source\":" + json_string(work_area.source) + "}}";
+    }
+    return result + "}";
+}
+
 std::string RuntimeSceneController::state_result_json(bool deduplicated) const {
     return std::string("{\"status\":\"accepted\",\"deduplicated\":")
         + (deduplicated ? "true" : "false")
         + ",\"sceneState\":" + state_json()
+        + ",\"sceneStateSnapshot\":" + scene_state_snapshot_json()
         + ",\"layout\":" + layout_json()
         + ",\"workArea\":" + work_area_json() + "}"
         ;
@@ -487,6 +560,7 @@ std::string RuntimeSceneController::cards_result_json(bool deduplicated) const {
     return std::string("{\"status\":\"accepted\",\"deduplicated\":")
         + (deduplicated ? "true" : "false")
         + ",\"sceneCards\":" + cards_json()
+        + ",\"sceneStateSnapshot\":" + scene_state_snapshot_json()
         + ",\"layout\":" + layout_json()
         + ",\"workArea\":" + work_area_json() + "}"
         ;

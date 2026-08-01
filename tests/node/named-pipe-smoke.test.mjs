@@ -4,6 +4,7 @@ import { spawn } from 'node:child_process';
 import test from 'node:test';
 
 import { PipeClient } from '../../plugin/runtime/pipe-client.js';
+import { validateSceneState } from '../../plugin/runtime/scene-state.js';
 
 const runtimePath = process.argv[2];
 
@@ -102,6 +103,11 @@ test('Node client completes hello, health, and shutdown over Named Pipe', async 
     width: 420,
     height: 180
   });
+  const emptySnapshot = validateSceneState(sceneUpdate.payload.result.sceneStateSnapshot);
+  assert.deepEqual(emptySnapshot.sceneWindow, sceneUpdate.payload.result.sceneState);
+  assert.deepEqual(emptySnapshot.cardOrder, []);
+  assert.deepEqual(emptySnapshot.cards, []);
+  assert.equal(emptySnapshot.layout, null);
 
   await assert.rejects(
     client.request('scene.update', { x: 0, y: 0, width: 0, height: 180 }, { retryable: false }),
@@ -209,6 +215,12 @@ test('Node client completes hello, health, and shutdown over Named Pipe', async 
     isFallback: false,
     source: 'explicit-override'
   });
+  const stackedSnapshot = validateSceneState(stackedCard.payload.result.sceneStateSnapshot);
+  assert.deepEqual(stackedSnapshot.cardOrder, ['card-a']);
+  assert.deepEqual(stackedSnapshot.cards.map((card) => card.id), ['card-a']);
+  assert.equal(stackedSnapshot.layout.mode, 'stack');
+  assert.equal(stackedSnapshot.layout.workArea.resolution, 'explicit');
+  assert.equal(stackedSnapshot.layout.workArea.source, 'explicit-override');
 
   await assert.rejects(
     client.request('scene.set-mode', {
@@ -250,6 +262,10 @@ test('Node client completes hello, health, and shutdown over Named Pipe', async 
   const stateAfterRejectedLayout = await client.request('health', {}, { retryable: false });
   assert.equal(stateAfterRejectedLayout.payload.result.layout.layout, 'stack');
   assert.deepEqual(stateAfterRejectedLayout.payload.result.workArea, stackedCard.payload.result.workArea);
+  const rejectedSnapshot = validateSceneState(stateAfterRejectedLayout.payload.result.sceneStateSnapshot);
+  const withoutTimestamp = ({ updatedAt, ...snapshot }) => snapshot;
+  assert.deepEqual(withoutTimestamp(rejectedSnapshot), withoutTimestamp(stackedSnapshot));
+  assert.notEqual(rejectedSnapshot.updatedAt, stackedSnapshot.updatedAt);
 
   const shutdown = await client.request('shutdown');
   assert.equal(shutdown.type, 'ack');

@@ -41,6 +41,7 @@ public:
     std::string cards_json() const;
     std::string layout_json() const;
     std::string work_area_json() const;
+    std::string scene_state_snapshot_json() const;
     std::string state_result_json(bool deduplicated) const;
     std::string cards_result_json(bool deduplicated) const;
     void pump_messages();
