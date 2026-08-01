@@ -20,6 +20,7 @@ using notification_hub::transport::encode_frame;
 using notification_hub::transport::run_named_pipe_server;
 using notification_hub::scene::SceneWindow;
 using notification_hub::scene::WindowConfig;
+using notification_hub::scene::close_button_bounds;
 using notification_hub::scene::point_inside_card;
 
 constexpr std::string_view kTimestamp = "2026-08-01T00:00:00.000Z";
@@ -102,6 +103,40 @@ bool hit_test_self_test() {
         "Card and transparent-region hit testing completed", std::string(kTimestamp));
     std::cout << serialize_jsonl(event);
     return true;
+}
+
+bool close_interaction_self_test() {
+#ifndef _WIN32
+    std::cerr << "INTERACTION_UNSUPPORTED: Native close interaction requires Windows\n";
+    return false;
+#else
+    SceneWindow window(WindowConfig{
+        L"Notification Hub Close Self Test",
+        L"Close button interaction",
+        420,
+        180,
+        true});
+    if (!window.create() || !window.show()) return false;
+
+    const auto close_bounds = close_button_bounds(420.0f, 180.0f);
+    const auto center_x = (close_bounds.left + close_bounds.right) * 0.5f;
+    const auto center_y = (close_bounds.top + close_bounds.bottom) * 0.5f;
+    if (window.click_client_point(40.0f, 40.0f) || window.is_close_requested()) return false;
+    if (!window.click_client_point(center_x, center_y) || !window.is_close_requested()) return false;
+
+    if (window.run_message_pump(false) != 0 || window.is_created()) {
+        const auto event = create_event(
+            "interaction-close-self-test", "close-completed", "INTERACTION_CLOSE_FAILED", "error", false,
+            "Close button did not destroy the scene window", std::string(kTimestamp));
+        std::cerr << serialize_jsonl(event);
+        return false;
+    }
+    const auto event = create_event(
+        "interaction-close-self-test", "close-completed", "INTERACTION_CLOSE_COMPLETED", "info", true,
+        "Close button requested and completed window destruction", std::string(kTimestamp));
+    std::cout << serialize_jsonl(event);
+    return true;
+#endif
 }
 
 bool render_self_test() {
@@ -258,6 +293,11 @@ int main(int argc, char** argv) {
     if (argc > 1 && std::string_view(argv[1]) == "--hit-test-self-test") {
         const bool passed = hit_test_self_test();
         std::cout << "notification-hub-runtime hit-test self-test: " << (passed ? "ok" : "failed") << "\n";
+        return passed ? 0 : 1;
+    }
+    if (argc > 1 && std::string_view(argv[1]) == "--close-interaction-self-test") {
+        const bool passed = close_interaction_self_test();
+        std::cout << "notification-hub-runtime close interaction self-test: " << (passed ? "ok" : "failed") << "\n";
         return passed ? 0 : 1;
     }
     if (argc > 2 && std::string_view(argv[1]) == "--pipe-server") {

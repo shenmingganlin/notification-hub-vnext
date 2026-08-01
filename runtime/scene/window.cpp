@@ -36,6 +36,13 @@ LRESULT CALLBACK window_proc(HWND hwnd, UINT message, WPARAM wparam, LPARAM lpar
             ? HTCLIENT
             : HTTRANSPARENT;
     }
+    case WM_LBUTTONUP:
+        if (window != nullptr) {
+            window->click_client_point(
+                static_cast<float>(GET_X_LPARAM(lparam)),
+                static_cast<float>(GET_Y_LPARAM(lparam)));
+        }
+        return 0;
     case WM_PAINT: {
         PAINTSTRUCT paint{};
         const auto device_context = BeginPaint(hwnd, &paint);
@@ -198,8 +205,21 @@ bool SceneWindow::is_frame_rendered() const noexcept {
     return frame_rendered_;
 }
 
+bool SceneWindow::is_close_requested() const noexcept {
+    return close_requested_;
+}
+
 bool SceneWindow::hit_test_client_point(float x, float y) const noexcept {
     return point_inside_card(x, y, static_cast<float>(config_.width), static_cast<float>(config_.height));
+}
+
+bool SceneWindow::click_client_point(float x, float y) noexcept {
+    if (!point_inside_close_button(x, y, static_cast<float>(config_.width), static_cast<float>(config_.height))) {
+        return false;
+    }
+    close_requested_ = true;
+    request_close();
+    return true;
 }
 
 void* SceneWindow::native_handle() const noexcept {

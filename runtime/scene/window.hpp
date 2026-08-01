@@ -33,7 +33,9 @@ public:
     bool is_visible() const noexcept;
     bool is_renderer_ready() const noexcept;
     bool is_frame_rendered() const noexcept;
+    bool is_close_requested() const noexcept;
     bool hit_test_client_point(float x, float y) const noexcept;
+    bool click_client_point(float x, float y) noexcept;
     void* native_handle() const noexcept;
     bool paint();
     bool resize_render_target(int width, int height);
@@ -47,6 +49,7 @@ private:
     bool visible_{};
     bool first_paint_seen_{};
     bool frame_rendered_{};
+    bool close_requested_{};
     CardRenderer renderer_;
     std::wstring class_name_{L"NotificationHubVNextSceneWindow"};
 };

@@ -82,6 +82,8 @@ struct CardRenderer::Impl {
     ComPtr<ID2D1SolidColorBrush> accent_brush;
     ComPtr<ID2D1SolidColorBrush> title_brush;
     ComPtr<ID2D1SolidColorBrush> body_brush;
+    ComPtr<ID2D1SolidColorBrush> close_background_brush;
+    ComPtr<ID2D1SolidColorBrush> close_icon_brush;
     ComPtr<IDCompositionDevice> composition_device;
     ComPtr<IDCompositionTarget> composition_target;
     ComPtr<IDCompositionVisual> composition_visual;
@@ -189,6 +191,12 @@ bool CardRenderer::initialize(void* native_window, int width, int height) {
     result = impl_->d2d_context->CreateSolidColorBrush(
         color(0.70f, 0.76f, 0.78f, 1.0f), &impl_->body_brush);
     if (FAILED(result)) return false;
+    result = impl_->d2d_context->CreateSolidColorBrush(
+        color(0.18f, 0.22f, 0.24f, 0.92f), &impl_->close_background_brush);
+    if (FAILED(result)) return false;
+    result = impl_->d2d_context->CreateSolidColorBrush(
+        color(0.82f, 0.88f, 0.88f, 1.0f), &impl_->close_icon_brush);
+    if (FAILED(result)) return false;
 
     impl_->ready = true;
     return true;
@@ -255,7 +263,24 @@ bool CardRenderer::draw(std::wstring_view title, std::wstring_view body) {
     const auto accent = D2D1::RectF(bounds.left, bounds.top, bounds.left + 4.0f, (std::max)(20.0f, bounds.bottom));
     impl_->d2d_context->FillRectangle(accent, impl_->accent_brush.Get());
 
-    const auto title_rect = D2D1::RectF(30.0f, 24.0f, (std::max)(36.0f, width - 24.0f), 56.0f);
+    const auto close_button = close_button_bounds(width, height);
+    const auto close_center_x = (close_button.left + close_button.right) * 0.5f;
+    const auto close_center_y = (close_button.top + close_button.bottom) * 0.5f;
+    const auto close_radius = (close_button.right - close_button.left) * 0.5f;
+    impl_->d2d_context->FillEllipse(
+        D2D1::Ellipse(D2D1::Point2F(close_center_x, close_center_y), close_radius, close_radius),
+        impl_->close_background_brush.Get());
+    const auto icon_padding = 8.0f;
+    impl_->d2d_context->DrawLine(
+        D2D1::Point2F(close_button.left + icon_padding, close_button.top + icon_padding),
+        D2D1::Point2F(close_button.right - icon_padding, close_button.bottom - icon_padding),
+        impl_->close_icon_brush.Get(), 1.5f);
+    impl_->d2d_context->DrawLine(
+        D2D1::Point2F(close_button.right - icon_padding, close_button.top + icon_padding),
+        D2D1::Point2F(close_button.left + icon_padding, close_button.bottom - icon_padding),
+        impl_->close_icon_brush.Get(), 1.5f);
+
+    const auto title_rect = D2D1::RectF(30.0f, 24.0f, (std::max)(36.0f, close_button.left - 8.0f), 56.0f);
     impl_->d2d_context->DrawText(
         title.data(), static_cast<UINT32>(title.size()), impl_->title_format.Get(), title_rect,
         impl_->title_brush.Get(), D2D1_DRAW_TEXT_OPTIONS_ENABLE_COLOR_FONT);
@@ -302,6 +327,8 @@ void CardRenderer::reset() noexcept {
     impl_->accent_brush.Reset();
     impl_->title_brush.Reset();
     impl_->body_brush.Reset();
+    impl_->close_background_brush.Reset();
+    impl_->close_icon_brush.Reset();
     impl_->title_format.Reset();
     impl_->body_format.Reset();
     impl_->d2d_context.Reset();
