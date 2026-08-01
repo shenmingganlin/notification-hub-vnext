@@ -4,6 +4,7 @@
 #include "../transport/named_pipe.hpp"
 #include "../scene/controller.hpp"
 #include "../scene/layout.hpp"
+#include "../scene/work_area.hpp"
 #include "../scene/window.hpp"
 
 #ifdef _WIN32
@@ -11,6 +12,7 @@
 #endif
 
 #include <iostream>
+#include <limits>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -34,6 +36,9 @@ using notification_hub::scene::StackCardInput;
 using notification_hub::scene::StackDirection;
 using notification_hub::scene::StackLayoutOptions;
 using notification_hub::scene::layout_stack;
+using notification_hub::scene::fallback_work_area;
+using notification_hub::scene::valid_work_area;
+using notification_hub::scene::query_primary_work_area;
 using notification_hub::scene::SceneWindowState;
 using notification_hub::scene::WindowConfig;
 using notification_hub::scene::close_button_bounds;
@@ -187,6 +192,35 @@ bool visual_self_test() {
     std::cout << serialize_jsonl(event);
     return true;
 #endif
+}
+
+bool work_area_self_test() {
+    const auto fallback = fallback_work_area(1920, 1080, 1.0f);
+    if (!valid_work_area(fallback)
+        || fallback.rect.left != 0
+        || fallback.rect.top != 0
+        || fallback.rect.width != 1920
+        || fallback.rect.height != 1080
+        || !fallback.is_fallback
+        || fallback.source != "virtual-screen-fallback") return false;
+
+    if (valid_work_area(fallback_work_area(0, 1080, 1.0f))
+        || valid_work_area(fallback_work_area(1920, -1, 1.0f))
+        || valid_work_area(fallback_work_area(1920, 1080, 0.0f))) return false;
+
+    const auto invalid_nan = fallback_work_area(1920, 1080, std::numeric_limits<float>::quiet_NaN());
+    if (valid_work_area(invalid_nan)) return false;
+
+#ifdef _WIN32
+    const auto primary = query_primary_work_area();
+    if (!valid_work_area(primary) || primary.dpi_scale <= 0.0f) return false;
+#endif
+
+    const auto event = create_event(
+        "work-area-self-test", "snapshot-validated", "WORK_AREA_PROVIDER_OK", "info", true,
+        "Display work area snapshot validation completed", std::string(kTimestamp));
+    std::cout << serialize_jsonl(event);
+    return true;
 }
 
 bool layout_self_test() {
@@ -807,6 +841,11 @@ int main(int argc, char** argv) {
     if (argc > 1 && std::string_view(argv[1]) == "--hit-test-self-test") {
         const bool passed = hit_test_self_test();
         std::cout << "notification-hub-runtime hit-test self-test: " << (passed ? "ok" : "failed") << "\n";
+        return passed ? 0 : 1;
+    }
+    if (argc > 1 && std::string_view(argv[1]) == "--work-area-self-test") {
+        const bool passed = work_area_self_test();
+        std::cout << "notification-hub-runtime work area self-test: " << (passed ? "ok" : "failed") << "\n";
         return passed ? 0 : 1;
     }
     if (argc > 1 && std::string_view(argv[1]) == "--layout-self-test") {

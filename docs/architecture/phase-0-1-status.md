@@ -27,6 +27,7 @@
 - recovery snapshot 增加 `scene.update` 窗口几何 entry，严格校验 `x/y/width/height`，重启后按顺序恢复到 Runtime 状态层。
 - fixed 布局恢复支持 `scene.create`、卡片型 `scene.update` 和 `scene.dismiss`，保存卡片 id、标题、正文和窗口几何。
 - 新增纯数学 stack 布局模块，支持方向、交叉轴锚点、间距、工作区边界、DPI 缩放和稳定错误码。
+- 新增工作区快照模型与 Windows 主显示器工作区查询适配器，统一输出物理像素矩形、DPI、来源和显式 fallback 标志；本阶段仍不宣称多显示器热插拔支持。
 - `scene.set-mode` 已接入 stack 布局，按卡片创建顺序计算并应用多卡片 HWND 几何；stack 配置也进入 recovery snapshot。
 - Runtime Named Pipe 严格接收单窗口、多卡片和布局命令，通过 RuntimeSceneController 应用到真实 Native HWND，并在 ACK/health 中回显实际状态；非法 payload 返回稳定错误码。
 - 增加 Runtime Scene Controller self-test，直接验证 HWND 位置和客户区尺寸已应用。
@@ -45,7 +46,7 @@
 - 增加桌面级 `WindowFromPoint` 透明区域命中测试，以及 Per-Monitor V2 DPI、窗口客户区尺寸和当前窗口 DPI 读取测试。
 - 接入 `WM_DPICHANGED` 建议矩形处理，验证 DPI 状态、窗口位置、客户区尺寸、渲染目标和命中几何同步。
 - Node.js 测试通过：11 项中 11 项通过，2 项需要 Runtime 参数的测试由 CTest 执行。
-- CTest 通过：16/16。
+- CTest 通过：当前 18/18。
 
 ## 当前阶段
 
@@ -72,4 +73,4 @@ ctest --preset debug-vs2026
 
 ## 下一步
 
-继续完善 Native Scene Window：增加整图 golden 与真实桌面截图回归、透明区域桌面穿透验证、多显示器 DPI 拖动验证；同时继续推进持久化幂等记录和 Scene 状态迁移。
+继续将工作区 Provider 接入 `scene.set-mode`，保留显式输入作为测试和策略覆盖；随后在统一物理像素工作区上实现 shelf。真实多显示器拓扑、显示器热插拔刷新和多显示器 DPI 拖动验证仍待完成。

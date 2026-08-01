@@ -7,6 +7,7 @@ add_executable(notification-hub-runtime
   scene/window.cpp
   scene/renderer.cpp
   scene/layout.cpp
+  scene/work_area.cpp
   scene/controller.cpp
 )
 
@@ -39,6 +40,7 @@ add_test(NAME runtime_dpi_self_test COMMAND notification-hub-runtime --dpi-self-
 add_test(NAME runtime_dpi_transition_self_test COMMAND notification-hub-runtime --dpi-transition-self-test)
 add_test(NAME runtime_scene_controller_self_test COMMAND notification-hub-runtime --scene-controller-self-test)
 add_test(NAME runtime_layout_self_test COMMAND notification-hub-runtime --layout-self-test)
+add_test(NAME runtime_work_area_self_test COMMAND notification-hub-runtime --work-area-self-test)
 
 find_program(NODE_EXECUTABLE node)
 if (NODE_EXECUTABLE)
