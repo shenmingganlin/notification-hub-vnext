@@ -1,0 +1,50 @@
+# Node.js
+node_modules/
+npm-debug.log*
+
+# Build outputs
+build/
+out/
+dist/
+release/
+*.obj
+*.pdb
+*.ilk
+*.exe
+*.dll
+*.lib
+*.exp
+
+# Runtime and diagnostic data
+logs/
+诊断导出/
+diagnostics-output/
+*.log
+
+# Local configuration and secrets
+.local/
+config.local.*
+.env
+.env.*
+!.env.example
+
+# IDE and OS
+.vscode/
+.idea/
+*.user
+*.suo
+.DS_Store
+Thumbs.db
+
+# Test outputs
+coverage/
+test-results/
+
+# Original planning inputs remain outside the vNext repository boundary.
+/notification-hub-0.2.1/
+/notification-hub-vnext-plan.md
+
+# Keep the legacy reference source tree, but ignore its generated data.
+legacy-reference/notification-hub-0.2.1/node_modules/
+legacy-reference/notification-hub-0.2.1/logs/
+legacy-reference/notification-hub-0.2.1/dist/

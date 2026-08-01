@@ -1,0 +1,12 @@
+{
+  "manifestVersion": 1,
+  "id": "notification-hub-vnext",
+  "name": "Notification Hub vNext",
+  "version": "0.1.0-alpha.1",
+  "description": "Notification Hub vNext for HanaAgent.",
+  "minAppVersion": "0.158.0",
+  "trust": "full-access",
+  "activationEvents": [
+    "onStartup"
+  ]
+}

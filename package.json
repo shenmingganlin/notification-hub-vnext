@@ -1,0 +1,15 @@
+{
+  "name": "notification-hub-vnext",
+  "version": "0.1.0-alpha.1",
+  "private": true,
+  "description": "Notification Hub vNext: a Windows notification scene system for HanaAgent.",
+  "type": "module",
+  "license": "MIT",
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "check": "node --check plugin/index.js && node --check tests/node/smoke.test.mjs",
+    "test": "node tests/node/smoke.test.mjs"
+  }
+}

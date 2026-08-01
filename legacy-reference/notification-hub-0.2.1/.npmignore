@@ -1,0 +1,50 @@
+node_modules/
+
+# Hana local runtime data
+.hanako/
+data/
+plugin-data/
+custom-toast/
+custom-toast-clicks/
+notification-clicks.jsonl
+notifications.jsonl
+
+# Smoke-test runtime data
+.smoke-data-*/
+.smoke-interact/
+.smoke-todo-style/
+tmp/
+helper/.smoke-*.ps1
+helper/.smoke-*.mjs
+helper/.watch-*.ps1
+
+# Helper build outputs and debug symbols
+helper/bin/
+helper/obj/
+helper/publish/
+helper/*.dll
+helper/*.pdb
+helper/*.deps.json
+helper/*.runtimeconfig.json
+helper/*.bak
+helper/*.tmp
+helper/*.old
+helper/*.backup*
+helper/*.before-*.exe
+helper/*backup*.exe
+helper/*before*.exe
+helper/*test*.exe
+helper/*new*.exe
+
+# Logs, archives, editor state
+*.log
+*.tmp
+*.bak
+*.old
+*.zip
+*.tar
+*.tar.gz
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
