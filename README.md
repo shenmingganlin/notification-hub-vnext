@@ -11,7 +11,7 @@ Notification Hub vNext is a Windows notification scene system for HanaAgent.
 
 ## Current status
 
-The project is beginning Phase 0 and Phase 1 from [PLAN.md](./PLAN.md): repository boundaries, build tooling, and reproducible foundations. No runtime feature is considered implemented yet.
+The project has completed the Phase 0/1 repository foundation and the initial Phase 2 protocol/diagnostic contracts. Native runtime behavior is still minimal and requires C++ build verification.
 
 ## Repository layout
 
@@ -27,22 +27,23 @@ The project is beginning Phase 0 and Phase 1 from [PLAN.md](./PLAN.md): reposito
 - Windows 10/11
 - Node.js >= 18
 - npm
-- CMake
-- MSVC with C++20 support
+- Visual Studio Community 2026 with the Desktop development with C++ workload
+- CMake and CTest from the Visual Studio 2026 installation
 - Windows 10/11 SDK
 
-The current machine has Node.js, npm, and a Windows SDK detected. CMake and the MSVC developer toolchain still need to be made available in the build environment before the C++ runtime can be built.
+Use a Visual Studio 2026 Developer Command Prompt or Developer PowerShell when building native code. This supplies the matching MSVC and Windows SDK environment without manually adding compiler internals to the system PATH.
 
 ## Commands
 
 ```powershell
+npm run check
 npm test
-cmake --preset debug-vs2022
-cmake --build --preset debug-vs2022
-ctest --preset debug-vs2022
+cmake --preset debug-vs2026
+cmake --build --preset debug-vs2026
+ctest --preset debug-vs2026
 ```
 
-The CMake and CTest commands become active after Visual Studio 2022 and the local C++ toolchain are installed. The repository preset targets the Visual Studio 2022 x64 generator.
+The repository preset targets the confirmed `Visual Studio 18 2026` x64 generator.
 
 ## Version
 

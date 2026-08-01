@@ -7,24 +7,24 @@
   },
   "configurePresets": [
     {
-      "name": "debug-vs2022",
-      "displayName": "Debug (Visual Studio 2022 x64)",
-      "generator": "Visual Studio 17 2022",
+      "name": "debug-vs2026",
+      "displayName": "Debug (Visual Studio 2026 x64)",
+      "generator": "Visual Studio 18 2026",
       "architecture": "x64",
-      "binaryDir": "${sourceDir}/build/debug-vs2022"
+      "binaryDir": "${sourceDir}/build/debug-vs2026"
     }
   ],
   "buildPresets": [
     {
-      "name": "debug-vs2022",
-      "configurePreset": "debug-vs2022",
+      "name": "debug-vs2026",
+      "configurePreset": "debug-vs2026",
       "configuration": "Debug"
     }
   ],
   "testPresets": [
     {
-      "name": "debug-vs2022",
-      "configurePreset": "debug-vs2022",
+      "name": "debug-vs2026",
+      "configurePreset": "debug-vs2026",
       "configuration": "Debug",
       "output": {
         "outputOnFailure": true
