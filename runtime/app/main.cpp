@@ -4,6 +4,10 @@
 #include "../transport/named_pipe.hpp"
 #include "../scene/window.hpp"
 
+#ifdef _WIN32
+#include <windows.h>
+#endif
+
 #include <iostream>
 #include <string>
 #include <string_view>
@@ -170,6 +174,125 @@ bool visual_self_test() {
     const auto event = create_event(
         "visual-self-test", "pixel-sampled", "RENDERER_VISUAL_REGRESSION_OK", "info", true,
         "Structural card pixel assertions completed", std::string(kTimestamp));
+    std::cout << serialize_jsonl(event);
+    return true;
+#endif
+}
+
+bool desktop_visual_self_test() {
+#ifndef _WIN32
+    std::cerr << "RENDERER_UNSUPPORTED: Desktop capture requires Windows\n";
+    return false;
+#else
+    SceneWindow window(WindowConfig{
+        L"Notification Hub Desktop Visual Self Test",
+        L"PrintWindow compositor capture",
+        420,
+        180,
+        true});
+    if (!window.create() || !window.is_renderer_ready() || !window.show() || !window.paint()) return false;
+
+    const auto hwnd = static_cast<HWND>(window.native_handle());
+    SetWindowPos(hwnd, HWND_TOP, 96, 96, 0, 0, SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW);
+    UpdateWindow(hwnd);
+    Sleep(50);
+    RECT client_rect{};
+    if (GetClientRect(hwnd, &client_rect) == FALSE) return false;
+    const int width = client_rect.right - client_rect.left;
+    const int height = client_rect.bottom - client_rect.top;
+    BITMAPINFO bitmap_info{};
+    bitmap_info.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+    bitmap_info.bmiHeader.biWidth = width;
+    bitmap_info.bmiHeader.biHeight = -height;
+    bitmap_info.bmiHeader.biPlanes = 1;
+    bitmap_info.bmiHeader.biBitCount = 32;
+    bitmap_info.bmiHeader.biCompression = BI_RGB;
+
+    void* bits = nullptr;
+    const auto screen_dc = GetDC(nullptr);
+    const auto memory_dc = CreateCompatibleDC(screen_dc);
+    const auto bitmap = CreateDIBSection(
+        screen_dc,
+        &bitmap_info,
+        DIB_RGB_COLORS,
+        &bits,
+        nullptr,
+        0);
+    const auto previous = bitmap != nullptr ? SelectObject(memory_dc, bitmap) : nullptr;
+    bool captured = bitmap != nullptr
+        && PrintWindow(hwnd, memory_dc, PW_RENDERFULLCONTENT) != FALSE;
+    bool used_screen_capture = false;
+
+    std::size_t nonzero_pixels = 0;
+    Pixel center{};
+    Pixel corner{};
+    const auto scan_pixels = [&]() {
+        nonzero_pixels = 0;
+        center = {};
+        corner = {};
+        if (bits == nullptr) return;
+        const auto* pixels = static_cast<const std::uint8_t*>(bits);
+        for (int index = 0; index < width * height; ++index) {
+            const auto* bgra = pixels + (index * 4);
+            if (bgra[0] != 0 || bgra[1] != 0 || bgra[2] != 0) ++nonzero_pixels;
+        }
+        const auto read_pixel = [&](int x, int y) {
+            const auto* bgra = pixels + (((y * width) + x) * 4);
+            return Pixel{bgra[2], bgra[1], bgra[0], bgra[3]};
+        };
+        center = read_pixel(width / 2, height / 2);
+        corner = read_pixel(0, 0);
+    };
+    scan_pixels();
+
+    if (bitmap != nullptr && nonzero_pixels == 0 && screen_dc != nullptr && memory_dc != nullptr) {
+        POINT origin{0, 0};
+        ClientToScreen(hwnd, &origin);
+        captured = BitBlt(
+            memory_dc,
+            0,
+            0,
+            width,
+            height,
+            screen_dc,
+            origin.x,
+            origin.y,
+            SRCCOPY | CAPTUREBLT) != FALSE;
+        used_screen_capture = captured;
+        scan_pixels();
+    }
+
+    if (previous != nullptr) SelectObject(memory_dc, previous);
+    if (bitmap != nullptr) DeleteObject(bitmap);
+    if (memory_dc != nullptr) DeleteDC(memory_dc);
+    if (screen_dc != nullptr) ReleaseDC(nullptr, screen_dc);
+
+    window.request_close();
+    const auto pump_result = window.run_message_pump(false);
+    const bool valid_capture = captured && nonzero_pixels > 0 && pump_result == 0 && !window.is_created();
+    if (!valid_capture) {
+        std::cerr << "desktop capture: captured=" << captured
+                  << " usedScreenCapture=" << used_screen_capture
+                  << " nonzeroPixels=" << nonzero_pixels
+                  << " center=" << static_cast<int>(center.red) << ","
+                  << static_cast<int>(center.green) << ","
+                  << static_cast<int>(center.blue) << ","
+                  << static_cast<int>(center.alpha)
+                  << " corner=" << static_cast<int>(corner.red) << ","
+                  << static_cast<int>(corner.green) << ","
+                  << static_cast<int>(corner.blue) << ","
+                  << static_cast<int>(corner.alpha) << "\n";
+        const auto event = create_event(
+            "desktop-visual-self-test", "window-captured", "RENDERER_DESKTOP_CAPTURE_FAILED", "error", false,
+            "Desktop compositor capture was empty or failed", std::string(kTimestamp));
+        std::cerr << serialize_jsonl(event);
+        return false;
+    }
+    const auto event = create_event(
+        "desktop-visual-self-test", "window-captured", "RENDERER_DESKTOP_CAPTURE_OK", "info", true,
+        used_screen_capture
+            ? "Screen-region desktop compositor capture completed after PrintWindow returned empty"
+            : "PrintWindow desktop compositor capture completed", std::string(kTimestamp));
     std::cout << serialize_jsonl(event);
     return true;
 #endif
@@ -413,6 +536,11 @@ int main(int argc, char** argv) {
     if (argc > 1 && std::string_view(argv[1]) == "--hit-test-self-test") {
         const bool passed = hit_test_self_test();
         std::cout << "notification-hub-runtime hit-test self-test: " << (passed ? "ok" : "failed") << "\n";
+        return passed ? 0 : 1;
+    }
+    if (argc > 1 && std::string_view(argv[1]) == "--desktop-visual-self-test") {
+        const bool passed = desktop_visual_self_test();
+        std::cout << "notification-hub-runtime desktop visual self-test: " << (passed ? "ok" : "failed") << "\n";
         return passed ? 0 : 1;
     }
     if (argc > 1 && std::string_view(argv[1]) == "--drag-interaction-self-test") {
