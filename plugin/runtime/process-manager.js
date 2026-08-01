@@ -21,6 +21,7 @@ export class RuntimeProcessManager extends EventEmitter {
     sceneState,
     recoverySnapshot,
     recoveryClient,
+    sceneStatePersistence,
     spawnOptions = {}
   } = {}) {
     super();
@@ -49,8 +50,12 @@ export class RuntimeProcessManager extends EventEmitter {
       this.recoverySnapshot = recoverySnapshot ? validateRecoverySnapshot(recoverySnapshot) : null;
       this.recoverySource = this.recoverySnapshot ? 'recovery-snapshot' : null;
     }
-    this.recoveryClient = recoveryClient ?? null;
+    this.recoveryClient = null;
+    this.sceneStatePersistence = null;
+    this.persistenceResponseHandler = null;
     this.spawnOptions = { windowsHide: true, ...spawnOptions };
+    if (sceneStatePersistence !== undefined) this.setSceneStatePersistence(sceneStatePersistence);
+    if (recoveryClient !== undefined) this.setRecoveryClient(recoveryClient);
     this.child = null;
     this.startPromise = null;
     this.restartTimer = null;
@@ -203,8 +208,66 @@ export class RuntimeProcessManager extends EventEmitter {
   }
 
   setRecoveryClient(client) {
+    if (this.recoveryClient && this.persistenceResponseHandler) {
+      this.recoveryClient.off?.('response', this.persistenceResponseHandler);
+    }
     this.recoveryClient = client;
+    if (this.sceneStatePersistence && client?.on) {
+      this.persistenceResponseHandler = (message) => this.observeSceneStateResponse(message);
+      client.on('response', this.persistenceResponseHandler);
+    } else {
+      this.persistenceResponseHandler = null;
+    }
     return client;
+  }
+
+  setSceneStatePersistence(persistence) {
+    if (persistence !== null
+      && (typeof persistence.observe !== 'function' || typeof persistence.flush !== 'function')) {
+      throw processError(
+        'RUNTIME_SCENE_STATE_PERSISTENCE_INVALID',
+        'SceneState persistence must expose observe() and flush()'
+      );
+    }
+    this.sceneStatePersistence = persistence;
+    if (this.recoveryClient) this.setRecoveryClient(this.recoveryClient);
+    if (persistence?.on) {
+      persistence.on('diagnostic', (diagnostic) => {
+        this.emit('diagnostic', diagnostic);
+      });
+    }
+    return persistence;
+  }
+
+  observeSceneStateResponse(message) {
+    const snapshot = message?.payload?.result?.sceneStateSnapshot;
+    if (!snapshot || !this.sceneStatePersistence) return null;
+    try {
+      return this.sceneStatePersistence.observe(snapshot);
+    } catch (error) {
+      this.emitDiagnostic(
+        error.code ?? 'RUNTIME_SCENE_STATE_PERSIST_FAILED',
+        error.message,
+        error.details
+      );
+      return null;
+    }
+  }
+
+  async flushSceneStatePersistence() {
+    if (!this.sceneStatePersistence) return null;
+    try {
+      return await this.sceneStatePersistence.flush();
+    } catch (error) {
+      if (typeof this.sceneStatePersistence.emit !== 'function') {
+        this.emitDiagnostic(
+          error.code ?? 'RUNTIME_SCENE_STATE_PERSIST_FAILED',
+          error.message,
+          error.details
+        );
+      }
+      throw error;
+    }
   }
 
   async restoreRecoverySnapshot(client = this.recoveryClient) {
@@ -245,6 +308,12 @@ export class RuntimeProcessManager extends EventEmitter {
 
   async stop() {
     this.intentionalStop = true;
+    let persistenceError = null;
+    try {
+      await this.flushSceneStatePersistence();
+    } catch (error) {
+      persistenceError = error;
+    }
     if (this.restartTimer) {
       clearTimeout(this.restartTimer);
       this.restartTimer = null;
@@ -253,6 +322,7 @@ export class RuntimeProcessManager extends EventEmitter {
     this.child = null;
     if (!child || child.exitCode !== null) {
       this.setState('stopped', 'stop-requested');
+      if (persistenceError) throw persistenceError;
       return;
     }
     this.setState('stopping', 'stop-requested');
@@ -268,6 +338,7 @@ export class RuntimeProcessManager extends EventEmitter {
       child.kill();
     });
     this.setState('stopped', 'stopped');
+    if (persistenceError) throw persistenceError;
   }
 
   setState(nextState, reason) {

@@ -263,6 +263,7 @@ export class PipeClient extends EventEmitter {
       this.emitDiagnostic(wrapped.code, wrapped.message, wrapped.details);
       return;
     }
+    this.emit('response', message);
     const pending = this.pending.get(message.requestId);
     if (!pending) return;
     this.pending.delete(message.requestId);
