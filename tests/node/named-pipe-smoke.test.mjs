@@ -148,6 +148,35 @@ test('Node client completes hello, health, and shutdown over Named Pipe', async 
   }, { retryable: false, idempotencyKey: 'card-b-dismiss' });
   assert.deepEqual(dismissedCard.payload.result.sceneCards.map((card) => card.id), ['card-a']);
 
+  const stackedCard = await client.request('scene.set-mode', {
+    layout: 'stack',
+    direction: 'down',
+    anchor: 'top-right',
+    spacing: 12,
+    workAreaWidth: 800,
+    workAreaHeight: 600,
+    dpiScale: 1
+  }, { retryable: false, idempotencyKey: 'scene-stack-1' });
+  assert.equal(stackedCard.type, 'ack');
+  assert.deepEqual(stackedCard.payload.result.sceneCards.map((card) => ({
+    id: card.id,
+    x: card.x,
+    y: card.y
+  })), [{ id: 'card-a', x: 480, y: 0 }]);
+
+  await assert.rejects(
+    client.request('scene.set-mode', {
+      layout: 'stack',
+      direction: 'down',
+      anchor: 'top-right',
+      spacing: 12,
+      workAreaWidth: 100,
+      workAreaHeight: 100,
+      dpiScale: 1
+    }, { retryable: false }),
+    (error) => error.code === 'LAYOUT_CARD_OUT_OF_BOUNDS'
+  );
+
   const shutdown = await client.request('shutdown');
   assert.equal(shutdown.type, 'ack');
   assert.equal(shutdown.payload.requestType, 'shutdown');

@@ -40,6 +40,19 @@ test('RuntimeProcessManager restarts Runtime after a controlled exit', async (t)
     type: 'scene.dismiss',
     payload: { id: 'card-b' }
   });
+  addRecoveryEntry(recoverySnapshot, {
+    key: 'scene-stack',
+    type: 'scene.set-mode',
+    payload: {
+      layout: 'stack',
+      direction: 'down',
+      anchor: 'top-right',
+      spacing: 12,
+      workAreaWidth: 800,
+      workAreaHeight: 600,
+      dpiScale: 1
+    }
+  });
   const manager = new RuntimeProcessManager({
     runtimePath,
     pipeName,
@@ -86,7 +99,7 @@ test('RuntimeProcessManager restarts Runtime after a controlled exit', async (t)
     const check = () => {
       if (!managerStates.some((change) => change.state === 'crashed')) return;
       if (!managerStates.some((change) => change.state === 'running' && change.reason === 'ready')) return;
-      if (recoveryEvents.length !== 5) return;
+      if (recoveryEvents.length !== 6) return;
       clearTimeout(timer);
       clearInterval(poll);
       manager.off('state', check);
@@ -100,13 +113,14 @@ test('RuntimeProcessManager restarts Runtime after a controlled exit', async (t)
   const recoveredHealth = await client.request('health');
   assert.equal(recoveredHealth.type, 'ack');
   assert.equal(recoveredHealth.payload.requestType, 'health');
-  assert.equal(recoveryEvents.length, 5);
+  assert.equal(recoveryEvents.length, 6);
   assert.deepEqual(recoveryEvents.map((event) => event.key), [
     'runtime-config',
     'scene-window',
     'card-a',
     'card-b',
-    'card-b-dismiss'
+    'card-b-dismiss',
+    'scene-stack'
   ]);
   assert.deepEqual(recoveredHealth.payload.result.sceneState, {
     x: 137,
@@ -115,6 +129,8 @@ test('RuntimeProcessManager restarts Runtime after a controlled exit', async (t)
     height: 220
   });
   assert.deepEqual(recoveredHealth.payload.result.sceneCards.map((card) => card.id), ['card-a']);
+  assert.equal(recoveredHealth.payload.result.sceneCards[0].x, 480);
+  assert.equal(recoveredHealth.payload.result.sceneCards[0].y, 0);
   assert.ok(clientStates.some((change) => change.state === 'reconnecting'));
   assert.ok(managerStates.some((change) => change.state === 'starting'));
   assert.ok(managerStates.some((change) => change.state === 'crashed'));

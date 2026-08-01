@@ -349,17 +349,43 @@ bool desktop_hit_test_self_test() {
     if (!window.create() || !window.show() || !window.paint()) return false;
 
     const auto hwnd = static_cast<HWND>(window.native_handle());
-    SetWindowPos(hwnd, HWND_TOP, 96, 96, 0, 0, SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW);
-    UpdateWindow(hwnd);
-    Sleep(50);
-    POINT origin{0, 0};
-    if (ClientToScreen(hwnd, &origin) == FALSE) return false;
-    const auto center = POINT{origin.x + 210, origin.y + 90};
-    const auto transparent_corner = POINT{origin.x, origin.y};
-    const auto center_window = WindowFromPoint(center);
-    const auto corner_window = WindowFromPoint(transparent_corner);
-    const bool card_owned = center_window == hwnd;
-    const bool corner_transparent = corner_window != hwnd;
+    const int virtual_left = GetSystemMetrics(SM_XVIRTUALSCREEN);
+    const int virtual_top = GetSystemMetrics(SM_YVIRTUALSCREEN);
+    const int virtual_width = GetSystemMetrics(SM_CXVIRTUALSCREEN);
+    const int virtual_height = GetSystemMetrics(SM_CYVIRTUALSCREEN);
+    const POINT candidates[] = {
+        {virtual_left + 32, virtual_top + 32},
+        {virtual_left + virtual_width - 452, virtual_top + 32},
+        {virtual_left + 32, virtual_top + virtual_height - 212},
+        {virtual_left + virtual_width - 452, virtual_top + virtual_height - 212},
+        {virtual_left + (virtual_width - 420) / 2, virtual_top + (virtual_height - 180) / 2}
+    };
+    HWND center_window = nullptr;
+    HWND corner_window = nullptr;
+    bool card_owned = false;
+    bool corner_transparent = false;
+    for (const auto& candidate : candidates) {
+        if (SetWindowPos(
+                hwnd,
+                HWND_TOPMOST,
+                candidate.x,
+                candidate.y,
+                0,
+                0,
+                SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW) == FALSE) continue;
+        BringWindowToTop(hwnd);
+        UpdateWindow(hwnd);
+        Sleep(50);
+        POINT origin{0, 0};
+        if (ClientToScreen(hwnd, &origin) == FALSE) continue;
+        const auto center = POINT{origin.x + 210, origin.y + 90};
+        const auto transparent_corner = POINT{origin.x, origin.y};
+        center_window = WindowFromPoint(center);
+        corner_window = WindowFromPoint(transparent_corner);
+        card_owned = center_window == hwnd;
+        corner_transparent = corner_window != hwnd;
+        if (card_owned) break;
+    }
 
     window.request_close();
     const auto pump_result = window.run_message_pump(false);

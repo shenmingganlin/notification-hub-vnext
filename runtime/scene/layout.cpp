@@ -53,7 +53,16 @@ StackLayoutResult layout_stack(
     StackLayoutResult result{true, {}, {}, {}, {}};
     result.placements.reserve(cards.size());
 
-    int cursor = 0;
+    struct ScaledCard {
+        const StackCardInput* input;
+        int width;
+        int height;
+    };
+    std::vector<ScaledCard> scaled_cards;
+    scaled_cards.reserve(cards.size());
+    const auto horizontal = options.direction == StackDirection::Right
+        || options.direction == StackDirection::Left;
+    long long total_extent = 0;
     for (const auto& card : cards) {
         if (card.width <= 0 || card.height <= 0) {
             return failure("LAYOUT_CARD_INVALID", "Stack card dimensions must be positive", card.id);
@@ -63,14 +72,38 @@ StackLayoutResult layout_stack(
         if (width <= 0 || height <= 0) {
             return failure("LAYOUT_CARD_INVALID", "Stack card dimensions must remain positive after DPI scaling", card.id);
         }
+        scaled_cards.push_back(ScaledCard{&card, width, height});
+        total_extent += horizontal ? width : height;
+        if (scaled_cards.size() > 1) total_extent += spacing;
+    }
+    const auto work_extent = horizontal ? options.work_area_width : options.work_area_height;
+    if (total_extent > work_extent) {
+        const auto& failing_card = scaled_cards.empty() ? StackCardInput{} : *scaled_cards.back().input;
+        return failure(
+            "LAYOUT_CARD_OUT_OF_BOUNDS",
+            "Stack cards exceed the work area extent",
+            failing_card.id);
+    }
 
+    int cursor = 0;
+    for (const auto& scaled : scaled_cards) {
+        const auto& card = *scaled.input;
+        const auto width = scaled.width;
+        const auto height = scaled.height;
+        if (card.width <= 0 || card.height <= 0) {
+            return failure("LAYOUT_CARD_INVALID", "Stack card dimensions must be positive", card.id);
+        }
         StackCardPlacement placement{card.id, 0, 0, width, height};
-        const auto horizontal = options.direction == StackDirection::Right
-            || options.direction == StackDirection::Left;
         if (horizontal) {
-            placement.x = options.direction == StackDirection::Right
-                ? cursor
-                : options.work_area_width - cursor - width;
+            if (options.direction == StackDirection::Right) {
+                placement.x = anchor_is_right(options.anchor)
+                    ? options.work_area_width - static_cast<int>(total_extent) + cursor
+                    : cursor;
+            } else {
+                placement.x = anchor_is_right(options.anchor)
+                    ? options.work_area_width - cursor - width
+                    : static_cast<int>(total_extent) - cursor - width;
+            }
             placement.y = anchor_is_bottom(options.anchor)
                 ? options.work_area_height - height
                 : 0;
@@ -79,9 +112,15 @@ StackLayoutResult layout_stack(
             placement.x = anchor_is_right(options.anchor)
                 ? options.work_area_width - width
                 : 0;
-            placement.y = options.direction == StackDirection::Down
-                ? cursor
-                : options.work_area_height - cursor - height;
+            if (options.direction == StackDirection::Down) {
+                placement.y = anchor_is_bottom(options.anchor)
+                    ? options.work_area_height - static_cast<int>(total_extent) + cursor
+                    : cursor;
+            } else {
+                placement.y = anchor_is_bottom(options.anchor)
+                    ? options.work_area_height - cursor - height
+                    : static_cast<int>(total_extent) - cursor - height;
+            }
             cursor += height + spacing;
         }
 

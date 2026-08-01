@@ -64,6 +64,19 @@ function validateSceneDismissPayload(payload) {
   return payload;
 }
 
+function validateSceneModePayload(payload) {
+  const directions = new Set(['down', 'up', 'left', 'right']);
+  const anchors = new Set(['top-left', 'top-right', 'bottom-left', 'bottom-right']);
+  if (payload.layout !== 'stack' || !directions.has(payload.direction) || !anchors.has(payload.anchor)
+    || !Number.isInteger(payload.spacing) || payload.spacing < 0
+    || !Number.isInteger(payload.workAreaWidth) || payload.workAreaWidth <= 0
+    || !Number.isInteger(payload.workAreaHeight) || payload.workAreaHeight <= 0
+    || typeof payload.dpiScale !== 'number' || !Number.isFinite(payload.dpiScale) || payload.dpiScale <= 0) {
+    throw recoveryError('RUNTIME_RECOVERY_INVALID_PAYLOAD', 'scene.set-mode requires a valid stack layout payload');
+  }
+  return payload;
+}
+
 export function createRecoverySnapshot({ updatedAt = new Date().toISOString(), entries = [] } = {}) {
   const snapshot = {
     recoveryVersion: RECOVERY_SNAPSHOT_VERSION,
@@ -91,6 +104,7 @@ export function addRecoveryEntry(snapshot, { type, payload = {}, key = type } = 
     else validateSceneUpdatePayload(payload);
   }
   if (type === 'scene.dismiss') validateSceneDismissPayload(payload);
+  if (type === 'scene.set-mode') validateSceneModePayload(payload);
 
   const entry = Object.freeze({ key, type, payload: Object.freeze(cloneJson(payload)) });
   const existingIndex = snapshot.entries.findIndex((candidate) => candidate.key === key);
@@ -123,6 +137,7 @@ export function validateRecoverySnapshot(snapshot) {
     if (entry.type === 'scene.create') validateSceneCardPayload(entry.payload, entry.type);
     if (entry.type === 'scene.update') validateSceneUpdatePayload(entry.payload);
     if (entry.type === 'scene.dismiss') validateSceneDismissPayload(entry.payload);
+    if (entry.type === 'scene.set-mode') validateSceneModePayload(entry.payload);
   }
   return snapshot;
 }

@@ -26,7 +26,9 @@
 - recovery snapshot 支持临时文件写入、原子替换、读取和版本校验。
 - recovery snapshot 增加 `scene.update` 窗口几何 entry，严格校验 `x/y/width/height`，重启后按顺序恢复到 Runtime 状态层。
 - fixed 布局恢复支持 `scene.create`、卡片型 `scene.update` 和 `scene.dismiss`，保存卡片 id、标题、正文和窗口几何。
-- Runtime Named Pipe 严格接收单窗口与多卡片 Scene 命令，通过 RuntimeSceneController 应用到真实 Native HWND，并在 ACK/health 中回显实际状态；非法 payload 返回稳定错误码。
+- 新增纯数学 stack 布局模块，支持方向、交叉轴锚点、间距、工作区边界、DPI 缩放和稳定错误码。
+- `scene.set-mode` 已接入 stack 布局，按卡片创建顺序计算并应用多卡片 HWND 几何；stack 配置也进入 recovery snapshot。
+- Runtime Named Pipe 严格接收单窗口、多卡片和布局命令，通过 RuntimeSceneController 应用到真实 Native HWND，并在 ACK/health 中回显实际状态；非法 payload 返回稳定错误码。
 - 增加 Runtime Scene Controller self-test，直接验证 HWND 位置和客户区尺寸已应用。
 - ProcessManager 重启 smoke 已验证 Runtime 重启后按快照顺序重放窗口与卡片命令，并通过重启后 `health` 读取真实恢复几何和卡片集合。
 - 重启后按快照顺序重放恢复命令，并对失败停止后续恢复、输出结构化诊断。
@@ -47,7 +49,7 @@
 
 ## 当前阶段
 
-Phase 2 已完成基础闭环，Phase 4 正在推进，Phase 5 已开始。Node.js 与 C++ Runtime 已具备协议、诊断、framing、最小 Named Pipe 通信、有限自动重连、Runtime 进程托管、幂等请求、版本化恢复快照、fixed 布局多卡片创建/更新/关闭恢复、Runtime Scene Controller 到 Native HWND 的实际应用、Runtime 重启后的窗口与卡片状态恢复、最小 Win32 窗口生命周期、Direct2D/DirectWrite 卡片绘制、DirectComposition 预乘 alpha surface、离屏结构性像素回归、卡片命中、关闭、基础拖动交互、桌面区域合成回归、桌面透明命中、DPI 基础契约和受控 `WM_DPICHANGED` 几何同步；stack 等后续布局、真实跨显示器 DPI 和完整 Scene 状态重建尚未完全收口。
+Phase 2 已完成基础闭环，Phase 4 正在推进，Phase 5 已开始。Node.js 与 C++ Runtime 已具备协议、诊断、framing、最小 Named Pipe 通信、有限自动重连、Runtime 进程托管、幂等请求、版本化恢复快照、fixed 布局多卡片创建/更新/关闭恢复、stack 布局数学与运行时接入、Runtime Scene Controller 到 Native HWND 的实际应用、Runtime 重启后的窗口与卡片状态恢复、最小 Win32 窗口生命周期、Direct2D/DirectWrite 卡片绘制、DirectComposition 预乘 alpha surface、离屏结构性像素回归、卡片命中、关闭、基础拖动交互、桌面区域合成回归、桌面透明命中、DPI 基础契约和受控 `WM_DPICHANGED` 几何同步；shelf/cascade/focus/freeform、真实跨显示器 DPI 和完整 Scene 状态重建尚未完全收口。
 
 ## 标准验证命令
 

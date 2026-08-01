@@ -26,7 +26,15 @@ test('recovery snapshot persists atomically and validates on load', async () => 
     addRecoveryEntry(snapshot, {
       key: 'mode',
       type: 'scene.set-mode',
-      payload: { mode: 'quiet' }
+      payload: {
+        layout: 'stack',
+        direction: 'down',
+        anchor: 'top-right',
+        spacing: 12,
+        workAreaWidth: 800,
+        workAreaHeight: 600,
+        dpiScale: 1
+      }
     });
     addRecoveryEntry(snapshot, {
       key: 'window',
@@ -82,6 +90,14 @@ test('recovery snapshot rejects unsupported commands and malformed files', async
       key: 'invalid-card',
       type: 'scene.create',
       payload: { id: 'card', title: '', x: 0, y: 0, width: 320, height: 160 }
+    }),
+    (error) => error.code === 'RUNTIME_RECOVERY_INVALID_PAYLOAD'
+  );
+  assert.throws(
+    () => addRecoveryEntry(snapshot, {
+      key: 'invalid-mode',
+      type: 'scene.set-mode',
+      payload: { layout: 'stack', direction: 'down', anchor: 'top-right', spacing: -1, workAreaWidth: 800, workAreaHeight: 600, dpiScale: 1 }
     }),
     (error) => error.code === 'RUNTIME_RECOVERY_INVALID_PAYLOAD'
   );

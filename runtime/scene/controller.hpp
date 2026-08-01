@@ -1,5 +1,7 @@
 #pragma once
 
+#include "layout.hpp"
+
 #include <string>
 #include <string_view>
 
@@ -17,6 +19,8 @@ struct SceneCardState {
     std::string title;
     std::string body;
     SceneWindowState window{};
+    int layout_width{};
+    int layout_height{};
 };
 
 class RuntimeSceneController {
@@ -31,6 +35,7 @@ public:
     bool create_card(const SceneCardState& card, std::string& error_code, std::string& error_message);
     bool update_card(const SceneCardState& card, std::string& error_code, std::string& error_message);
     bool dismiss_card(std::string_view id, std::string& error_code, std::string& error_message);
+    bool apply_stack_layout(const StackLayoutOptions& options, std::string& error_code, std::string& error_message);
     bool get_window_state(SceneWindowState& state) const noexcept;
     std::string state_json() const;
     std::string cards_json() const;

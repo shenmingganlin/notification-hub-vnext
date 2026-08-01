@@ -6,7 +6,10 @@
 #include "frame.hpp"
 
 #include <charconv>
+#include <cmath>
 #include <cctype>
+#include <cstdlib>
+#include <limits>
 #include <iostream>
 #include <string>
 #include <string_view>
@@ -210,6 +213,93 @@ bool parse_scene_card_payload(std::string_view payload, scene::SceneCardState& c
         && card.window.height > 0 && card.window.height <= 10000;
 }
 
+bool parse_scene_mode_payload(std::string_view payload, scene::StackLayoutOptions& options) {
+    size_t position = 0;
+    const auto skip = [&]() {
+        while (position < payload.size() && std::isspace(static_cast<unsigned char>(payload[position]))) ++position;
+    };
+    const auto consume = [&](char expected) {
+        skip();
+        if (position >= payload.size() || payload[position] != expected) return false;
+        ++position;
+        return true;
+    };
+    const auto parse_number = [&](double& value) {
+        skip();
+        const auto start = position;
+        if (position < payload.size() && (payload[position] == '-' || payload[position] == '+')) ++position;
+        while (position < payload.size() && std::isdigit(static_cast<unsigned char>(payload[position]))) ++position;
+        if (position < payload.size() && payload[position] == '.') {
+            ++position;
+            while (position < payload.size() && std::isdigit(static_cast<unsigned char>(payload[position]))) ++position;
+        }
+        if (start == position) return false;
+        const std::string token(payload.substr(start, position - start));
+        char* end = nullptr;
+        value = std::strtod(token.c_str(), &end);
+        return end == token.c_str() + token.size();
+    };
+    if (!consume('{')) return false;
+    bool seen_layout = false;
+    bool seen_direction = false;
+    bool seen_anchor = false;
+    bool seen_spacing = false;
+    bool seen_work_area_width = false;
+    bool seen_work_area_height = false;
+    bool seen_dpi_scale = false;
+    std::string layout;
+    std::string direction;
+    std::string anchor;
+    while (true) {
+        skip();
+        if (position < payload.size() && payload[position] == '}') {
+            ++position;
+            break;
+        }
+        std::string key;
+        if (!parse_json_string_token(payload, position, key) || !consume(':')) return false;
+        if (key == "layout" || key == "direction" || key == "anchor") {
+            std::string value;
+            if (!parse_json_string_token(payload, position, value)) return false;
+            if (key == "layout" && !seen_layout) { layout = std::move(value); seen_layout = true; }
+            else if (key == "direction" && !seen_direction) { direction = std::move(value); seen_direction = true; }
+            else if (key == "anchor" && !seen_anchor) { anchor = std::move(value); seen_anchor = true; }
+            else return false;
+        } else if (key == "spacing" || key == "workAreaWidth" || key == "workAreaHeight" || key == "dpiScale") {
+            double numeric = 0.0;
+            if (!parse_number(numeric)) return false;
+            if (key != "dpiScale"
+                && (std::floor(numeric) != numeric
+                    || numeric < static_cast<double>((std::numeric_limits<int>::min)())
+                    || numeric > static_cast<double>((std::numeric_limits<int>::max)()))) return false;
+            if (key == "spacing" && !seen_spacing) { options.spacing = static_cast<int>(numeric); seen_spacing = true; }
+            else if (key == "workAreaWidth" && !seen_work_area_width) { options.work_area_width = static_cast<int>(numeric); seen_work_area_width = true; }
+            else if (key == "workAreaHeight" && !seen_work_area_height) { options.work_area_height = static_cast<int>(numeric); seen_work_area_height = true; }
+            else if (key == "dpiScale" && !seen_dpi_scale) { options.dpi_scale = static_cast<float>(numeric); seen_dpi_scale = true; }
+            else return false;
+        } else return false;
+        skip();
+        if (position < payload.size() && payload[position] == ',') { ++position; continue; }
+        if (position < payload.size() && payload[position] == '}') { ++position; break; }
+        return false;
+    }
+    skip();
+    if (position != payload.size() || !seen_layout || !seen_direction || !seen_anchor
+        || !seen_spacing || !seen_work_area_width || !seen_work_area_height || !seen_dpi_scale
+        || layout != "stack") return false;
+    if (direction == "down") options.direction = scene::StackDirection::Down;
+    else if (direction == "up") options.direction = scene::StackDirection::Up;
+    else if (direction == "right") options.direction = scene::StackDirection::Right;
+    else if (direction == "left") options.direction = scene::StackDirection::Left;
+    else return false;
+    if (anchor == "top-left") options.anchor = scene::StackAnchor::TopLeft;
+    else if (anchor == "top-right") options.anchor = scene::StackAnchor::TopRight;
+    else if (anchor == "bottom-left") options.anchor = scene::StackAnchor::BottomLeft;
+    else if (anchor == "bottom-right") options.anchor = scene::StackAnchor::BottomRight;
+    else return false;
+    return true;
+}
+
 bool parse_scene_dismiss_payload(std::string_view payload, std::string& id) {
     size_t position = 0;
     while (position < payload.size() && std::isspace(static_cast<unsigned char>(payload[position]))) ++position;
@@ -322,12 +412,14 @@ int run_named_pipe_server(std::string_view pipe_name, bool drop_after_health, bo
 
                 scene::SceneWindowState requested_scene_state{};
                 scene::SceneCardState requested_card{};
+                scene::StackLayoutOptions requested_layout_options{};
                 std::string requested_dismiss_id;
                 const bool is_card_update = parsed.message.type == "scene.update"
                     && parsed.message.payload_json.find("\"id\"") != std::string::npos;
                 const bool is_card_command = parsed.message.type == "scene.create"
                     || is_card_update
                     || parsed.message.type == "scene.dismiss";
+                const bool is_layout_command = parsed.message.type == "scene.set-mode";
                 bool payload_valid = true;
                 if (parsed.message.type == "scene.update" && !is_card_update) {
                     payload_valid = parse_scene_update_payload(parsed.message.payload_json, requested_scene_state);
@@ -335,13 +427,19 @@ int run_named_pipe_server(std::string_view pipe_name, bool drop_after_health, bo
                     payload_valid = parse_scene_card_payload(parsed.message.payload_json, requested_card);
                 } else if (parsed.message.type == "scene.dismiss") {
                     payload_valid = parse_scene_dismiss_payload(parsed.message.payload_json, requested_dismiss_id);
+                } else if (is_layout_command) {
+                    payload_valid = parse_scene_mode_payload(parsed.message.payload_json, requested_layout_options);
                 }
                 if (!payload_valid) {
                     protocol::ProtocolError error{
-                        is_card_command ? "RUNTIME_SCENE_CARD_INVALID" : "RUNTIME_SCENE_STATE_INVALID",
+                        is_card_command
+                            ? "RUNTIME_SCENE_CARD_INVALID"
+                            : (is_layout_command ? "LAYOUT_INVALID" : "RUNTIME_SCENE_STATE_INVALID"),
                         is_card_command
                             ? "scene card payload is invalid"
-                            : "scene.update requires integer x, y, width, and height",
+                            : (is_layout_command
+                                ? "scene.set-mode requires a valid stack layout payload"
+                                : "scene.update requires integer x, y, width, and height"),
                         parsed.message.request_id,
                         parsed.message.trace_id
                     };
@@ -375,7 +473,26 @@ int run_named_pipe_server(std::string_view pipe_name, bool drop_after_health, bo
                         idempotency_cache.emplace(parsed.message.idempotency_key, fingerprint);
                     }
                 }
-                if (!deduplicated && parsed.message.type == "scene.update" && !is_card_update) {
+                if (!deduplicated && is_layout_command) {
+                    std::string apply_error_code;
+                    std::string apply_error_message;
+                    if (!scene_controller.apply_stack_layout(
+                            requested_layout_options,
+                            apply_error_code,
+                            apply_error_message)) {
+                        protocol::ProtocolError error{
+                            apply_error_code,
+                            apply_error_message,
+                            parsed.message.request_id,
+                            parsed.message.trace_id
+                        };
+                        if (!send_payload(pipe, protocol::serialize_error(error))) {
+                            close_pipe(pipe);
+                            return 11;
+                        }
+                        continue;
+                    }
+                } else if (!deduplicated && parsed.message.type == "scene.update" && !is_card_update) {
                     std::string apply_error_code;
                     std::string apply_error_message;
                     if (!scene_controller.apply_window_state(
@@ -457,7 +574,7 @@ int run_named_pipe_server(std::string_view pipe_name, bool drop_after_health, bo
                     : "{\"status\":\"accepted\",\"deduplicated\":false}";
                 const auto result_json = parsed.message.type == "scene.update" && !is_card_update
                     ? scene_controller.state_result_json(deduplicated)
-                    : (parsed.message.type == "scene.create" || is_card_update || parsed.message.type == "scene.dismiss"
+                    : (parsed.message.type == "scene.create" || is_card_update || parsed.message.type == "scene.dismiss" || is_layout_command
                         ? scene_controller.cards_result_json(deduplicated)
                         : (parsed.message.type == "health"
                             ? std::string("{\"status\":\"accepted\",\"deduplicated\":")
