@@ -40,7 +40,8 @@ const ENVELOPE_FIELDS = new Set([
   'traceId',
   'type',
   'timestamp',
-  'payload'
+  'payload',
+  'idempotencyKey'
 ]);
 
 const isRecord = (value) => value !== null && typeof value === 'object' && !Array.isArray(value);
@@ -70,10 +71,19 @@ export function createRequest({
   payload = {},
   requestId = createId('req'),
   traceId = createId('trace'),
-  timestamp = new Date().toISOString()
+  timestamp = new Date().toISOString(),
+  idempotencyKey
 } = {}) {
   assertRequestType(type);
-  const message = { protocolVersion: PROTOCOL_VERSION, requestId, traceId, type, timestamp, payload };
+  const message = {
+    protocolVersion: PROTOCOL_VERSION,
+    requestId,
+    traceId,
+    type,
+    timestamp,
+    payload,
+    ...(idempotencyKey === undefined ? {} : { idempotencyKey })
+  };
   validateMessage(message);
   return Object.freeze(message);
 }
@@ -152,7 +162,7 @@ export function validateMessage(message, { allowUnknownFields = false } = {}) {
     }
   }
 
-  for (const field of ENVELOPE_FIELDS) {
+  for (const field of ['protocolVersion', 'requestId', 'traceId', 'type', 'timestamp', 'payload']) {
     if (!(field in message)) {
       throw protocolError(PROTOCOL_ERROR_CODES.MISSING_FIELD, `Missing protocol field: ${field}`, { field });
     }
@@ -167,6 +177,9 @@ export function validateMessage(message, { allowUnknownFields = false } = {}) {
   }
   if (!isNonEmptyString(message.requestId) || !isNonEmptyString(message.traceId)) {
     throw protocolError(PROTOCOL_ERROR_CODES.INVALID_MESSAGE, 'requestId and traceId must be non-empty strings');
+  }
+  if ('idempotencyKey' in message && !isNonEmptyString(message.idempotencyKey)) {
+    throw protocolError(PROTOCOL_ERROR_CODES.INVALID_MESSAGE, 'idempotencyKey must be a non-empty string');
   }
   if (!isNonEmptyString(message.type) || !MESSAGE_TYPES.includes(message.type)) {
     throw protocolError(PROTOCOL_ERROR_CODES.UNKNOWN_TYPE, `Unknown message type: ${String(message.type)}`, { type: message.type });

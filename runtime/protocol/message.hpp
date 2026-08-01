@@ -14,6 +14,7 @@ struct Message {
     std::string type;
     std::string timestamp;
     std::string payload_json;
+    std::string idempotency_key;
 };
 
 struct ProtocolError {

@@ -131,7 +131,8 @@ export class PipeClient extends EventEmitter {
       payload,
       requestId: options.requestId ?? `req-node-${sequence}`,
       traceId: options.traceId ?? `trace-node-${sequence}`,
-      timestamp: options.timestamp
+      timestamp: options.timestamp,
+      idempotencyKey: options.idempotencyKey
     });
     const retryable = options.retryable ?? RETRYABLE_TYPES.has(type);
     const maxAttempts = retryable

@@ -6,6 +6,7 @@
 
 #include <iostream>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 #ifdef _WIN32
@@ -59,6 +60,7 @@ int run_named_pipe_server(std::string_view pipe_name, bool drop_after_health, bo
     const auto wide_name = to_wide_ascii(pipe_name);
     bool injected_drop = false;
     bool shutdown_requested = false;
+    std::unordered_map<std::string, std::string> idempotency_cache;
 
     while (!shutdown_requested) {
         HANDLE pipe = CreateNamedPipeW(
@@ -134,7 +136,33 @@ int run_named_pipe_server(std::string_view pipe_name, bool drop_after_health, bo
                     continue;
                 }
 
-                if (!send_payload(pipe, protocol::serialize_ack(parsed.message, "{\"status\":\"accepted\"}"))) {
+                bool deduplicated = false;
+                if (!parsed.message.idempotency_key.empty()) {
+                    const auto fingerprint = parsed.message.type + "|" + parsed.message.payload_json;
+                    const auto existing = idempotency_cache.find(parsed.message.idempotency_key);
+                    if (existing != idempotency_cache.end()) {
+                        if (existing->second != fingerprint) {
+                            protocol::ProtocolError error{
+                                "TRANSPORT_IDEMPOTENCY_CONFLICT",
+                                "idempotencyKey was already used for a different request",
+                                parsed.message.request_id,
+                                parsed.message.trace_id
+                            };
+                            if (!send_payload(pipe, protocol::serialize_error(error))) {
+                                close_pipe(pipe);
+                                return 9;
+                            }
+                            continue;
+                        }
+                        deduplicated = true;
+                    } else {
+                        idempotency_cache.emplace(parsed.message.idempotency_key, fingerprint);
+                    }
+                }
+                const auto result_json = deduplicated
+                    ? "{\"status\":\"accepted\",\"deduplicated\":true}"
+                    : "{\"status\":\"accepted\",\"deduplicated\":false}";
+                if (!send_payload(pipe, protocol::serialize_ack(parsed.message, result_json))) {
                     std::cerr << "TRANSPORT_PIPE_WRITE_FAILED: " << GetLastError() << "\n";
                     close_pipe(pipe);
                     return 8;

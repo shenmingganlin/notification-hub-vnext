@@ -9,7 +9,7 @@
     "node": ">=18"
   },
   "scripts": {
-    "check": "node --check plugin/index.js && node --check plugin/protocol/index.js && node --check plugin/diagnostics/index.js && node --check plugin/runtime/pipe-client.js && node --check tests/node/smoke.test.mjs && node --check tests/node/protocol-diagnostics.test.mjs && node --check tests/node/named-pipe-smoke.test.mjs && node --check tests/node/runtime-process-manager-smoke.test.mjs",
+    "check": "node --check plugin/index.js && node --check plugin/protocol/index.js && node --check plugin/diagnostics/index.js && node --check plugin/runtime/pipe-client.js && node --check plugin/runtime/recovery-snapshot.js && node --check tests/node/smoke.test.mjs && node --check tests/node/protocol-diagnostics.test.mjs && node --check tests/node/named-pipe-smoke.test.mjs && node --check tests/node/runtime-process-manager-smoke.test.mjs && node --check tests/node/recovery-snapshot.test.mjs",
     "test": "node --test tests/node/*.test.mjs"
   }
 }

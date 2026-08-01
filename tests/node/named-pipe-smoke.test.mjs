@@ -60,9 +60,10 @@ test('Node client completes hello, health, and shutdown over Named Pipe', async 
   assert.equal(hello.payload.requestType, 'hello');
   assert.equal(hello.payload.accepted, true);
 
-  const health = await client.request('health');
+  const health = await client.request('health', {}, { idempotencyKey: 'health-smoke-1' });
   assert.equal(health.type, 'ack');
   assert.equal(health.payload.requestType, 'health');
+  assert.equal(health.payload.result.deduplicated, false);
 
   await new Promise((resolve, reject) => {
     const timer = setTimeout(() => reject(new Error(`Runtime did not report disconnect; states=${JSON.stringify(states)}`)), 1500);
@@ -76,9 +77,15 @@ test('Node client completes hello, health, and shutdown over Named Pipe', async 
     check();
   });
 
-  const recoveredHealth = await client.request('health');
+  const recoveredHealth = await client.request('health', {}, { idempotencyKey: 'health-smoke-1' });
   assert.equal(recoveredHealth.type, 'ack');
   assert.equal(recoveredHealth.payload.requestType, 'health');
+  assert.equal(recoveredHealth.payload.result.deduplicated, true);
+
+  await assert.rejects(
+    client.request('health', { different: true }, { idempotencyKey: 'health-smoke-1', retryable: false }),
+    (error) => error.code === 'TRANSPORT_IDEMPOTENCY_CONFLICT'
+  );
   assert.ok(states.some((change) => change.state === 'reconnecting'));
   assert.ok(states.filter((change) => change.state === 'connected').length >= 2);
 

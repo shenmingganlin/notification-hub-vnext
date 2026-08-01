@@ -1,3 +1,6 @@
+import { dirname } from 'node:path';
+import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
+
 import { PROTOCOL_VERSION } from '../protocol/index.js';
 
 export const RECOVERY_SNAPSHOT_VERSION = 1;
@@ -99,4 +102,49 @@ export function parseRecoverySnapshot(serialized) {
     });
   }
   return validateRecoverySnapshot(snapshot);
+}
+
+export async function saveRecoverySnapshot(snapshot, filePath) {
+  validateRecoverySnapshot(snapshot);
+  if (typeof filePath !== 'string' || filePath.trim().length === 0) {
+    throw recoveryError('RUNTIME_RECOVERY_PATH_INVALID', 'Recovery snapshot path must be a non-empty string');
+  }
+
+  const temporaryPath = `${filePath}.tmp-${process.pid}-${Date.now()}`;
+  try {
+    await mkdir(dirname(filePath), { recursive: true });
+    await writeFile(temporaryPath, `${serializeRecoverySnapshot(snapshot)}\n`, 'utf8');
+    try {
+      await rename(temporaryPath, filePath);
+    } catch (error) {
+      if (!['EEXIST', 'EPERM', 'ENOTEMPTY'].includes(error.code)) throw error;
+      await rm(filePath, { force: true });
+      await rename(temporaryPath, filePath);
+    }
+  } catch (error) {
+    await rm(temporaryPath, { force: true }).catch(() => {});
+    if (error.code?.startsWith('RUNTIME_RECOVERY_')) throw error;
+    throw recoveryError('RUNTIME_RECOVERY_PERSIST_FAILED', 'Failed to persist recovery snapshot', {
+      path: filePath,
+      cause: error.message,
+      code: error.code
+    });
+  }
+  return filePath;
+}
+
+export async function loadRecoverySnapshot(filePath) {
+  if (typeof filePath !== 'string' || filePath.trim().length === 0) {
+    throw recoveryError('RUNTIME_RECOVERY_PATH_INVALID', 'Recovery snapshot path must be a non-empty string');
+  }
+  try {
+    return parseRecoverySnapshot(await readFile(filePath, 'utf8'));
+  } catch (error) {
+    if (error.code?.startsWith('RUNTIME_RECOVERY_')) throw error;
+    throw recoveryError('RUNTIME_RECOVERY_LOAD_FAILED', 'Failed to load recovery snapshot', {
+      path: filePath,
+      cause: error.message,
+      code: error.code
+    });
+  }
 }

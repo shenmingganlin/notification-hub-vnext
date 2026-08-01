@@ -55,6 +55,8 @@ public:
                 if (!parse_string(result.message.type)) return fail("PROTOCOL_INVALID_MESSAGE", "type must be a string");
             } else if (name == "timestamp") {
                 if (!parse_string(result.message.timestamp)) return fail("PROTOCOL_INVALID_MESSAGE", "timestamp must be a string");
+            } else if (name == "idempotencyKey") {
+                if (!parse_string(result.message.idempotency_key)) return fail("PROTOCOL_INVALID_MESSAGE", "idempotencyKey must be a string");
             } else if (name == "payload") {
                 if (!parse_raw_value(result.message.payload_json)) return fail("PROTOCOL_INVALID_PAYLOAD", "payload must be valid JSON");
             } else {
@@ -74,6 +76,9 @@ public:
             return fail("PROTOCOL_INVALID_MESSAGE", "requestId and traceId must be non-empty");
         }
         if (result.message.timestamp.empty()) return fail("PROTOCOL_INVALID_MESSAGE", "timestamp must be non-empty");
+        if (!result.message.idempotency_key.empty() && result.message.idempotency_key.find_first_not_of(" \t\r\n") == std::string::npos) {
+            return fail("PROTOCOL_INVALID_MESSAGE", "idempotencyKey must be non-empty");
+        }
         if (!contains(kMessageTypes, result.message.type)) return fail("PROTOCOL_UNKNOWN_TYPE", "unknown message type: " + result.message.type);
         if (result.message.payload_json.empty() || result.message.payload_json.front() != '{') {
             return fail("PROTOCOL_INVALID_PAYLOAD", "payload must be an object");

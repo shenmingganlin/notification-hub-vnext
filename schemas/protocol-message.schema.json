@@ -49,6 +49,10 @@
     },
     "payload": {
       "type": "object"
+    },
+    "idempotencyKey": {
+      "type": "string",
+      "minLength": 1
     }
   }
 }
