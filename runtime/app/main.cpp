@@ -2,6 +2,7 @@
 #include "../protocol/message.hpp"
 #include "../transport/frame.hpp"
 #include "../transport/named_pipe.hpp"
+#include "../scene/window.hpp"
 
 #include <iostream>
 #include <string_view>
@@ -17,6 +18,8 @@ using notification_hub::transport::FrameDecoder;
 using notification_hub::transport::FrameStatus;
 using notification_hub::transport::encode_frame;
 using notification_hub::transport::run_named_pipe_server;
+using notification_hub::scene::SceneWindow;
+using notification_hub::scene::WindowConfig;
 
 constexpr std::string_view kTimestamp = "2026-08-01T00:00:00.000Z";
 
@@ -83,6 +86,41 @@ bool transport_self_test() {
     return true;
 }
 
+bool window_self_test() {
+#ifndef _WIN32
+    std::cerr << "WINDOW_UNSUPPORTED: Native Scene Window requires Windows\\n";
+    return false;
+#else
+    SceneWindow window(WindowConfig{L"Notification Hub Self Test", 320, 120, true});
+    if (!window.create()) {
+        const auto event = create_event(
+            "window-self-test", "renderer-created", "RENDERER_WINDOW_CREATE_FAILED", "error", false,
+            "Native scene window creation failed", std::string(kTimestamp));
+        std::cerr << serialize_jsonl(event);
+        return false;
+    }
+    if (!window.show()) {
+        const auto event = create_event(
+            "window-self-test", "shown", "RENDERER_WINDOW_SHOW_FAILED", "error", false,
+            "Native scene window show failed", std::string(kTimestamp));
+        std::cerr << serialize_jsonl(event);
+        return false;
+    }
+    if (window.run_message_pump(true) != 0 || window.is_created()) {
+        const auto event = create_event(
+            "window-self-test", "dismissed", "RENDERER_WINDOW_CLOSE_FAILED", "error", false,
+            "Native scene window did not close cleanly", std::string(kTimestamp));
+        std::cerr << serialize_jsonl(event);
+        return false;
+    }
+    const auto event = create_event(
+        "window-self-test", "dismissed", "RENDERER_WINDOW_LIFECYCLE_OK", "info", true,
+        "Native scene window lifecycle completed", std::string(kTimestamp));
+    std::cout << serialize_jsonl(event);
+    return true;
+#endif
+}
+
 bool protocol_self_test() {
     constexpr std::string_view hello =
         R"({"protocolVersion":1,"requestId":"req-test","traceId":"trace-test","type":"hello","timestamp":"2026-08-01T00:00:00.000Z","payload":{"clientVersion":"test"}})";
@@ -142,6 +180,11 @@ int main(int argc, char** argv) {
     if (argc > 1 && std::string_view(argv[1]) == "--transport-self-test") {
         const bool passed = transport_self_test();
         std::cout << "notification-hub-runtime transport self-test: " << (passed ? "ok" : "failed") << "\n";
+        return passed ? 0 : 1;
+    }
+    if (argc > 1 && std::string_view(argv[1]) == "--window-self-test") {
+        const bool passed = window_self_test();
+        std::cout << "notification-hub-runtime window self-test: " << (passed ? "ok" : "failed") << "\n";
         return passed ? 0 : 1;
     }
     if (argc > 2 && std::string_view(argv[1]) == "--pipe-server") {
