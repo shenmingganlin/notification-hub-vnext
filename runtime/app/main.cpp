@@ -1,5 +1,6 @@
 #include "../diagnostics/event.hpp"
 #include "../protocol/message.hpp"
+#include "../transport/frame.hpp"
 
 #include <iostream>
 #include <string_view>
@@ -11,6 +12,9 @@ using notification_hub::diagnostics::serialize_jsonl;
 using notification_hub::protocol::Message;
 using notification_hub::protocol::parse_message;
 using notification_hub::protocol::serialize_ack;
+using notification_hub::transport::FrameDecoder;
+using notification_hub::transport::FrameStatus;
+using notification_hub::transport::encode_frame;
 
 constexpr std::string_view kTimestamp = "2026-08-01T00:00:00.000Z";
 
@@ -29,6 +33,51 @@ bool expect_rejected(std::string_view input, std::string_view expected_code) {
         std::cerr << "expected rejection code " << expected_code << "\n";
         return false;
     }
+    return true;
+}
+
+bool transport_self_test() {
+    const auto encoded = encode_frame("hello-frame");
+    if (!encoded.ok || encoded.bytes.size() != 4 + 11) {
+        std::cerr << "frame encoding failed\n";
+        return false;
+    }
+
+    FrameDecoder decoder;
+    decoder.append(std::string_view(reinterpret_cast<const char*>(encoded.bytes.data()), 2));
+    if (decoder.next().status != FrameStatus::NeedMoreData) return false;
+    decoder.append(std::string_view(reinterpret_cast<const char*>(encoded.bytes.data() + 2), encoded.bytes.size() - 2));
+    const auto first = decoder.next();
+    if (first.status != FrameStatus::Ready || first.payload != "hello-frame") {
+        std::cerr << "fragmented frame decoding failed\n";
+        return false;
+    }
+
+    const auto second = encode_frame("second-frame");
+    decoder.append(std::string_view(reinterpret_cast<const char*>(second.bytes.data()), second.bytes.size()));
+    const auto second_result = decoder.next();
+    if (second_result.status != FrameStatus::Ready || second_result.payload != "second-frame") {
+        std::cerr << "coalesced frame decoding failed\n";
+        return false;
+    }
+
+    const auto empty = encode_frame("");
+    if (empty.ok || empty.code != "TRANSPORT_FRAME_EMPTY") return false;
+
+    std::string oversized(notification_hub::transport::kMaxFramePayloadBytes + 1, 'x');
+    const auto too_large = encode_frame(oversized);
+    if (too_large.ok || too_large.code != "TRANSPORT_FRAME_TOO_LARGE") return false;
+
+    decoder.append(std::string_view("\x05\0\0\0ab", 6));
+    if (decoder.finish().code != "TRANSPORT_FRAME_TRUNCATED") {
+        std::cerr << "truncated frame rejection failed\n";
+        return false;
+    }
+
+    decoder.append(std::string_view("\0\0\0\0", 4));
+    if (decoder.next().code != "TRANSPORT_FRAME_EMPTY") return false;
+    decoder.append(std::string_view("\x01\x00\x10\0", 4));
+    if (decoder.next().code != "TRANSPORT_FRAME_TOO_LARGE") return false;
     return true;
 }
 
@@ -86,6 +135,11 @@ int main(int argc, char** argv) {
     if (argc > 1 && std::string_view(argv[1]) == "--protocol-self-test") {
         const bool passed = protocol_self_test();
         std::cout << "notification-hub-runtime protocol self-test: " << (passed ? "ok" : "failed") << "\n";
+        return passed ? 0 : 1;
+    }
+    if (argc > 1 && std::string_view(argv[1]) == "--transport-self-test") {
+        const bool passed = transport_self_test();
+        std::cout << "notification-hub-runtime transport self-test: " << (passed ? "ok" : "failed") << "\n";
         return passed ? 0 : 1;
     }
 

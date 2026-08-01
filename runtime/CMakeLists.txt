@@ -2,6 +2,7 @@ add_executable(notification-hub-runtime
   app/main.cpp
   diagnostics/event.cpp
   protocol/message.cpp
+  transport/frame.cpp
 )
 
 target_include_directories(notification-hub-runtime PRIVATE
@@ -16,3 +17,4 @@ target_compile_definitions(notification-hub-runtime PRIVATE
 
 add_test(NAME runtime_smoke COMMAND notification-hub-runtime --self-test)
 add_test(NAME runtime_protocol_self_test COMMAND notification-hub-runtime --protocol-self-test)
+add_test(NAME runtime_transport_self_test COMMAND notification-hub-runtime --transport-self-test)
