@@ -27,4 +27,6 @@
 - [x] 覆盖 SceneState 优先、版本失败 fallback、文件缺失 fallback、双源失败。
 - [x] Node check、36 项 Node 测试（31 passed、5 skipped）通过。
 - [ ] 由插件宿主提供实际 SceneState 文件路径并接入启动配置。
-- [ ] 设计 SceneState 持久化写入时机和原子替换策略。
+- [x] 建立独立 SceneState 原子持久化基础设施；写入失败时保留原目标文件。
+- [ ] 由插件宿主提供实际 SceneState 文件路径并接入启动配置。
+- [ ] 设计 SceneState 持久化写入时机和节流策略。

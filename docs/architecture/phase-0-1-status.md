@@ -39,6 +39,7 @@
 - 新增版本化 `SceneState` 快照契约：统一描述 Scene 窗口、显式 `cardOrder`、卡片集合、active layout 和 work area 元数据；Runtime 在 ACK/health 中以 `sceneStateSnapshot` 只读回显该规范状态，旧版 recovery command replay 保持不变。
 - 新增只读 `SceneState → recovery entries` 投影：按窗口、布局、`cardOrder` 生成旧协议命令；Provider 工作区让 Runtime 重新查询，旧协议无法表达的非零显式工作区原点明确拒绝。
 - 新增 SceneState 优先、旧 recovery snapshot fallback 的恢复计划选择器；`RuntimeProcessManager` 可选接收 SceneState，旧入口与 replay 顺序保持兼容，fallback 以结构化 diagnostic 暴露。
+- 新增独立 SceneState 原子持久化 store：校验后写入临时文件，替换失败时尝试恢复旧目标；当前不猜测路径、不接入 Runtime 生命周期。
 - 重启后按快照顺序重放恢复命令，并对失败停止后续恢复、输出结构化诊断。
 - 协议 envelope 增加可选 `idempotencyKey`，Runtime 对重复请求去重并拒绝同 key 不同内容的冲突请求。
 - 建立最小 Win32 Scene Window，支持 Per-Monitor V2 DPI、非激活显示、消息泵、自动关闭和生命周期诊断。
@@ -80,4 +81,4 @@ ctest --preset debug-vs2026
 
 ## 下一步
 
-继续收口 shelf 的视觉与交互边界，并由插件宿主接入 SceneState 快照文件路径与持久化时机；迁移前仍需定义派生几何与可重建输入的分离。真实多显示器拓扑、显示器热插拔刷新和多显示器 DPI 拖动验证仍待完成。
+继续收口 shelf 的视觉与交互边界，并由插件宿主接入 SceneState 快照文件路径、写入节流和生命周期；迁移前仍需定义派生几何与可重建输入的分离。真实多显示器拓扑、显示器热插拔刷新和多显示器 DPI 拖动验证仍待完成。
