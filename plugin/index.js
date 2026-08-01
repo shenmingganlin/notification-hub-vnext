@@ -12,3 +12,4 @@ export * from './protocol/index.js';
 export * from './diagnostics/index.js';
 export * from './diagnostics/error-codes.js';
 export * from './runtime/pipe-client.js';
+export * from './runtime/process-manager.js';

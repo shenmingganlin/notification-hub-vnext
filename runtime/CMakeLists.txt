@@ -26,7 +26,11 @@ if (NODE_EXECUTABLE)
     NAME runtime_named_pipe_smoke
     COMMAND "${NODE_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/node/named-pipe-smoke.test.mjs" "$<TARGET_FILE:notification-hub-runtime>"
   )
-  set_tests_properties(runtime_named_pipe_smoke PROPERTIES
+  add_test(
+    NAME runtime_process_manager_smoke
+    COMMAND "${NODE_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/node/runtime-process-manager-smoke.test.mjs" "$<TARGET_FILE:notification-hub-runtime>"
+  )
+  set_tests_properties(runtime_named_pipe_smoke runtime_process_manager_smoke PROPERTIES
     WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
   )
 endif()

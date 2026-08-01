@@ -48,10 +48,11 @@ void close_pipe(HANDLE pipe) {
 
 }  // namespace
 
-int run_named_pipe_server(std::string_view pipe_name, bool drop_after_health) {
+int run_named_pipe_server(std::string_view pipe_name, bool drop_after_health, bool exit_after_health) {
 #ifndef _WIN32
     static_cast<void>(pipe_name);
     static_cast<void>(drop_after_health);
+    static_cast<void>(exit_after_health);
     std::cerr << "TRANSPORT_PIPE_UNSUPPORTED: Named Pipe server requires Windows\n";
     return 2;
 #else
@@ -145,6 +146,11 @@ int run_named_pipe_server(std::string_view pipe_name, bool drop_after_health) {
                 }
                 if (drop_after_health && !injected_drop && parsed.message.type == "health") {
                     injected_drop = true;
+                    session_finished = true;
+                    break;
+                }
+                if (exit_after_health && parsed.message.type == "health") {
+                    shutdown_requested = true;
                     session_finished = true;
                     break;
                 }
