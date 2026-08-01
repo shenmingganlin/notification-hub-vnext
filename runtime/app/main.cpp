@@ -36,6 +36,7 @@ using notification_hub::scene::StackCardInput;
 using notification_hub::scene::StackDirection;
 using notification_hub::scene::StackLayoutOptions;
 using notification_hub::scene::layout_stack;
+using notification_hub::scene::layout_shelf;
 using notification_hub::scene::fallback_work_area;
 using notification_hub::scene::valid_work_area;
 using notification_hub::scene::query_primary_work_area;
@@ -267,9 +268,38 @@ bool layout_self_test() {
         {}, StackLayoutOptions{StackDirection::Down, StackAnchor::TopLeft, 0, 500, 300, 1.0f});
     if (!empty.ok || !empty.placements.empty()) return false;
 
+    const auto shelf_top = layout_shelf(
+        {{"a", 100, 40}, {"b", 120, 60}},
+        StackLayoutOptions{StackDirection::Right, StackAnchor::TopLeft, 10, 500, 300, 1.0f});
+    if (!shelf_top.ok || shelf_top.placements.size() != 2
+        || shelf_top.placements[0].x != 0 || shelf_top.placements[0].y != 0
+        || shelf_top.placements[1].x != 110 || shelf_top.placements[1].y != 0) return false;
+
+    const auto shelf_bottom = layout_shelf(
+        {{"a", 100, 40}, {"b", 120, 60}},
+        StackLayoutOptions{StackDirection::Left, StackAnchor::BottomRight, 10, 500, 300, 1.0f});
+    if (!shelf_bottom.ok || shelf_bottom.placements.size() != 2
+        || shelf_bottom.placements[0].x != 400 || shelf_bottom.placements[0].y != 260
+        || shelf_bottom.placements[1].x != 270 || shelf_bottom.placements[1].y != 240) return false;
+
+    const auto shelf_invalid_direction = layout_shelf(
+        {{"a", 100, 40}},
+        StackLayoutOptions{StackDirection::Down, StackAnchor::TopLeft, 0, 500, 300, 1.0f});
+    if (shelf_invalid_direction.ok || shelf_invalid_direction.code != "LAYOUT_SHELF_DIRECTION_INVALID") return false;
+
+    const auto shelf_too_large = layout_shelf(
+        {{"large", 600, 40}},
+        StackLayoutOptions{StackDirection::Right, StackAnchor::TopLeft, 0, 500, 300, 1.0f});
+    if (shelf_too_large.ok || shelf_too_large.code != "LAYOUT_SHELF_OUT_OF_BOUNDS") return false;
+
+    const auto shelf_origin = layout_shelf(
+        {{"origin", 100, 40}},
+        StackLayoutOptions{StackDirection::Right, StackAnchor::TopLeft, 0, 500, 300, 1.0f, 40, 50});
+    if (!shelf_origin.ok || shelf_origin.placements[0].x != 40 || shelf_origin.placements[0].y != 50) return false;
+
     const auto event = create_event(
-        "layout-self-test", "layout-planned", "LAYOUT_STACK_OK", "info", true,
-        "Deterministic stack layout calculation completed", std::string(kTimestamp));
+        "layout-self-test", "layout-planned", "LAYOUT_STACK_SHELF_OK", "info", true,
+        "Deterministic stack and shelf layout calculation completed", std::string(kTimestamp));
     std::cout << serialize_jsonl(event);
     return true;
 }

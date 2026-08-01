@@ -290,12 +290,13 @@ bool parse_scene_mode_payload(std::string_view payload, scene::StackLayoutOption
         && seen_dpi_scale;
     if (position != payload.size() || !seen_layout || !seen_direction || !seen_anchor
         || !seen_spacing || (any_work_area_override && !complete_work_area_override)
-        || layout != "stack") return false;
+        || (layout != "stack" && layout != "shelf")) return false;
     if (direction == "down") options.direction = scene::StackDirection::Down;
     else if (direction == "up") options.direction = scene::StackDirection::Up;
     else if (direction == "right") options.direction = scene::StackDirection::Right;
     else if (direction == "left") options.direction = scene::StackDirection::Left;
     else return false;
+    options.mode = layout == "shelf" ? scene::LayoutMode::Shelf : scene::LayoutMode::Stack;
     if (anchor == "top-left") options.anchor = scene::StackAnchor::TopLeft;
     else if (anchor == "top-right") options.anchor = scene::StackAnchor::TopRight;
     else if (anchor == "bottom-left") options.anchor = scene::StackAnchor::BottomLeft;
@@ -442,7 +443,7 @@ int run_named_pipe_server(std::string_view pipe_name, bool drop_after_health, bo
                         is_card_command
                             ? "scene card payload is invalid"
                             : (is_layout_command
-                                ? "scene.set-mode requires a valid stack layout payload"
+                                ? "scene.set-mode requires a valid stack or shelf layout payload"
                                 : "scene.update requires integer x, y, width, and height"),
                         parsed.message.request_id,
                         parsed.message.trace_id

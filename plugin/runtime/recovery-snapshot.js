@@ -70,13 +70,13 @@ function validateSceneModePayload(payload) {
   const overrideFields = ['workAreaWidth', 'workAreaHeight', 'dpiScale'];
   const hasAnyOverride = overrideFields.some((field) => field in payload);
   const hasCompleteOverride = overrideFields.every((field) => field in payload);
-  if (payload.layout !== 'stack' || !directions.has(payload.direction) || !anchors.has(payload.anchor)
+  if (!['stack', 'shelf'].includes(payload.layout) || !directions.has(payload.direction) || !anchors.has(payload.anchor)
     || !Number.isInteger(payload.spacing) || payload.spacing < 0
     || (hasAnyOverride && !hasCompleteOverride)
     || (hasCompleteOverride && (!Number.isInteger(payload.workAreaWidth) || payload.workAreaWidth <= 0
       || !Number.isInteger(payload.workAreaHeight) || payload.workAreaHeight <= 0
       || typeof payload.dpiScale !== 'number' || !Number.isFinite(payload.dpiScale) || payload.dpiScale <= 0))) {
-    throw recoveryError('RUNTIME_RECOVERY_INVALID_PAYLOAD', 'scene.set-mode requires a valid stack layout payload');
+    throw recoveryError('RUNTIME_RECOVERY_INVALID_PAYLOAD', 'scene.set-mode requires a valid stack or shelf layout payload');
   }
   return payload;
 }

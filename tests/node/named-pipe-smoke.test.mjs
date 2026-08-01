@@ -163,6 +163,17 @@ test('Node client completes hello, health, and shutdown over Named Pipe', async 
   ));
   assert.equal(typeof providerStackedCard.payload.result.workArea.isFallback, 'boolean');
 
+  const shelfCard = await client.request('scene.set-mode', {
+    layout: 'shelf',
+    direction: 'right',
+    anchor: 'bottom-left',
+    spacing: 12
+  }, { retryable: false, idempotencyKey: 'scene-shelf-provider-1' });
+  assert.equal(shelfCard.type, 'ack');
+  assert.equal(shelfCard.payload.result.sceneCards[0].x, 0);
+  assert.ok(shelfCard.payload.result.sceneCards[0].y >= 0);
+  assert.ok(shelfCard.payload.result.workArea.width > 0);
+
   const stackedCard = await client.request('scene.set-mode', {
     layout: 'stack',
     direction: 'down',
@@ -210,6 +221,19 @@ test('Node client completes hello, health, and shutdown over Named Pipe', async 
       workAreaWidth: 800
     }, { retryable: false }),
     (error) => error.code === 'LAYOUT_INVALID'
+  );
+
+  await assert.rejects(
+    client.request('scene.set-mode', {
+      layout: 'shelf',
+      direction: 'right',
+      anchor: 'top-left',
+      spacing: 12,
+      workAreaWidth: 100,
+      workAreaHeight: 100,
+      dpiScale: 1
+    }, { retryable: false }),
+    (error) => error.code === 'LAYOUT_SHELF_OUT_OF_BOUNDS'
   );
 
   const shutdown = await client.request('shutdown');

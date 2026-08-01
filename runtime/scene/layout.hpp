@@ -19,6 +19,11 @@ enum class StackAnchor {
     BottomRight
 };
 
+enum class LayoutMode {
+    Stack,
+    Shelf
+};
+
 struct StackCardInput {
     std::string id;
     int width{};
@@ -36,6 +41,7 @@ struct StackLayoutOptions {
     int work_area_top{};
     bool work_area_is_fallback{};
     std::string work_area_source;
+    LayoutMode mode{LayoutMode::Stack};
 };
 
 struct StackCardPlacement {
@@ -55,6 +61,10 @@ struct StackLayoutResult {
 };
 
 StackLayoutResult layout_stack(
+    const std::vector<StackCardInput>& cards,
+    const StackLayoutOptions& options);
+
+StackLayoutResult layout_shelf(
     const std::vector<StackCardInput>& cards,
     const StackLayoutOptions& options);
 

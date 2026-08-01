@@ -286,9 +286,14 @@ bool RuntimeSceneController::apply_stack_layout(
         options.work_area_is_fallback = effective_work_area.is_fallback;
     }
 
+    const auto apply_layout = [&](const std::vector<StackCardInput>& cards) {
+        return options.mode == LayoutMode::Shelf
+            ? layout_shelf(cards, options)
+            : layout_stack(cards, options);
+    };
     std::vector<StackCardInput> inputs;
     if (impl_->card_order.empty()) {
-        const auto layout = layout_stack(inputs, options);
+        const auto layout = apply_layout(inputs);
         if (!layout.ok) {
             error_code = layout.code;
             error_message = layout.message;
@@ -307,7 +312,7 @@ bool RuntimeSceneController::apply_stack_layout(
             card_it->second.layout_width > 0 ? card_it->second.layout_width : card_it->second.window.width,
             card_it->second.layout_height > 0 ? card_it->second.layout_height : card_it->second.window.height});
     }
-    const auto layout = layout_stack(inputs, options);
+    const auto layout = apply_layout(inputs);
     if (!layout.ok) {
         error_code = layout.code;
         error_message = layout.message;

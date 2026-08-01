@@ -47,6 +47,16 @@ test('recovery snapshot persists atomically and validates on load', async () => 
       }
     });
     addRecoveryEntry(snapshot, {
+      key: 'shelf-mode',
+      type: 'scene.set-mode',
+      payload: {
+        layout: 'shelf',
+        direction: 'right',
+        anchor: 'bottom-left',
+        spacing: 10
+      }
+    });
+    addRecoveryEntry(snapshot, {
       key: 'window',
       type: 'scene.update',
       payload: { x: 120, y: 80, width: 420, height: 180 }

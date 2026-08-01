@@ -137,4 +137,23 @@ StackLayoutResult layout_stack(
     return result;
 }
 
+StackLayoutResult layout_shelf(
+    const std::vector<StackCardInput>& cards,
+    const StackLayoutOptions& options) {
+    if (options.direction != StackDirection::Right && options.direction != StackDirection::Left) {
+        return failure(
+            "LAYOUT_SHELF_DIRECTION_INVALID",
+            "Shelf layout direction must be right or left");
+    }
+
+    auto shelf_options = options;
+    shelf_options.mode = LayoutMode::Shelf;
+    auto result = layout_stack(cards, shelf_options);
+    if (!result.ok && result.code == "LAYOUT_CARD_OUT_OF_BOUNDS") {
+        result.code = "LAYOUT_SHELF_OUT_OF_BOUNDS";
+        result.message = "Shelf cards exceed the work area width";
+    }
+    return result;
+}
+
 }  // namespace notification_hub::scene
