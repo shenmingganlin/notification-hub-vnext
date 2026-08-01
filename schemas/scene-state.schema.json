@@ -1,0 +1,144 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://notification-hub-vnext.local/schemas/scene-state.schema.json",
+  "title": "Notification Hub vNext SceneState snapshot",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "sceneStateVersion",
+    "protocolVersion",
+    "updatedAt",
+    "sceneWindow",
+    "cardOrder",
+    "cards",
+    "layout"
+  ],
+  "properties": {
+    "sceneStateVersion": {
+      "const": 1
+    },
+    "protocolVersion": {
+      "const": 1
+    },
+    "updatedAt": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "sceneWindow": {
+      "$ref": "#/$defs/geometry"
+    },
+    "cardOrder": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "cards": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/card"
+      },
+      "$comment": "Card id uniqueness and exact correspondence with cardOrder are enforced by the Node validator."
+    },
+    "layout": {
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "$ref": "#/$defs/layout"
+        }
+      ]
+    }
+  },
+  "$defs": {
+    "geometry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["x", "y", "width", "height"],
+      "properties": {
+        "x": { "type": "integer" },
+        "y": { "type": "integer" },
+        "width": { "type": "integer", "minimum": 1, "maximum": 10000 },
+        "height": { "type": "integer", "minimum": 1, "maximum": 10000 }
+      }
+    },
+    "card": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "title", "body", "x", "y", "width", "height"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "title": { "type": "string", "minLength": 1 },
+        "body": { "type": "string" },
+        "x": { "type": "integer" },
+        "y": { "type": "integer" },
+        "width": { "type": "integer", "minimum": 1, "maximum": 10000 },
+        "height": { "type": "integer", "minimum": 1, "maximum": 10000 }
+      }
+    },
+    "layout": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mode", "direction", "anchor", "spacing", "workArea"],
+      "properties": {
+        "mode": { "enum": ["stack", "shelf"] },
+        "direction": { "enum": ["down", "up", "left", "right"] },
+        "anchor": { "enum": ["top-left", "top-right", "bottom-left", "bottom-right"] },
+        "spacing": { "type": "integer", "minimum": 0 },
+        "workArea": { "$ref": "#/$defs/workArea" }
+      }
+    },
+    "workArea": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/providerWorkArea"
+        },
+        {
+          "$ref": "#/$defs/explicitWorkArea"
+        }
+      ]
+    },
+    "workAreaCommon": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["resolution", "left", "top", "width", "height", "dpiScale", "isFallback", "source"],
+      "properties": {
+        "resolution": { "enum": ["provider", "explicit"] },
+        "left": { "type": "integer" },
+        "top": { "type": "integer" },
+        "width": { "type": "integer", "minimum": 1 },
+        "height": { "type": "integer", "minimum": 1 },
+        "dpiScale": { "type": "number", "exclusiveMinimum": 0 },
+        "isFallback": { "type": "boolean" },
+        "source": { "type": "string", "minLength": 1 }
+      }
+    },
+    "providerWorkArea": {
+      "allOf": [
+        { "$ref": "#/$defs/workAreaCommon" },
+        {
+          "type": "object",
+          "properties": {
+            "resolution": { "const": "provider" },
+            "source": { "not": { "const": "explicit-override" } }
+          }
+        }
+      ]
+    },
+    "explicitWorkArea": {
+      "allOf": [
+        { "$ref": "#/$defs/workAreaCommon" },
+        {
+          "type": "object",
+          "properties": {
+            "resolution": { "const": "explicit" },
+            "source": { "const": "explicit-override" }
+          }
+        }
+      ]
+    }
+  }
+}
