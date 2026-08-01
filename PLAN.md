@@ -4,7 +4,7 @@
 >
 > 用途：在新对话、新工作区和 Git 初始化时，作为 notification-hub vNext 的共同基准。
 >
-> 当前阶段：Phase 0/1 已启动，正在建立工程骨架；协议、领域核心和 Runtime 尚未实现。
+> 当前阶段：Phase 2 正在推进；Node.js 协议与诊断契约已完成，Runtime 侧无窗口协议解析和诊断基础已完成，Named Pipe 尚未接入。
 >
 > 目标平台：Windows
 >
