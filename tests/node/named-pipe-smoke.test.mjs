@@ -89,6 +89,25 @@ test('Node client completes hello, health, and shutdown over Named Pipe', async 
   assert.ok(states.some((change) => change.state === 'reconnecting'));
   assert.ok(states.filter((change) => change.state === 'connected').length >= 2);
 
+  const sceneUpdate = await client.request('scene.update', {
+    x: 120,
+    y: 80,
+    width: 420,
+    height: 180
+  }, { retryable: false, idempotencyKey: 'scene-window-1' });
+  assert.equal(sceneUpdate.type, 'ack');
+  assert.deepEqual(sceneUpdate.payload.result.sceneState, {
+    x: 120,
+    y: 80,
+    width: 420,
+    height: 180
+  });
+
+  await assert.rejects(
+    client.request('scene.update', { x: 0, y: 0, width: 0, height: 180 }, { retryable: false }),
+    (error) => error.code === 'RUNTIME_SCENE_STATE_INVALID'
+  );
+
   const shutdown = await client.request('shutdown');
   assert.equal(shutdown.type, 'ack');
   assert.equal(shutdown.payload.requestType, 'shutdown');

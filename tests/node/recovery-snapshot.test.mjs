@@ -28,6 +28,11 @@ test('recovery snapshot persists atomically and validates on load', async () => 
       type: 'scene.set-mode',
       payload: { mode: 'quiet' }
     });
+    addRecoveryEntry(snapshot, {
+      key: 'window',
+      type: 'scene.update',
+      payload: { x: 120, y: 80, width: 420, height: 180 }
+    });
 
     await saveRecoverySnapshot(snapshot, filePath);
     const loaded = await loadRecoverySnapshot(filePath);
@@ -48,5 +53,13 @@ test('recovery snapshot rejects unsupported commands and malformed files', async
   assert.throws(
     () => parseRecoverySnapshot('{"recoveryVersion":99}'),
     (error) => error.code === 'RUNTIME_RECOVERY_VERSION_UNSUPPORTED'
+  );
+  assert.throws(
+    () => addRecoveryEntry(snapshot, {
+      key: 'invalid-window',
+      type: 'scene.update',
+      payload: { x: 0, y: 0, width: 0, height: 180 }
+    }),
+    (error) => error.code === 'RUNTIME_RECOVERY_INVALID_PAYLOAD'
   );
 });

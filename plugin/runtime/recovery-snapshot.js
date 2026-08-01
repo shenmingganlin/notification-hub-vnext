@@ -6,7 +6,8 @@ import { PROTOCOL_VERSION } from '../protocol/index.js';
 export const RECOVERY_SNAPSHOT_VERSION = 1;
 export const RECOVERABLE_COMMAND_TYPES = Object.freeze([
   'config.update',
-  'scene.set-mode'
+  'scene.set-mode',
+  'scene.update'
 ]);
 
 const RECOVERABLE_COMMAND_SET = new Set(RECOVERABLE_COMMAND_TYPES);
@@ -27,6 +28,17 @@ function cloneJson(value) {
       cause: error.message
     });
   }
+}
+
+function validateSceneUpdatePayload(payload) {
+  const fields = ['x', 'y', 'width', 'height'];
+  if (!fields.every((field) => Number.isInteger(payload[field]))) {
+    throw recoveryError('RUNTIME_RECOVERY_INVALID_PAYLOAD', 'scene.update requires integer x, y, width, and height');
+  }
+  if (payload.width <= 0 || payload.height <= 0 || payload.width > 10000 || payload.height > 10000) {
+    throw recoveryError('RUNTIME_RECOVERY_INVALID_PAYLOAD', 'scene.update width and height are outside the supported range');
+  }
+  return payload;
 }
 
 export function createRecoverySnapshot({ updatedAt = new Date().toISOString(), entries = [] } = {}) {
@@ -51,6 +63,7 @@ export function addRecoveryEntry(snapshot, { type, payload = {}, key = type } = 
   if (!isRecord(payload)) {
     throw recoveryError('RUNTIME_RECOVERY_INVALID_PAYLOAD', 'Recovery payload must be an object');
   }
+  if (type === 'scene.update') validateSceneUpdatePayload(payload);
 
   const entry = Object.freeze({ key, type, payload: Object.freeze(cloneJson(payload)) });
   const existingIndex = snapshot.entries.findIndex((candidate) => candidate.key === key);
@@ -80,6 +93,7 @@ export function validateRecoverySnapshot(snapshot) {
     if (!isRecord(entry) || typeof entry.key !== 'string' || !RECOVERABLE_COMMAND_SET.has(entry.type) || !isRecord(entry.payload)) {
       throw recoveryError('RUNTIME_RECOVERY_INVALID_SNAPSHOT', 'Recovery snapshot contains an invalid entry');
     }
+    if (entry.type === 'scene.update') validateSceneUpdatePayload(entry.payload);
   }
   return snapshot;
 }

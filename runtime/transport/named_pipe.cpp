@@ -4,8 +4,11 @@
 #include "../protocol/message.hpp"
 #include "frame.hpp"
 
+#include <charconv>
+#include <cctype>
 #include <iostream>
 #include <string>
+#include <string_view>
 #include <unordered_map>
 #include <vector>
 
@@ -45,6 +48,98 @@ void close_pipe(HANDLE pipe) {
     CloseHandle(pipe);
 }
 
+struct SceneState {
+    int x{};
+    int y{};
+    int width{};
+    int height{};
+};
+
+bool parse_scene_update_payload(std::string_view payload, SceneState& state) {
+    size_t position = 0;
+    const auto skip_whitespace = [&]() {
+        while (position < payload.size() && std::isspace(static_cast<unsigned char>(payload[position]))) ++position;
+    };
+    const auto consume = [&](char expected) {
+        skip_whitespace();
+        if (position >= payload.size() || payload[position] != expected) return false;
+        ++position;
+        return true;
+    };
+    if (!consume('{')) return false;
+
+    bool seen_x = false;
+    bool seen_y = false;
+    bool seen_width = false;
+    bool seen_height = false;
+    while (true) {
+        skip_whitespace();
+        if (position < payload.size() && payload[position] == '}') {
+            ++position;
+            break;
+        }
+        if (position >= payload.size() || payload[position] != '"') return false;
+        ++position;
+        const auto key_start = position;
+        while (position < payload.size() && payload[position] != '"') ++position;
+        if (position >= payload.size()) return false;
+        const std::string_view key = payload.substr(key_start, position - key_start);
+        ++position;
+        if (!consume(':')) return false;
+        skip_whitespace();
+        const auto number_start = position;
+        if (position < payload.size() && payload[position] == '-') ++position;
+        const auto digits_start = position;
+        while (position < payload.size() && std::isdigit(static_cast<unsigned char>(payload[position]))) ++position;
+        if (digits_start == position) return false;
+        int value = 0;
+        const auto parsed = std::from_chars(
+            payload.data() + number_start,
+            payload.data() + position,
+            value);
+        if (parsed.ec != std::errc{} || parsed.ptr != payload.data() + position) return false;
+        if (key == "x" && !seen_x) {
+            state.x = value;
+            seen_x = true;
+        } else if (key == "y" && !seen_y) {
+            state.y = value;
+            seen_y = true;
+        } else if (key == "width" && !seen_width) {
+            state.width = value;
+            seen_width = true;
+        } else if (key == "height" && !seen_height) {
+            state.height = value;
+            seen_height = true;
+        } else {
+            return false;
+        }
+        skip_whitespace();
+        if (position < payload.size() && payload[position] == ',') {
+            ++position;
+            continue;
+        }
+        if (position < payload.size() && payload[position] == '}') {
+            ++position;
+            break;
+        }
+        return false;
+    }
+    skip_whitespace();
+    return position == payload.size()
+        && seen_x && seen_y && seen_width && seen_height
+        && state.width > 0 && state.width <= 10000
+        && state.height > 0 && state.height <= 10000;
+}
+
+std::string scene_state_result(const SceneState& state, bool deduplicated) {
+    return std::string("{\"status\":\"accepted\",\"deduplicated\":")
+        + (deduplicated ? "true" : "false")
+        + ",\"sceneState\":{\"x\":" + std::to_string(state.x)
+        + ",\"y\":" + std::to_string(state.y)
+        + ",\"width\":" + std::to_string(state.width)
+        + ",\"height\":" + std::to_string(state.height) + "}}";
+}
+
 #endif
 
 }  // namespace
@@ -61,6 +156,7 @@ int run_named_pipe_server(std::string_view pipe_name, bool drop_after_health, bo
     bool injected_drop = false;
     bool shutdown_requested = false;
     std::unordered_map<std::string, std::string> idempotency_cache;
+    SceneState scene_state{0, 0, 420, 180};
 
     while (!shutdown_requested) {
         HANDLE pipe = CreateNamedPipeW(
@@ -136,6 +232,22 @@ int run_named_pipe_server(std::string_view pipe_name, bool drop_after_health, bo
                     continue;
                 }
 
+                SceneState requested_scene_state = scene_state;
+                if (parsed.message.type == "scene.update"
+                    && !parse_scene_update_payload(parsed.message.payload_json, requested_scene_state)) {
+                    protocol::ProtocolError error{
+                        "RUNTIME_SCENE_STATE_INVALID",
+                        "scene.update requires integer x, y, width, and height",
+                        parsed.message.request_id,
+                        parsed.message.trace_id
+                    };
+                    if (!send_payload(pipe, protocol::serialize_error(error))) {
+                        close_pipe(pipe);
+                        return 10;
+                    }
+                    continue;
+                }
+
                 bool deduplicated = false;
                 if (!parsed.message.idempotency_key.empty()) {
                     const auto fingerprint = parsed.message.type + "|" + parsed.message.payload_json;
@@ -159,9 +271,16 @@ int run_named_pipe_server(std::string_view pipe_name, bool drop_after_health, bo
                         idempotency_cache.emplace(parsed.message.idempotency_key, fingerprint);
                     }
                 }
-                const auto result_json = deduplicated
+                if (parsed.message.type == "scene.update" && !deduplicated) {
+                    scene_state = requested_scene_state;
+                }
+                const auto generic_result = deduplicated
                     ? "{\"status\":\"accepted\",\"deduplicated\":true}"
                     : "{\"status\":\"accepted\",\"deduplicated\":false}";
+                const auto scene_result = scene_state_result(requested_scene_state, deduplicated);
+                const auto result_json = parsed.message.type == "scene.update"
+                    ? scene_result
+                    : std::string(generic_result);
                 if (!send_payload(pipe, protocol::serialize_ack(parsed.message, result_json))) {
                     std::cerr << "TRANSPORT_PIPE_WRITE_FAILED: " << GetLastError() << "\n";
                     close_pipe(pipe);
