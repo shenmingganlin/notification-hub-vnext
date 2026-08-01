@@ -33,6 +33,21 @@ test('recovery snapshot persists atomically and validates on load', async () => 
       type: 'scene.update',
       payload: { x: 120, y: 80, width: 420, height: 180 }
     });
+    addRecoveryEntry(snapshot, {
+      key: 'card-a',
+      type: 'scene.create',
+      payload: { id: 'card-a', title: 'Card A', body: 'First card', x: 140, y: 90, width: 320, height: 160 }
+    });
+    addRecoveryEntry(snapshot, {
+      key: 'card-b',
+      type: 'scene.create',
+      payload: { id: 'card-b', title: 'Card B', body: 'Second card', x: 500, y: 90, width: 320, height: 160 }
+    });
+    addRecoveryEntry(snapshot, {
+      key: 'card-b-dismiss',
+      type: 'scene.dismiss',
+      payload: { id: 'card-b' }
+    });
 
     await saveRecoverySnapshot(snapshot, filePath);
     const loaded = await loadRecoverySnapshot(filePath);
@@ -47,7 +62,7 @@ test('recovery snapshot persists atomically and validates on load', async () => 
 test('recovery snapshot rejects unsupported commands and malformed files', async () => {
   const snapshot = createRecoverySnapshot();
   assert.throws(
-    () => addRecoveryEntry(snapshot, { key: 'scene', type: 'scene.create', payload: {} }),
+    () => addRecoveryEntry(snapshot, { key: 'scene', type: 'scene.drag', payload: {} }),
     (error) => error.code === 'RUNTIME_RECOVERY_TYPE_UNSUPPORTED'
   );
   assert.throws(
@@ -59,6 +74,14 @@ test('recovery snapshot rejects unsupported commands and malformed files', async
       key: 'invalid-window',
       type: 'scene.update',
       payload: { x: 0, y: 0, width: 0, height: 180 }
+    }),
+    (error) => error.code === 'RUNTIME_RECOVERY_INVALID_PAYLOAD'
+  );
+  assert.throws(
+    () => addRecoveryEntry(snapshot, {
+      key: 'invalid-card',
+      type: 'scene.create',
+      payload: { id: 'card', title: '', x: 0, y: 0, width: 320, height: 160 }
     }),
     (error) => error.code === 'RUNTIME_RECOVERY_INVALID_PAYLOAD'
   );

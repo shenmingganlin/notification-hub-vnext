@@ -25,6 +25,21 @@ test('RuntimeProcessManager restarts Runtime after a controlled exit', async (t)
     type: 'scene.update',
     payload: { x: 137, y: 83, width: 500, height: 220 }
   });
+  addRecoveryEntry(recoverySnapshot, {
+    key: 'card-a',
+    type: 'scene.create',
+    payload: { id: 'card-a', title: 'Card A', body: 'First card', x: 140, y: 90, width: 320, height: 160 }
+  });
+  addRecoveryEntry(recoverySnapshot, {
+    key: 'card-b',
+    type: 'scene.create',
+    payload: { id: 'card-b', title: 'Card B', body: 'Second card', x: 500, y: 90, width: 320, height: 160 }
+  });
+  addRecoveryEntry(recoverySnapshot, {
+    key: 'card-b-dismiss',
+    type: 'scene.dismiss',
+    payload: { id: 'card-b' }
+  });
   const manager = new RuntimeProcessManager({
     runtimePath,
     pipeName,
@@ -64,14 +79,20 @@ test('RuntimeProcessManager restarts Runtime after a controlled exit', async (t)
   assert.equal(firstHealth.type, 'ack');
 
   await new Promise((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error(`Runtime did not restart; states=${JSON.stringify(managerStates)}`)), 2500);
+    const timer = setTimeout(() => {
+      clearInterval(poll);
+      reject(new Error(`Runtime did not restart; states=${JSON.stringify(managerStates)}`));
+    }, 2500);
     const check = () => {
       if (!managerStates.some((change) => change.state === 'crashed')) return;
       if (!managerStates.some((change) => change.state === 'running' && change.reason === 'ready')) return;
+      if (recoveryEvents.length !== 5) return;
       clearTimeout(timer);
+      clearInterval(poll);
       manager.off('state', check);
       resolve();
     };
+    const poll = setInterval(check, 10);
     manager.on('state', check);
     check();
   });
@@ -79,15 +100,21 @@ test('RuntimeProcessManager restarts Runtime after a controlled exit', async (t)
   const recoveredHealth = await client.request('health');
   assert.equal(recoveredHealth.type, 'ack');
   assert.equal(recoveredHealth.payload.requestType, 'health');
-  assert.equal(recoveryEvents.length, 2);
-  assert.equal(recoveryEvents[0].key, 'runtime-config');
-  assert.equal(recoveryEvents[1].key, 'scene-window');
+  assert.equal(recoveryEvents.length, 5);
+  assert.deepEqual(recoveryEvents.map((event) => event.key), [
+    'runtime-config',
+    'scene-window',
+    'card-a',
+    'card-b',
+    'card-b-dismiss'
+  ]);
   assert.deepEqual(recoveredHealth.payload.result.sceneState, {
     x: 137,
     y: 83,
     width: 500,
     height: 220
   });
+  assert.deepEqual(recoveredHealth.payload.result.sceneCards.map((card) => card.id), ['card-a']);
   assert.ok(clientStates.some((change) => change.state === 'reconnecting'));
   assert.ok(managerStates.some((change) => change.state === 'starting'));
   assert.ok(managerStates.some((change) => change.state === 'crashed'));

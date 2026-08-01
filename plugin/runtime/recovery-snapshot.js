@@ -7,7 +7,9 @@ export const RECOVERY_SNAPSHOT_VERSION = 1;
 export const RECOVERABLE_COMMAND_TYPES = Object.freeze([
   'config.update',
   'scene.set-mode',
-  'scene.update'
+  'scene.create',
+  'scene.update',
+  'scene.dismiss'
 ]);
 
 const RECOVERABLE_COMMAND_SET = new Set(RECOVERABLE_COMMAND_TYPES);
@@ -30,13 +32,34 @@ function cloneJson(value) {
   }
 }
 
-function validateSceneUpdatePayload(payload) {
+function validateWindowGeometry(payload, type = 'scene.update') {
   const fields = ['x', 'y', 'width', 'height'];
   if (!fields.every((field) => Number.isInteger(payload[field]))) {
-    throw recoveryError('RUNTIME_RECOVERY_INVALID_PAYLOAD', 'scene.update requires integer x, y, width, and height');
+    throw recoveryError('RUNTIME_RECOVERY_INVALID_PAYLOAD', `${type} requires integer x, y, width, and height`);
   }
   if (payload.width <= 0 || payload.height <= 0 || payload.width > 10000 || payload.height > 10000) {
-    throw recoveryError('RUNTIME_RECOVERY_INVALID_PAYLOAD', 'scene.update width and height are outside the supported range');
+    throw recoveryError('RUNTIME_RECOVERY_INVALID_PAYLOAD', `${type} width and height are outside the supported range`);
+  }
+}
+
+function validateSceneCardPayload(payload, type) {
+  if (typeof payload.id !== 'string' || payload.id.trim().length === 0
+    || typeof payload.title !== 'string' || payload.title.trim().length === 0) {
+    throw recoveryError('RUNTIME_RECOVERY_INVALID_PAYLOAD', `${type} requires non-empty id and title`);
+  }
+  validateWindowGeometry(payload, type);
+  return payload;
+}
+
+function validateSceneUpdatePayload(payload) {
+  if ('id' in payload) return validateSceneCardPayload(payload, 'scene.update');
+  validateWindowGeometry(payload);
+  return payload;
+}
+
+function validateSceneDismissPayload(payload) {
+  if (typeof payload.id !== 'string' || payload.id.trim().length === 0) {
+    throw recoveryError('RUNTIME_RECOVERY_INVALID_PAYLOAD', 'scene.dismiss requires a non-empty id');
   }
   return payload;
 }
@@ -63,7 +86,11 @@ export function addRecoveryEntry(snapshot, { type, payload = {}, key = type } = 
   if (!isRecord(payload)) {
     throw recoveryError('RUNTIME_RECOVERY_INVALID_PAYLOAD', 'Recovery payload must be an object');
   }
-  if (type === 'scene.update') validateSceneUpdatePayload(payload);
+  if (type === 'scene.create' || type === 'scene.update') {
+    if (type === 'scene.create' || 'id' in payload) validateSceneCardPayload(payload, type);
+    else validateSceneUpdatePayload(payload);
+  }
+  if (type === 'scene.dismiss') validateSceneDismissPayload(payload);
 
   const entry = Object.freeze({ key, type, payload: Object.freeze(cloneJson(payload)) });
   const existingIndex = snapshot.entries.findIndex((candidate) => candidate.key === key);
@@ -93,7 +120,9 @@ export function validateRecoverySnapshot(snapshot) {
     if (!isRecord(entry) || typeof entry.key !== 'string' || !RECOVERABLE_COMMAND_SET.has(entry.type) || !isRecord(entry.payload)) {
       throw recoveryError('RUNTIME_RECOVERY_INVALID_SNAPSHOT', 'Recovery snapshot contains an invalid entry');
     }
+    if (entry.type === 'scene.create') validateSceneCardPayload(entry.payload, entry.type);
     if (entry.type === 'scene.update') validateSceneUpdatePayload(entry.payload);
+    if (entry.type === 'scene.dismiss') validateSceneDismissPayload(entry.payload);
   }
   return snapshot;
 }

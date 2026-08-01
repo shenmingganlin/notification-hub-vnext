@@ -12,6 +12,13 @@ struct SceneWindowState {
     int height{180};
 };
 
+struct SceneCardState {
+    std::string id;
+    std::string title;
+    std::string body;
+    SceneWindowState window{};
+};
+
 class RuntimeSceneController {
 public:
     RuntimeSceneController() = default;
@@ -21,9 +28,14 @@ public:
     RuntimeSceneController& operator=(const RuntimeSceneController&) = delete;
 
     bool apply_window_state(const SceneWindowState& state, std::string& error_code, std::string& error_message);
+    bool create_card(const SceneCardState& card, std::string& error_code, std::string& error_message);
+    bool update_card(const SceneCardState& card, std::string& error_code, std::string& error_message);
+    bool dismiss_card(std::string_view id, std::string& error_code, std::string& error_message);
     bool get_window_state(SceneWindowState& state) const noexcept;
     std::string state_json() const;
+    std::string cards_json() const;
     std::string state_result_json(bool deduplicated) const;
+    std::string cards_result_json(bool deduplicated) const;
     void pump_messages();
     bool has_window() const noexcept;
 

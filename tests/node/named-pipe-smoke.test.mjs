@@ -108,6 +108,46 @@ test('Node client completes hello, health, and shutdown over Named Pipe', async 
     (error) => error.code === 'RUNTIME_SCENE_STATE_INVALID'
   );
 
+  const firstCard = await client.request('scene.create', {
+    id: 'card-a',
+    title: 'Card A',
+    body: 'First fixed card',
+    x: 140,
+    y: 90,
+    width: 320,
+    height: 160
+  }, { retryable: false, idempotencyKey: 'card-a-create' });
+  assert.equal(firstCard.type, 'ack');
+  assert.equal(firstCard.payload.result.sceneCards.length, 1);
+
+  const secondCard = await client.request('scene.create', {
+    id: 'card-b',
+    title: 'Card B',
+    body: 'Second fixed card',
+    x: 500,
+    y: 90,
+    width: 320,
+    height: 160
+  }, { retryable: false, idempotencyKey: 'card-b-create' });
+  assert.equal(secondCard.payload.result.sceneCards.length, 2);
+
+  const updatedCard = await client.request('scene.update', {
+    id: 'card-a',
+    title: 'Card A updated',
+    body: 'Updated fixed card',
+    x: 160,
+    y: 110,
+    width: 340,
+    height: 170
+  }, { retryable: false, idempotencyKey: 'card-a-update' });
+  assert.equal(updatedCard.payload.result.sceneCards.length, 2);
+  assert.ok(updatedCard.payload.result.sceneCards.some((card) => card.id === 'card-a' && card.x === 160));
+
+  const dismissedCard = await client.request('scene.dismiss', {
+    id: 'card-b'
+  }, { retryable: false, idempotencyKey: 'card-b-dismiss' });
+  assert.deepEqual(dismissedCard.payload.result.sceneCards.map((card) => card.id), ['card-a']);
+
   const shutdown = await client.request('shutdown');
   assert.equal(shutdown.type, 'ack');
   assert.equal(shutdown.payload.requestType, 'shutdown');

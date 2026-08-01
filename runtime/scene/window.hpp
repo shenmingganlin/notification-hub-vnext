@@ -41,6 +41,7 @@ public:
     bool begin_drag_client_point(float x, float y) noexcept;
     bool update_drag_screen_point(int x, int y) noexcept;
     void end_drag() noexcept;
+    void update_content(std::wstring title, std::wstring body);
     bool capture_pixels() const noexcept;
     bool sample_pixel(int x, int y, Pixel& pixel) const noexcept;
     bool hit_test_client_point(float x, float y) const noexcept;

@@ -342,6 +342,17 @@ void SceneWindow::end_drag() noexcept {
 #endif
 }
 
+void SceneWindow::update_content(std::wstring title, std::wstring body) {
+    config_.title = std::move(title);
+    config_.body = std::move(body);
+#ifdef _WIN32
+    if (hwnd_ != nullptr) {
+        SetWindowTextW(static_cast<HWND>(hwnd_), config_.title.c_str());
+        InvalidateRect(static_cast<HWND>(hwnd_), nullptr, FALSE);
+    }
+#endif
+}
+
 bool SceneWindow::capture_pixels() const noexcept {
     return renderer_.capture_pixels();
 }

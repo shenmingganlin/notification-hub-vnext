@@ -51,6 +51,27 @@ void close_pipe(HANDLE pipe) {
 
 using SceneState = scene::SceneWindowState;
 
+bool parse_json_string_token(std::string_view payload, size_t& position, std::string& value) {
+    if (position >= payload.size() || payload[position] != '"') return false;
+    ++position;
+    value.clear();
+    while (position < payload.size()) {
+        const char ch = payload[position++];
+        if (ch == '"') return true;
+        if (ch == '\\') {
+            if (position >= payload.size()) return false;
+            const char escaped = payload[position++];
+            if (escaped == '"' || escaped == '\\' || escaped == '/') value.push_back(escaped);
+            else if (escaped == 'n') value.push_back('\n');
+            else if (escaped == 't') value.push_back('\t');
+            else return false;
+        } else {
+            value.push_back(ch);
+        }
+    }
+    return false;
+}
+
 bool parse_scene_update_payload(std::string_view payload, SceneState& state) {
     size_t position = 0;
     const auto skip_whitespace = [&]() {
@@ -127,7 +148,84 @@ bool parse_scene_update_payload(std::string_view payload, SceneState& state) {
         && state.height > 0 && state.height <= 10000;
 }
 
+bool parse_scene_card_payload(std::string_view payload, scene::SceneCardState& card) {
+    size_t position = 0;
+    const auto skip = [&]() {
+        while (position < payload.size() && std::isspace(static_cast<unsigned char>(payload[position]))) ++position;
+    };
+    const auto consume = [&](char expected) {
+        skip();
+        if (position >= payload.size() || payload[position] != expected) return false;
+        ++position;
+        return true;
+    };
+    if (!consume('{')) return false;
+    bool seen_id = false;
+    bool seen_title = false;
+    bool seen_body = false;
+    bool seen_x = false;
+    bool seen_y = false;
+    bool seen_width = false;
+    bool seen_height = false;
+    while (true) {
+        skip();
+        if (position < payload.size() && payload[position] == '}') {
+            ++position;
+            break;
+        }
+        std::string key;
+        if (!parse_json_string_token(payload, position, key) || !consume(':')) return false;
+        skip();
+        if (key == "id" || key == "title" || key == "body") {
+            std::string value;
+            if (!parse_json_string_token(payload, position, value)) return false;
+            if (key == "id" && !seen_id) { card.id = std::move(value); seen_id = true; }
+            else if (key == "title" && !seen_title) { card.title = std::move(value); seen_title = true; }
+            else if (key == "body" && !seen_body) { card.body = std::move(value); seen_body = true; }
+            else return false;
+        } else if (key == "x" || key == "y" || key == "width" || key == "height") {
+            const auto start = position;
+            if (position < payload.size() && payload[position] == '-') ++position;
+            const auto digits = position;
+            while (position < payload.size() && std::isdigit(static_cast<unsigned char>(payload[position]))) ++position;
+            if (digits == position) return false;
+            int value = 0;
+            const auto parsed = std::from_chars(payload.data() + start, payload.data() + position, value);
+            if (parsed.ec != std::errc{} || parsed.ptr != payload.data() + position) return false;
+            if (key == "x" && !seen_x) { card.window.x = value; seen_x = true; }
+            else if (key == "y" && !seen_y) { card.window.y = value; seen_y = true; }
+            else if (key == "width" && !seen_width) { card.window.width = value; seen_width = true; }
+            else if (key == "height" && !seen_height) { card.window.height = value; seen_height = true; }
+            else return false;
+        } else return false;
+        skip();
+        if (position < payload.size() && payload[position] == ',') { ++position; continue; }
+        if (position < payload.size() && payload[position] == '}') { ++position; break; }
+        return false;
+    }
+    skip();
+    return position == payload.size() && seen_id && seen_title && seen_x && seen_y && seen_width && seen_height
+        && !card.id.empty() && !card.title.empty()
+        && card.window.width > 0 && card.window.width <= 10000
+        && card.window.height > 0 && card.window.height <= 10000;
+}
 
+bool parse_scene_dismiss_payload(std::string_view payload, std::string& id) {
+    size_t position = 0;
+    while (position < payload.size() && std::isspace(static_cast<unsigned char>(payload[position]))) ++position;
+    if (position >= payload.size() || payload[position++] != '{') return false;
+    while (position < payload.size() && std::isspace(static_cast<unsigned char>(payload[position]))) ++position;
+    std::string key;
+    if (!parse_json_string_token(payload, position, key) || key != "id") return false;
+    while (position < payload.size() && std::isspace(static_cast<unsigned char>(payload[position]))) ++position;
+    if (position >= payload.size() || payload[position++] != ':') return false;
+    while (position < payload.size() && std::isspace(static_cast<unsigned char>(payload[position]))) ++position;
+    if (!parse_json_string_token(payload, position, id) || id.empty()) return false;
+    while (position < payload.size() && std::isspace(static_cast<unsigned char>(payload[position]))) ++position;
+    if (position >= payload.size() || payload[position++] != '}') return false;
+    while (position < payload.size() && std::isspace(static_cast<unsigned char>(payload[position]))) ++position;
+    return position == payload.size();
+}
 
 #endif
 
@@ -223,11 +321,27 @@ int run_named_pipe_server(std::string_view pipe_name, bool drop_after_health, bo
                 }
 
                 scene::SceneWindowState requested_scene_state{};
-                if (parsed.message.type == "scene.update"
-                    && !parse_scene_update_payload(parsed.message.payload_json, requested_scene_state)) {
+                scene::SceneCardState requested_card{};
+                std::string requested_dismiss_id;
+                const bool is_card_update = parsed.message.type == "scene.update"
+                    && parsed.message.payload_json.find("\"id\"") != std::string::npos;
+                const bool is_card_command = parsed.message.type == "scene.create"
+                    || is_card_update
+                    || parsed.message.type == "scene.dismiss";
+                bool payload_valid = true;
+                if (parsed.message.type == "scene.update" && !is_card_update) {
+                    payload_valid = parse_scene_update_payload(parsed.message.payload_json, requested_scene_state);
+                } else if (parsed.message.type == "scene.create" || is_card_update) {
+                    payload_valid = parse_scene_card_payload(parsed.message.payload_json, requested_card);
+                } else if (parsed.message.type == "scene.dismiss") {
+                    payload_valid = parse_scene_dismiss_payload(parsed.message.payload_json, requested_dismiss_id);
+                }
+                if (!payload_valid) {
                     protocol::ProtocolError error{
-                        "RUNTIME_SCENE_STATE_INVALID",
-                        "scene.update requires integer x, y, width, and height",
+                        is_card_command ? "RUNTIME_SCENE_CARD_INVALID" : "RUNTIME_SCENE_STATE_INVALID",
+                        is_card_command
+                            ? "scene card payload is invalid"
+                            : "scene.update requires integer x, y, width, and height",
                         parsed.message.request_id,
                         parsed.message.trace_id
                     };
@@ -261,7 +375,7 @@ int run_named_pipe_server(std::string_view pipe_name, bool drop_after_health, bo
                         idempotency_cache.emplace(parsed.message.idempotency_key, fingerprint);
                     }
                 }
-                if (parsed.message.type == "scene.update" && !deduplicated) {
+                if (!deduplicated && parsed.message.type == "scene.update" && !is_card_update) {
                     std::string apply_error_code;
                     std::string apply_error_message;
                     if (!scene_controller.apply_window_state(
@@ -280,17 +394,78 @@ int run_named_pipe_server(std::string_view pipe_name, bool drop_after_health, bo
                         }
                         continue;
                     }
+                } else if (!deduplicated && parsed.message.type == "scene.create") {
+                    std::string apply_error_code;
+                    std::string apply_error_message;
+                    if (!scene_controller.create_card(
+                            requested_card,
+                            apply_error_code,
+                            apply_error_message)) {
+                        std::cerr << "scene.create failed: " << apply_error_code << " " << apply_error_message << "\n" << std::flush;
+                        protocol::ProtocolError error{
+                            apply_error_code,
+                            apply_error_message,
+                            parsed.message.request_id,
+                            parsed.message.trace_id
+                        };
+                        if (!send_payload(pipe, protocol::serialize_error(error))) {
+                            close_pipe(pipe);
+                            return 11;
+                        }
+                        continue;
+                    }
+                } else if (!deduplicated && is_card_update) {
+                    std::string apply_error_code;
+                    std::string apply_error_message;
+                    if (!scene_controller.update_card(
+                            requested_card,
+                            apply_error_code,
+                            apply_error_message)) {
+                        protocol::ProtocolError error{
+                            apply_error_code,
+                            apply_error_message,
+                            parsed.message.request_id,
+                            parsed.message.trace_id
+                        };
+                        if (!send_payload(pipe, protocol::serialize_error(error))) {
+                            close_pipe(pipe);
+                            return 11;
+                        }
+                        continue;
+                    }
+                } else if (!deduplicated && parsed.message.type == "scene.dismiss") {
+                    std::string apply_error_code;
+                    std::string apply_error_message;
+                    if (!scene_controller.dismiss_card(
+                            requested_dismiss_id,
+                            apply_error_code,
+                            apply_error_message)) {
+                        protocol::ProtocolError error{
+                            apply_error_code,
+                            apply_error_message,
+                            parsed.message.request_id,
+                            parsed.message.trace_id
+                        };
+                        if (!send_payload(pipe, protocol::serialize_error(error))) {
+                            close_pipe(pipe);
+                            return 11;
+                        }
+                        continue;
+                    }
                 }
                 const auto generic_result = deduplicated
                     ? "{\"status\":\"accepted\",\"deduplicated\":true}"
                     : "{\"status\":\"accepted\",\"deduplicated\":false}";
-                const auto result_json = parsed.message.type == "scene.update"
+                const auto result_json = parsed.message.type == "scene.update" && !is_card_update
                     ? scene_controller.state_result_json(deduplicated)
-                    : (parsed.message.type == "health"
-                        ? std::string("{\"status\":\"accepted\",\"deduplicated\":")
-                            + (deduplicated ? "true" : "false")
-                            + ",\"sceneState\":" + scene_controller.state_json() + "}"
-                        : std::string(generic_result));
+                    : (parsed.message.type == "scene.create" || is_card_update || parsed.message.type == "scene.dismiss"
+                        ? scene_controller.cards_result_json(deduplicated)
+                        : (parsed.message.type == "health"
+                            ? std::string("{\"status\":\"accepted\",\"deduplicated\":")
+                                + (deduplicated ? "true" : "false")
+                                + ",\"sceneState\":" + scene_controller.state_json()
+                                + ",\"sceneCards\":" + scene_controller.cards_json() + "}"
+                            : std::string(generic_result)));
                 if (!send_payload(pipe, protocol::serialize_ack(parsed.message, result_json))) {
                     std::cerr << "TRANSPORT_PIPE_WRITE_FAILED: " << GetLastError() << "\n";
                     close_pipe(pipe);

@@ -1,8 +1,12 @@
 #include "controller.hpp"
 
 #include "window.hpp"
+#include "../protocol/message.hpp"
 
+#include <iostream>
 #include <memory>
+#include <string>
+#include <unordered_map>
 #include <utility>
 
 #ifdef _WIN32
@@ -10,11 +14,38 @@
 #endif
 
 namespace notification_hub::scene {
+namespace {
+
+std::wstring widen(std::string_view value) {
+    return std::wstring(value.begin(), value.end());
+}
+
+bool valid_window_state(const SceneWindowState& state) {
+    return state.width > 0 && state.height > 0 && state.width <= 10000 && state.height <= 10000;
+}
+
+std::string json_string(std::string_view value) {
+    return std::string("\"") + protocol::escape_json_string(value) + "\"";
+}
+
+std::string card_json(const SceneCardState& card) {
+    return std::string("{\"id\":") + json_string(card.id)
+        + ",\"title\":" + json_string(card.title)
+        + ",\"body\":" + json_string(card.body)
+        + ",\"x\":" + std::to_string(card.window.x)
+        + ",\"y\":" + std::to_string(card.window.y)
+        + ",\"width\":" + std::to_string(card.window.width)
+        + ",\"height\":" + std::to_string(card.window.height) + "}";
+}
+
+}  // namespace
 
 class RuntimeSceneController::Impl {
 public:
     std::unique_ptr<SceneWindow> window;
     SceneWindowState state{};
+    std::unordered_map<std::string, SceneCardState> cards;
+    std::unordered_map<std::string, std::unique_ptr<SceneWindow>> card_windows;
 };
 
 RuntimeSceneController::~RuntimeSceneController() {
@@ -27,7 +58,7 @@ bool RuntimeSceneController::apply_window_state(
     const SceneWindowState& state,
     std::string& error_code,
     std::string& error_message) {
-    if (state.width <= 0 || state.height <= 0 || state.width > 10000 || state.height > 10000) {
+    if (!valid_window_state(state)) {
         error_code = "RUNTIME_SCENE_STATE_INVALID";
         error_message = "scene.update width and height are outside the supported range";
         return false;
@@ -75,6 +106,120 @@ bool RuntimeSceneController::apply_window_state(
     return true;
 }
 
+bool RuntimeSceneController::create_card(
+    const SceneCardState& card,
+    std::string& error_code,
+    std::string& error_message) {
+    if (card.id.empty() || card.title.empty() || !valid_window_state(card.window)) {
+        error_code = "RUNTIME_SCENE_CARD_INVALID";
+        error_message = "scene.create requires id, title, and a valid window state";
+        return false;
+    }
+    if (impl_ == nullptr) impl_ = new Impl();
+    if (impl_->cards.contains(card.id)) {
+        error_code = "RUNTIME_SCENE_CARD_EXISTS";
+        error_message = "scene.create id already exists";
+        return false;
+    }
+
+    auto window = std::make_unique<SceneWindow>(WindowConfig{
+        widen(card.title),
+        widen(card.body),
+        card.window.width,
+        card.window.height,
+        true});
+    if (!window->create() || !window->show()) {
+        error_code = "RUNTIME_SCENE_WINDOW_APPLY_FAILED";
+        error_message = "scene.create could not create or show the card window";
+        return false;
+    }
+#ifdef _WIN32
+    const auto hwnd = static_cast<HWND>(window->native_handle());
+    if (hwnd == nullptr || SetWindowPos(
+        hwnd,
+        nullptr,
+        card.window.x,
+        card.window.y,
+        card.window.width,
+        card.window.height,
+        SWP_NOZORDER | SWP_NOACTIVATE | SWP_SHOWWINDOW) == FALSE) {
+        error_code = "RUNTIME_SCENE_WINDOW_APPLY_FAILED";
+        error_message = "scene.create could not apply card geometry";
+        return false;
+    }
+#endif
+    if (!window->resize_render_target(card.window.width, card.window.height)) {
+        error_code = "RUNTIME_SCENE_WINDOW_APPLY_FAILED";
+        error_message = "scene.create could not resize the card renderer target";
+        return false;
+    }
+    window->paint();
+    impl_->cards.emplace(card.id, card);
+    impl_->card_windows.emplace(card.id, std::move(window));
+    return true;
+}
+
+bool RuntimeSceneController::update_card(
+    const SceneCardState& card,
+    std::string& error_code,
+    std::string& error_message) {
+    if (impl_ == nullptr || !impl_->cards.contains(card.id)) {
+        error_code = "RUNTIME_SCENE_CARD_NOT_FOUND";
+        error_message = "scene.update card id was not found";
+        return false;
+    }
+    if (card.title.empty() || !valid_window_state(card.window)) {
+        error_code = "RUNTIME_SCENE_CARD_INVALID";
+        error_message = "scene.update requires title and a valid window state";
+        return false;
+    }
+    auto window_it = impl_->card_windows.find(card.id);
+    if (window_it == impl_->card_windows.end() || window_it->second == nullptr) {
+        error_code = "RUNTIME_SCENE_WINDOW_APPLY_FAILED";
+        error_message = "scene.update card window is unavailable";
+        return false;
+    }
+    auto& window = window_it->second;
+    window->update_content(widen(card.title), widen(card.body));
+#ifdef _WIN32
+    const auto hwnd = static_cast<HWND>(window->native_handle());
+    if (hwnd == nullptr || SetWindowPos(
+        hwnd,
+        nullptr,
+        card.window.x,
+        card.window.y,
+        card.window.width,
+        card.window.height,
+        SWP_NOZORDER | SWP_NOACTIVATE | SWP_SHOWWINDOW) == FALSE) {
+        error_code = "RUNTIME_SCENE_WINDOW_APPLY_FAILED";
+        error_message = "scene.update could not apply card geometry";
+        return false;
+    }
+#endif
+    if (!window->resize_render_target(card.window.width, card.window.height)) {
+        error_code = "RUNTIME_SCENE_WINDOW_APPLY_FAILED";
+        error_message = "scene.update could not resize the card renderer target";
+        return false;
+    }
+    window->paint();
+    impl_->cards[card.id] = card;
+    return true;
+}
+
+bool RuntimeSceneController::dismiss_card(
+    std::string_view id,
+    std::string& error_code,
+    std::string& error_message) {
+    if (impl_ == nullptr || !impl_->cards.contains(std::string(id))) {
+        error_code = "RUNTIME_SCENE_CARD_NOT_FOUND";
+        error_message = "scene.dismiss card id was not found";
+        return false;
+    }
+    impl_->card_windows.erase(std::string(id));
+    impl_->cards.erase(std::string(id));
+    return true;
+}
+
 bool RuntimeSceneController::get_window_state(SceneWindowState& state) const noexcept {
     if (impl_ == nullptr || impl_->window == nullptr || !impl_->window->is_created()) return false;
     int x = 0;
@@ -102,20 +247,37 @@ std::string RuntimeSceneController::state_json() const {
         + ",\"height\":" + std::to_string(state.height) + "}";
 }
 
+std::string RuntimeSceneController::cards_json() const {
+    std::string result = "[";
+    if (impl_ != nullptr) {
+        bool first = true;
+        for (const auto& [id, card] : impl_->cards) {
+            if (!first) result += ',';
+            first = false;
+            result += card_json(card);
+        }
+    }
+    result += ']';
+    return result;
+}
+
 std::string RuntimeSceneController::state_result_json(bool deduplicated) const {
-    SceneWindowState state{};
-    if (!get_window_state(state) && impl_ != nullptr) state = impl_->state;
     return std::string("{\"status\":\"accepted\",\"deduplicated\":")
         + (deduplicated ? "true" : "false")
-        + ",\"sceneState\":{\"x\":" + std::to_string(state.x)
-        + ",\"y\":" + std::to_string(state.y)
-        + ",\"width\":" + std::to_string(state.width)
-        + ",\"height\":" + std::to_string(state.height) + "}}";
+        + ",\"sceneState\":" + state_json() + "}"
+        ;
+}
+
+std::string RuntimeSceneController::cards_result_json(bool deduplicated) const {
+    return std::string("{\"status\":\"accepted\",\"deduplicated\":")
+        + (deduplicated ? "true" : "false")
+        + ",\"sceneCards\":" + cards_json() + "}"
+        ;
 }
 
 void RuntimeSceneController::pump_messages() {
 #ifdef _WIN32
-    if (impl_ == nullptr || impl_->window == nullptr) return;
+    if (impl_ == nullptr) return;
     MSG message{};
     while (PeekMessageW(&message, nullptr, 0, 0, PM_REMOVE)) {
         TranslateMessage(&message);
