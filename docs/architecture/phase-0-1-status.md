@@ -28,12 +28,13 @@
 - 协议 envelope 增加可选 `idempotencyKey`，Runtime 对重复请求去重并拒绝同 key 不同内容的冲突请求。
 - 建立最小 Win32 Scene Window，支持 Per-Monitor V2 DPI、非激活显示、消息泵、自动关闭和生命周期诊断。
 - 接入 Direct2D/DirectWrite 最小卡片表面，支持圆角背景、强调色、标题和正文绘制，并保留 GDI 回退。
+- 接入 D3D11、Direct2D device context 和 DirectComposition visual，使用预乘 alpha surface 提交到 HWND。
 - Node.js 测试通过：11 项中 11 项通过，2 项需要 Runtime 参数的测试由 CTest 执行。
 - CTest 通过：7/7。
 
 ## 当前阶段
 
-Phase 2 已完成基础闭环，Phase 4 正在推进，Phase 5 已开始。Node.js 与 C++ Runtime 已具备协议、诊断、framing、最小 Named Pipe 通信、有限自动重连、Runtime 进程托管、幂等请求、基础恢复快照持久化、最小 Win32 窗口生命周期和 Direct2D/DirectWrite 卡片绘制能力；DirectComposition、真 alpha、命中测试、拖动和 Scene 状态重建尚未接入。
+Phase 2 已完成基础闭环，Phase 4 正在推进，Phase 5 已开始。Node.js 与 C++ Runtime 已具备协议、诊断、framing、最小 Named Pipe 通信、有限自动重连、Runtime 进程托管、幂等请求、基础恢复快照持久化、最小 Win32 窗口生命周期、Direct2D/DirectWrite 卡片绘制和 DirectComposition 预乘 alpha surface 能力；截图级视觉回归、透明区域命中、点击、拖动和 Scene 状态重建尚未接入。
 
 ## 标准验证命令
 
@@ -56,4 +57,4 @@ ctest --preset debug-vs2026
 
 ## 下一步
 
-继续完善 Native Scene Window：接入 DirectComposition、真 alpha 表面、截图级视觉回归、卡片命中测试和关闭交互；同时继续推进持久化幂等记录和 Scene 状态迁移。
+继续完善 Native Scene Window：增加截图级视觉回归、透明区域命中、卡片点击和关闭交互；同时继续推进持久化幂等记录和 Scene 状态迁移。

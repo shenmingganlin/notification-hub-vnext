@@ -89,7 +89,7 @@ bool SceneWindow::create() {
     }
 
     DWORD style = WS_POPUP;
-    DWORD extended_style = WS_EX_NOACTIVATE;
+    DWORD extended_style = WS_EX_NOACTIVATE | WS_EX_NOREDIRECTIONBITMAP;
     if (config_.tool_window) extended_style |= WS_EX_TOOLWINDOW;
 
     RECT bounds{0, 0, config_.width, config_.height};

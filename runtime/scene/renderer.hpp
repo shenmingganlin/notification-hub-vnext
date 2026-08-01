@@ -21,6 +21,7 @@ public:
 
 private:
     struct Impl;
+    bool create_composition_surface(int width, int height);
     std::unique_ptr<Impl> impl_;
 };
 

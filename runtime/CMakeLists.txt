@@ -19,7 +19,7 @@ target_compile_definitions(notification-hub-runtime PRIVATE
 )
 
 if (WIN32)
-  target_link_libraries(notification-hub-runtime PRIVATE user32 gdi32 d2d1 dwrite)
+  target_link_libraries(notification-hub-runtime PRIVATE user32 gdi32 d2d1 dwrite dcomp d3d11 dxgi)
 endif()
 
 add_test(NAME runtime_smoke COMMAND notification-hub-runtime --self-test)
