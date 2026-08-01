@@ -2,6 +2,7 @@
 #include "../protocol/message.hpp"
 #include "../transport/frame.hpp"
 #include "../transport/named_pipe.hpp"
+#include "../scene/controller.hpp"
 #include "../scene/window.hpp"
 
 #ifdef _WIN32
@@ -24,7 +25,9 @@ using notification_hub::transport::FrameStatus;
 using notification_hub::transport::encode_frame;
 using notification_hub::transport::run_named_pipe_server;
 using notification_hub::scene::Pixel;
+using notification_hub::scene::RuntimeSceneController;
 using notification_hub::scene::SceneWindow;
+using notification_hub::scene::SceneWindowState;
 using notification_hub::scene::WindowConfig;
 using notification_hub::scene::close_button_bounds;
 using notification_hub::scene::point_inside_card;
@@ -174,6 +177,42 @@ bool visual_self_test() {
     const auto event = create_event(
         "visual-self-test", "pixel-sampled", "RENDERER_VISUAL_REGRESSION_OK", "info", true,
         "Structural card pixel assertions completed", std::string(kTimestamp));
+    std::cout << serialize_jsonl(event);
+    return true;
+#endif
+}
+
+bool scene_controller_self_test() {
+#ifndef _WIN32
+    std::cerr << "SCENE_UNSUPPORTED: Runtime scene controller requires Windows\n";
+    return false;
+#else
+    RuntimeSceneController controller;
+    const SceneWindowState requested{137, 83, 500, 220};
+    std::string error_code;
+    std::string error_message;
+    if (!controller.apply_window_state(requested, error_code, error_message)) {
+        std::cerr << "scene controller apply failed: " << error_code << " " << error_message << "\n";
+        return false;
+    }
+
+    SceneWindowState actual{};
+    const bool state_valid = controller.get_window_state(actual)
+        && actual.x == requested.x
+        && actual.y == requested.y
+        && actual.width == requested.width
+        && actual.height == requested.height;
+    if (!state_valid) {
+        const auto event = create_event(
+            "scene-controller-self-test", "state-applied", "RUNTIME_SCENE_WINDOW_APPLY_FAILED", "error", false,
+            "Runtime scene controller HWND state did not match requested geometry", std::string(kTimestamp));
+        std::cerr << serialize_jsonl(event);
+        return false;
+    }
+
+    const auto event = create_event(
+        "scene-controller-self-test", "state-applied", "RUNTIME_SCENE_WINDOW_APPLY_OK", "info", true,
+        "Runtime scene controller applied state to the native window", std::string(kTimestamp));
     std::cout << serialize_jsonl(event);
     return true;
 #endif
@@ -684,6 +723,11 @@ int main(int argc, char** argv) {
     if (argc > 1 && std::string_view(argv[1]) == "--hit-test-self-test") {
         const bool passed = hit_test_self_test();
         std::cout << "notification-hub-runtime hit-test self-test: " << (passed ? "ok" : "failed") << "\n";
+        return passed ? 0 : 1;
+    }
+    if (argc > 1 && std::string_view(argv[1]) == "--scene-controller-self-test") {
+        const bool passed = scene_controller_self_test();
+        std::cout << "notification-hub-runtime scene controller self-test: " << (passed ? "ok" : "failed") << "\n";
         return passed ? 0 : 1;
     }
     if (argc > 1 && std::string_view(argv[1]) == "--dpi-transition-self-test") {

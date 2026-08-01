@@ -6,6 +6,7 @@ add_executable(notification-hub-runtime
   transport/named_pipe.cpp
   scene/window.cpp
   scene/renderer.cpp
+  scene/controller.cpp
 )
 
 target_include_directories(notification-hub-runtime PRIVATE
@@ -35,6 +36,7 @@ add_test(NAME runtime_desktop_visual_self_test COMMAND notification-hub-runtime 
 add_test(NAME runtime_desktop_hit_test_self_test COMMAND notification-hub-runtime --desktop-hit-test-self-test)
 add_test(NAME runtime_dpi_self_test COMMAND notification-hub-runtime --dpi-self-test)
 add_test(NAME runtime_dpi_transition_self_test COMMAND notification-hub-runtime --dpi-transition-self-test)
+add_test(NAME runtime_scene_controller_self_test COMMAND notification-hub-runtime --scene-controller-self-test)
 
 find_program(NODE_EXECUTABLE node)
 if (NODE_EXECUTABLE)

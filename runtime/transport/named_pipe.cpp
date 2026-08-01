@@ -2,6 +2,7 @@
 
 #include "../diagnostics/event.hpp"
 #include "../protocol/message.hpp"
+#include "../scene/controller.hpp"
 #include "frame.hpp"
 
 #include <charconv>
@@ -48,12 +49,7 @@ void close_pipe(HANDLE pipe) {
     CloseHandle(pipe);
 }
 
-struct SceneState {
-    int x{};
-    int y{};
-    int width{};
-    int height{};
-};
+using SceneState = scene::SceneWindowState;
 
 bool parse_scene_update_payload(std::string_view payload, SceneState& state) {
     size_t position = 0;
@@ -131,14 +127,7 @@ bool parse_scene_update_payload(std::string_view payload, SceneState& state) {
         && state.height > 0 && state.height <= 10000;
 }
 
-std::string scene_state_result(const SceneState& state, bool deduplicated) {
-    return std::string("{\"status\":\"accepted\",\"deduplicated\":")
-        + (deduplicated ? "true" : "false")
-        + ",\"sceneState\":{\"x\":" + std::to_string(state.x)
-        + ",\"y\":" + std::to_string(state.y)
-        + ",\"width\":" + std::to_string(state.width)
-        + ",\"height\":" + std::to_string(state.height) + "}}";
-}
+
 
 #endif
 
@@ -156,7 +145,7 @@ int run_named_pipe_server(std::string_view pipe_name, bool drop_after_health, bo
     bool injected_drop = false;
     bool shutdown_requested = false;
     std::unordered_map<std::string, std::string> idempotency_cache;
-    SceneState scene_state{0, 0, 420, 180};
+    scene::RuntimeSceneController scene_controller;
 
     while (!shutdown_requested) {
         HANDLE pipe = CreateNamedPipeW(
@@ -188,6 +177,7 @@ int run_named_pipe_server(std::string_view pipe_name, bool drop_after_health, bo
         std::vector<char> read_buffer(16 * 1024);
         bool session_finished = false;
         while (!session_finished && !shutdown_requested) {
+            scene_controller.pump_messages();
             DWORD bytes_read = 0;
             if (!ReadFile(pipe, read_buffer.data(), static_cast<DWORD>(read_buffer.size()), &bytes_read, nullptr)) {
                 const auto error = GetLastError();
@@ -232,7 +222,7 @@ int run_named_pipe_server(std::string_view pipe_name, bool drop_after_health, bo
                     continue;
                 }
 
-                SceneState requested_scene_state = scene_state;
+                scene::SceneWindowState requested_scene_state{};
                 if (parsed.message.type == "scene.update"
                     && !parse_scene_update_payload(parsed.message.payload_json, requested_scene_state)) {
                     protocol::ProtocolError error{
@@ -272,14 +262,30 @@ int run_named_pipe_server(std::string_view pipe_name, bool drop_after_health, bo
                     }
                 }
                 if (parsed.message.type == "scene.update" && !deduplicated) {
-                    scene_state = requested_scene_state;
+                    std::string apply_error_code;
+                    std::string apply_error_message;
+                    if (!scene_controller.apply_window_state(
+                            requested_scene_state,
+                            apply_error_code,
+                            apply_error_message)) {
+                        protocol::ProtocolError error{
+                            apply_error_code,
+                            apply_error_message,
+                            parsed.message.request_id,
+                            parsed.message.trace_id
+                        };
+                        if (!send_payload(pipe, protocol::serialize_error(error))) {
+                            close_pipe(pipe);
+                            return 11;
+                        }
+                        continue;
+                    }
                 }
                 const auto generic_result = deduplicated
                     ? "{\"status\":\"accepted\",\"deduplicated\":true}"
                     : "{\"status\":\"accepted\",\"deduplicated\":false}";
-                const auto scene_result = scene_state_result(requested_scene_state, deduplicated);
                 const auto result_json = parsed.message.type == "scene.update"
-                    ? scene_result
+                    ? scene_controller.state_result_json(deduplicated)
                     : std::string(generic_result);
                 if (!send_payload(pipe, protocol::serialize_ack(parsed.message, result_json))) {
                     std::cerr << "TRANSPORT_PIPE_WRITE_FAILED: " << GetLastError() << "\n";
