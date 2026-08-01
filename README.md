@@ -37,11 +37,12 @@ The current machine has Node.js, npm, and a Windows SDK detected. CMake and the 
 
 ```powershell
 npm test
-cmake --preset debug
-ctest --preset debug
+cmake --preset debug-vs2022
+cmake --build --preset debug-vs2022
+ctest --preset debug-vs2022
 ```
 
-The CMake and CTest commands become active after the local C++ toolchain is installed and configured.
+The CMake and CTest commands become active after Visual Studio 2022 and the local C++ toolchain are installed. The repository preset targets the Visual Studio 2022 x64 generator.
 
 ## Version
 

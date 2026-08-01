@@ -7,19 +7,25 @@
   },
   "configurePresets": [
     {
-      "name": "debug",
-      "displayName": "Debug",
-      "generator": "Ninja",
-      "binaryDir": "${sourceDir}/build/debug",
-      "cacheVariables": {
-        "CMAKE_BUILD_TYPE": "Debug"
-      }
+      "name": "debug-vs2022",
+      "displayName": "Debug (Visual Studio 2022 x64)",
+      "generator": "Visual Studio 17 2022",
+      "architecture": "x64",
+      "binaryDir": "${sourceDir}/build/debug-vs2022"
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "debug-vs2022",
+      "configurePreset": "debug-vs2022",
+      "configuration": "Debug"
     }
   ],
   "testPresets": [
     {
-      "name": "debug",
-      "configurePreset": "debug",
+      "name": "debug-vs2022",
+      "configurePreset": "debug-vs2022",
+      "configuration": "Debug",
       "output": {
         "outputOnFailure": true
       }
