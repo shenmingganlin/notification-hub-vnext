@@ -34,6 +34,7 @@ add_test(NAME runtime_visual_self_test COMMAND notification-hub-runtime --visual
 add_test(NAME runtime_desktop_visual_self_test COMMAND notification-hub-runtime --desktop-visual-self-test)
 add_test(NAME runtime_desktop_hit_test_self_test COMMAND notification-hub-runtime --desktop-hit-test-self-test)
 add_test(NAME runtime_dpi_self_test COMMAND notification-hub-runtime --dpi-self-test)
+add_test(NAME runtime_dpi_transition_self_test COMMAND notification-hub-runtime --dpi-transition-self-test)
 
 find_program(NODE_EXECUTABLE node)
 if (NODE_EXECUTABLE)

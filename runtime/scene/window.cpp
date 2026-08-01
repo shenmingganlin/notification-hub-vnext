@@ -82,6 +82,13 @@ LRESULT CALLBACK window_proc(HWND hwnd, UINT message, WPARAM wparam, LPARAM lpar
             window->resize_render_target(LOWORD(lparam), HIWORD(lparam));
         }
         return 0;
+    case WM_DPICHANGED:
+        if (window != nullptr) {
+            window->apply_dpi_change(
+                static_cast<unsigned int>(LOWORD(wparam)),
+                reinterpret_cast<const void*>(lparam));
+        }
+        return 0;
     case WM_ERASEBKGND:
         return 1;
     case WM_CLOSE:
@@ -149,6 +156,7 @@ bool SceneWindow::create() {
     if (hwnd == nullptr) return false;
 
     hwnd_ = hwnd;
+    dpi_ = GetDpiForWindow(hwnd);
     renderer_.initialize(hwnd_, config_.width, config_.height);
     return true;
 #else
@@ -230,6 +238,35 @@ bool SceneWindow::is_frame_rendered() const noexcept {
 
 bool SceneWindow::is_close_requested() const noexcept {
     return close_requested_;
+}
+
+unsigned int SceneWindow::dpi() const noexcept {
+    return dpi_;
+}
+
+bool SceneWindow::apply_dpi_change(unsigned int dpi, const void* suggested_rect) noexcept {
+#ifdef _WIN32
+    if (hwnd_ == nullptr || dpi == 0 || suggested_rect == nullptr) return false;
+    const auto* rect = static_cast<const RECT*>(suggested_rect);
+    const int width = rect->right - rect->left;
+    const int height = rect->bottom - rect->top;
+    if (width <= 0 || height <= 0) return false;
+    dpi_ = dpi;
+    const auto moved = SetWindowPos(
+        static_cast<HWND>(hwnd_),
+        nullptr,
+        rect->left,
+        rect->top,
+        width,
+        height,
+        SWP_NOZORDER | SWP_NOACTIVATE) != FALSE;
+    const auto resized = resize_render_target(width, height);
+    return moved && resized;
+#else
+    static_cast<void>(dpi);
+    static_cast<void>(suggested_rect);
+    return false;
+#endif
 }
 
 bool SceneWindow::is_dragging() const noexcept {

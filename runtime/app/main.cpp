@@ -179,6 +179,65 @@ bool visual_self_test() {
 #endif
 }
 
+bool dpi_transition_self_test() {
+#ifndef _WIN32
+    std::cerr << "DPI_UNSUPPORTED: DPI transition requires Windows\n";
+    return false;
+#else
+    SceneWindow window(WindowConfig{
+        L"Notification Hub DPI Transition Self Test",
+        L"WM_DPICHANGED geometry transition",
+        420,
+        180,
+        true});
+    if (!window.create() || !window.show()) return false;
+
+    int start_x = 0;
+    int start_y = 0;
+    if (!window.get_window_position(start_x, start_y)) return false;
+    RECT suggested{start_x + 17, start_y + 19, start_x + 517, start_y + 239};
+    const auto hwnd = static_cast<HWND>(window.native_handle());
+    SendMessageW(
+        hwnd,
+        WM_DPICHANGED,
+        MAKEWPARAM(144, 144),
+        reinterpret_cast<LPARAM>(&suggested));
+
+    RECT client_rect{};
+    int moved_x = 0;
+    int moved_y = 0;
+    const bool dimensions_valid = GetClientRect(hwnd, &client_rect) != FALSE
+        && client_rect.right - client_rect.left == 500
+        && client_rect.bottom - client_rect.top == 220;
+    const bool position_valid = window.get_window_position(moved_x, moved_y)
+        && moved_x == suggested.left
+        && moved_y == suggested.top;
+    const bool geometry_valid = window.dpi() == 144
+        && dimensions_valid
+        && position_valid
+        && window.hit_test_client_point(250.0f, 110.0f);
+
+    window.request_close();
+    const auto pump_result = window.run_message_pump(false);
+    if (!geometry_valid || pump_result != 0 || window.is_created()) {
+        std::cerr << "dpi transition: dpi=" << window.dpi()
+                  << " dimensionsValid=" << dimensions_valid
+                  << " positionValid=" << position_valid
+                  << " geometryValid=" << geometry_valid << "\n";
+        const auto event = create_event(
+            "dpi-transition-self-test", "dpi-transitioned", "DPI_TRANSITION_FAILED", "error", false,
+            "WM_DPICHANGED geometry transition failed", std::string(kTimestamp));
+        std::cerr << serialize_jsonl(event);
+        return false;
+    }
+    const auto event = create_event(
+        "dpi-transition-self-test", "dpi-transitioned", "DPI_TRANSITION_OK", "info", true,
+        "WM_DPICHANGED geometry transition completed", std::string(kTimestamp));
+    std::cout << serialize_jsonl(event);
+    return true;
+#endif
+}
+
 bool desktop_hit_test_self_test() {
 #ifndef _WIN32
     std::cerr << "INTERACTION_UNSUPPORTED: Desktop hit testing requires Windows\n";
@@ -625,6 +684,11 @@ int main(int argc, char** argv) {
     if (argc > 1 && std::string_view(argv[1]) == "--hit-test-self-test") {
         const bool passed = hit_test_self_test();
         std::cout << "notification-hub-runtime hit-test self-test: " << (passed ? "ok" : "failed") << "\n";
+        return passed ? 0 : 1;
+    }
+    if (argc > 1 && std::string_view(argv[1]) == "--dpi-transition-self-test") {
+        const bool passed = dpi_transition_self_test();
+        std::cout << "notification-hub-runtime dpi transition self-test: " << (passed ? "ok" : "failed") << "\n";
         return passed ? 0 : 1;
     }
     if (argc > 1 && std::string_view(argv[1]) == "--desktop-hit-test-self-test") {
