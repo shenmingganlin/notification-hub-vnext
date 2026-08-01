@@ -401,7 +401,6 @@ int run_named_pipe_server(std::string_view pipe_name, bool drop_after_health, bo
                             requested_card,
                             apply_error_code,
                             apply_error_message)) {
-                        std::cerr << "scene.create failed: " << apply_error_code << " " << apply_error_message << "\n" << std::flush;
                         protocol::ProtocolError error{
                             apply_error_code,
                             apply_error_message,

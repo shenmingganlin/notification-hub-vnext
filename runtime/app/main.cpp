@@ -3,6 +3,7 @@
 #include "../transport/frame.hpp"
 #include "../transport/named_pipe.hpp"
 #include "../scene/controller.hpp"
+#include "../scene/layout.hpp"
 #include "../scene/window.hpp"
 
 #ifdef _WIN32
@@ -12,6 +13,7 @@
 #include <iostream>
 #include <string>
 #include <string_view>
+#include <vector>
 
 namespace {
 
@@ -27,6 +29,11 @@ using notification_hub::transport::run_named_pipe_server;
 using notification_hub::scene::Pixel;
 using notification_hub::scene::RuntimeSceneController;
 using notification_hub::scene::SceneWindow;
+using notification_hub::scene::StackAnchor;
+using notification_hub::scene::StackCardInput;
+using notification_hub::scene::StackDirection;
+using notification_hub::scene::StackLayoutOptions;
+using notification_hub::scene::layout_stack;
 using notification_hub::scene::SceneWindowState;
 using notification_hub::scene::WindowConfig;
 using notification_hub::scene::close_button_bounds;
@@ -180,6 +187,57 @@ bool visual_self_test() {
     std::cout << serialize_jsonl(event);
     return true;
 #endif
+}
+
+bool layout_self_test() {
+    const std::vector<StackCardInput> cards{
+        {"a", 100, 40},
+        {"b", 120, 60},
+        {"c", 80, 30},
+    };
+    const StackLayoutOptions options{
+        StackDirection::Down,
+        StackAnchor::TopRight,
+        10,
+        500,
+        300,
+        1.0f,
+    };
+    const auto result = layout_stack(cards, options);
+    if (!result.ok || result.placements.size() != 3
+        || result.placements[0].x != 400 || result.placements[0].y != 0
+        || result.placements[1].x != 380 || result.placements[1].y != 50
+        || result.placements[2].x != 420 || result.placements[2].y != 120) {
+        std::cerr << "stack layout placement failed\n";
+        return false;
+    }
+
+    const auto too_large = layout_stack(
+        {{"large", 600, 40}},
+        StackLayoutOptions{StackDirection::Down, StackAnchor::TopLeft, 0, 500, 300, 1.0f});
+    if (too_large.ok || too_large.code != "LAYOUT_CARD_OUT_OF_BOUNDS"
+        || too_large.failing_card_id != "large") return false;
+
+    const auto invalid_dpi = layout_stack(
+        {}, StackLayoutOptions{StackDirection::Down, StackAnchor::TopLeft, 0, 500, 300, 0.0f});
+    if (invalid_dpi.ok || invalid_dpi.code != "LAYOUT_DPI_INVALID") return false;
+
+    const auto scaled = layout_stack(
+        {{"scaled", 100, 40}},
+        StackLayoutOptions{StackDirection::Down, StackAnchor::TopRight, 8, 500, 300, 1.25f});
+    if (!scaled.ok || scaled.placements.size() != 1
+        || scaled.placements[0].x != 375 || scaled.placements[0].y != 0
+        || scaled.placements[0].width != 125 || scaled.placements[0].height != 50) return false;
+
+    const auto empty = layout_stack(
+        {}, StackLayoutOptions{StackDirection::Down, StackAnchor::TopLeft, 0, 500, 300, 1.0f});
+    if (!empty.ok || !empty.placements.empty()) return false;
+
+    const auto event = create_event(
+        "layout-self-test", "layout-planned", "LAYOUT_STACK_OK", "info", true,
+        "Deterministic stack layout calculation completed", std::string(kTimestamp));
+    std::cout << serialize_jsonl(event);
+    return true;
 }
 
 bool scene_controller_self_test() {
@@ -723,6 +781,11 @@ int main(int argc, char** argv) {
     if (argc > 1 && std::string_view(argv[1]) == "--hit-test-self-test") {
         const bool passed = hit_test_self_test();
         std::cout << "notification-hub-runtime hit-test self-test: " << (passed ? "ok" : "failed") << "\n";
+        return passed ? 0 : 1;
+    }
+    if (argc > 1 && std::string_view(argv[1]) == "--layout-self-test") {
+        const bool passed = layout_self_test();
+        std::cout << "notification-hub-runtime layout self-test: " << (passed ? "ok" : "failed") << "\n";
         return passed ? 0 : 1;
     }
     if (argc > 1 && std::string_view(argv[1]) == "--scene-controller-self-test") {

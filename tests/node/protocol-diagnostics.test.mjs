@@ -138,6 +138,7 @@ test('stable error code registry is unique and queryable', () => {
   assert.ok(ERROR_CODES.length > 0);
   assert.equal(ERROR_CODES.length, ERROR_CODE_SET.size);
   assert.ok(ERROR_CODE_SET.has('TRANSPORT_ACK_TIMEOUT'));
+  assert.ok(ERROR_CODE_SET.has('LAYOUT_CARD_OUT_OF_BOUNDS'));
   assert.ok(ERROR_CODE_SET.has('FALLBACK_TO_NO_DESKTOP'));
 });
 
