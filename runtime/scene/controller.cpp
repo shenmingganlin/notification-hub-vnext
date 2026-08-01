@@ -51,6 +51,8 @@ public:
     std::unordered_map<std::string, SceneCardState> cards;
     std::unordered_map<std::string, std::unique_ptr<SceneWindow>> card_windows;
     std::vector<std::string> card_order;
+    StackLayoutOptions active_layout{};
+    bool has_active_layout{};
     WorkAreaSnapshot provider_work_area{};
     WorkAreaSnapshot active_work_area{};
 };
@@ -300,6 +302,9 @@ bool RuntimeSceneController::apply_stack_layout(
             return false;
         }
         impl_->active_work_area = effective_work_area;
+        options.mode = requested_options.mode;
+        impl_->active_layout = options;
+        impl_->has_active_layout = true;
         return true;
     }
 
@@ -318,8 +323,6 @@ bool RuntimeSceneController::apply_stack_layout(
         error_message = layout.message;
         return false;
     }
-    impl_->active_work_area = effective_work_area;
-
     for (const auto& placement : layout.placements) {
         auto card_it = impl_->cards.find(placement.id);
         auto window_it = impl_->card_windows.find(placement.id);
@@ -353,6 +356,10 @@ bool RuntimeSceneController::apply_stack_layout(
         }
         window->paint();
     }
+    impl_->active_work_area = effective_work_area;
+    options.mode = requested_options.mode;
+    impl_->active_layout = options;
+    impl_->has_active_layout = true;
     return true;
 }
 
@@ -387,14 +394,39 @@ std::string RuntimeSceneController::cards_json() const {
     std::string result = "[";
     if (impl_ != nullptr) {
         bool first = true;
-        for (const auto& [id, card] : impl_->cards) {
+        for (const auto& id : impl_->card_order) {
+            const auto card_it = impl_->cards.find(id);
+            if (card_it == impl_->cards.end()) continue;
             if (!first) result += ',';
             first = false;
-            result += card_json(card);
+            result += card_json(card_it->second);
         }
     }
     result += ']';
     return result;
+}
+
+std::string RuntimeSceneController::layout_json() const {
+    if (impl_ == nullptr || !impl_->has_active_layout) return "null";
+    const auto& options = impl_->active_layout;
+    const auto mode = options.mode == LayoutMode::Shelf ? "shelf" : "stack";
+    const auto direction = options.direction == StackDirection::Down ? "down"
+        : options.direction == StackDirection::Up ? "up"
+        : options.direction == StackDirection::Right ? "right" : "left";
+    const auto anchor = options.anchor == StackAnchor::TopLeft ? "top-left"
+        : options.anchor == StackAnchor::TopRight ? "top-right"
+        : options.anchor == StackAnchor::BottomLeft ? "bottom-left" : "bottom-right";
+    return std::string("{\"layout\":") + json_string(mode)
+        + ",\"direction\":" + json_string(direction)
+        + ",\"anchor\":" + json_string(anchor)
+        + ",\"spacing\":" + std::to_string(options.spacing)
+        + ",\"workAreaWidth\":" + std::to_string(options.work_area_width)
+        + ",\"workAreaHeight\":" + std::to_string(options.work_area_height)
+        + ",\"dpiScale\":" + std::to_string(options.dpi_scale)
+        + ",\"workAreaLeft\":" + std::to_string(options.work_area_left)
+        + ",\"workAreaTop\":" + std::to_string(options.work_area_top)
+        + ",\"workAreaIsFallback\":" + (options.work_area_is_fallback ? "true" : "false")
+        + ",\"workAreaSource\":" + json_string(options.work_area_source) + "}";
 }
 
 std::string RuntimeSceneController::work_area_json() const {
@@ -420,6 +452,7 @@ std::string RuntimeSceneController::state_result_json(bool deduplicated) const {
     return std::string("{\"status\":\"accepted\",\"deduplicated\":")
         + (deduplicated ? "true" : "false")
         + ",\"sceneState\":" + state_json()
+        + ",\"layout\":" + layout_json()
         + ",\"workArea\":" + work_area_json() + "}"
         ;
 }
@@ -428,6 +461,7 @@ std::string RuntimeSceneController::cards_result_json(bool deduplicated) const {
     return std::string("{\"status\":\"accepted\",\"deduplicated\":")
         + (deduplicated ? "true" : "false")
         + ",\"sceneCards\":" + cards_json()
+        + ",\"layout\":" + layout_json()
         + ",\"workArea\":" + work_area_json() + "}"
         ;
 }

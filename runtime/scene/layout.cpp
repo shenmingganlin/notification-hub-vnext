@@ -36,17 +36,38 @@ bool placement_inside_work_area(const StackCardPlacement& placement, const Stack
 
 }  // namespace
 
-StackLayoutResult layout_stack(
+namespace {
+
+StackLayoutResult layout_linear(
     const std::vector<StackCardInput>& cards,
-    const StackLayoutOptions& options) {
+    const StackLayoutOptions& options,
+    LayoutMode mode) {
+    const bool shelf = mode == LayoutMode::Shelf;
+    if (shelf && options.direction != StackDirection::Right && options.direction != StackDirection::Left) {
+        return failure(
+            "LAYOUT_SHELF_DIRECTION_INVALID",
+            "Shelf layout direction must be right or left");
+    }
     if (options.dpi_scale <= 0.0f || !std::isfinite(options.dpi_scale)) {
-        return failure("LAYOUT_DPI_INVALID", "Stack layout DPI scale must be finite and greater than zero");
+        return failure(
+            "LAYOUT_DPI_INVALID",
+            shelf
+                ? "Shelf layout DPI scale must be finite and greater than zero"
+                : "Stack layout DPI scale must be finite and greater than zero");
     }
     if (options.work_area_width <= 0 || options.work_area_height <= 0) {
-        return failure("LAYOUT_WORK_AREA_INVALID", "Stack layout work area must have positive dimensions");
+        return failure(
+            "LAYOUT_WORK_AREA_INVALID",
+            shelf
+                ? "Shelf layout work area must have positive dimensions"
+                : "Stack layout work area must have positive dimensions");
     }
     if (options.spacing < 0) {
-        return failure("LAYOUT_SPACING_INVALID", "Stack layout spacing cannot be negative");
+        return failure(
+            "LAYOUT_SPACING_INVALID",
+            shelf
+                ? "Shelf layout spacing cannot be negative"
+                : "Stack layout spacing cannot be negative");
     }
 
     const auto spacing = scale_logical(options.spacing, options.dpi_scale);
@@ -60,17 +81,25 @@ StackLayoutResult layout_stack(
     };
     std::vector<ScaledCard> scaled_cards;
     scaled_cards.reserve(cards.size());
-    const auto horizontal = options.direction == StackDirection::Right
+    const auto horizontal = shelf || options.direction == StackDirection::Right
         || options.direction == StackDirection::Left;
     long long total_extent = 0;
     for (const auto& card : cards) {
         if (card.width <= 0 || card.height <= 0) {
-            return failure("LAYOUT_CARD_INVALID", "Stack card dimensions must be positive", card.id);
+            return failure(
+                "LAYOUT_CARD_INVALID",
+                shelf ? "Shelf card dimensions must be positive" : "Stack card dimensions must be positive",
+                card.id);
         }
         const auto width = scale_logical(card.width, options.dpi_scale);
         const auto height = scale_logical(card.height, options.dpi_scale);
         if (width <= 0 || height <= 0) {
-            return failure("LAYOUT_CARD_INVALID", "Stack card dimensions must remain positive after DPI scaling", card.id);
+            return failure(
+                "LAYOUT_CARD_INVALID",
+                shelf
+                    ? "Shelf card dimensions must remain positive after DPI scaling"
+                    : "Stack card dimensions must remain positive after DPI scaling",
+                card.id);
         }
         scaled_cards.push_back(ScaledCard{&card, width, height});
         total_extent += horizontal ? width : height;
@@ -80,8 +109,8 @@ StackLayoutResult layout_stack(
     if (total_extent > work_extent) {
         const auto& failing_card = scaled_cards.empty() ? StackCardInput{} : *scaled_cards.back().input;
         return failure(
-            "LAYOUT_CARD_OUT_OF_BOUNDS",
-            "Stack cards exceed the work area extent",
+            shelf ? "LAYOUT_SHELF_OUT_OF_BOUNDS" : "LAYOUT_CARD_OUT_OF_BOUNDS",
+            shelf ? "Shelf cards exceed the work area width" : "Stack cards exceed the work area extent",
             failing_card.id);
     }
 
@@ -90,9 +119,6 @@ StackLayoutResult layout_stack(
         const auto& card = *scaled.input;
         const auto width = scaled.width;
         const auto height = scaled.height;
-        if (card.width <= 0 || card.height <= 0) {
-            return failure("LAYOUT_CARD_INVALID", "Stack card dimensions must be positive", card.id);
-        }
         StackCardPlacement placement{card.id, 0, 0, width, height};
         if (horizontal) {
             if (options.direction == StackDirection::Right) {
@@ -126,8 +152,8 @@ StackLayoutResult layout_stack(
 
         if (!placement_inside_work_area(placement, options)) {
             return failure(
-                "LAYOUT_CARD_OUT_OF_BOUNDS",
-                "Stack card placement exceeds the work area",
+                shelf ? "LAYOUT_SHELF_OUT_OF_BOUNDS" : "LAYOUT_CARD_OUT_OF_BOUNDS",
+                shelf ? "Shelf card placement exceeds the work area" : "Stack card placement exceeds the work area",
                 card.id);
         }
         placement.x += options.work_area_left;
@@ -137,23 +163,18 @@ StackLayoutResult layout_stack(
     return result;
 }
 
+}  // namespace
+
+StackLayoutResult layout_stack(
+    const std::vector<StackCardInput>& cards,
+    const StackLayoutOptions& options) {
+    return layout_linear(cards, options, LayoutMode::Stack);
+}
+
 StackLayoutResult layout_shelf(
     const std::vector<StackCardInput>& cards,
     const StackLayoutOptions& options) {
-    if (options.direction != StackDirection::Right && options.direction != StackDirection::Left) {
-        return failure(
-            "LAYOUT_SHELF_DIRECTION_INVALID",
-            "Shelf layout direction must be right or left");
-    }
-
-    auto shelf_options = options;
-    shelf_options.mode = LayoutMode::Shelf;
-    auto result = layout_stack(cards, shelf_options);
-    if (!result.ok && result.code == "LAYOUT_CARD_OUT_OF_BOUNDS") {
-        result.code = "LAYOUT_SHELF_OUT_OF_BOUNDS";
-        result.message = "Shelf cards exceed the work area width";
-    }
-    return result;
+    return layout_linear(cards, options, LayoutMode::Shelf);
 }
 
 }  // namespace notification_hub::scene

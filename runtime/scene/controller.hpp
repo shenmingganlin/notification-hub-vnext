@@ -39,6 +39,7 @@ public:
     bool get_window_state(SceneWindowState& state) const noexcept;
     std::string state_json() const;
     std::string cards_json() const;
+    std::string layout_json() const;
     std::string work_area_json() const;
     std::string state_result_json(bool deduplicated) const;
     std::string cards_result_json(bool deduplicated) const;

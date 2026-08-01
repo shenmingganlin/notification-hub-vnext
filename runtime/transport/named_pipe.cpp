@@ -586,6 +586,7 @@ int run_named_pipe_server(std::string_view pipe_name, bool drop_after_health, bo
                                 + (deduplicated ? "true" : "false")
                                 + ",\"sceneState\":" + scene_controller.state_json()
                                 + ",\"sceneCards\":" + scene_controller.cards_json()
+                                + ",\"layout\":" + scene_controller.layout_json()
                                 + ",\"workArea\":" + scene_controller.work_area_json() + "}"
                             : std::string(generic_result)));
                 if (!send_payload(pipe, protocol::serialize_ack(parsed.message, result_json))) {

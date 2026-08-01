@@ -173,6 +173,17 @@ test('Node client completes hello, health, and shutdown over Named Pipe', async 
   assert.equal(shelfCard.payload.result.sceneCards[0].x, 0);
   assert.ok(shelfCard.payload.result.sceneCards[0].y >= 0);
   assert.ok(shelfCard.payload.result.workArea.width > 0);
+  assert.equal(shelfCard.payload.result.layout.layout, 'shelf');
+  assert.equal(shelfCard.payload.result.layout.direction, 'right');
+
+  const repeatedShelfCard = await client.request('scene.set-mode', {
+    layout: 'shelf',
+    direction: 'right',
+    anchor: 'bottom-left',
+    spacing: 12
+  }, { retryable: false });
+  assert.deepEqual(repeatedShelfCard.payload.result.sceneCards, shelfCard.payload.result.sceneCards);
+  assert.deepEqual(repeatedShelfCard.payload.result.layout, shelfCard.payload.result.layout);
 
   const stackedCard = await client.request('scene.set-mode', {
     layout: 'stack',
@@ -235,6 +246,10 @@ test('Node client completes hello, health, and shutdown over Named Pipe', async 
     }, { retryable: false }),
     (error) => error.code === 'LAYOUT_SHELF_OUT_OF_BOUNDS'
   );
+
+  const stateAfterRejectedLayout = await client.request('health', {}, { retryable: false });
+  assert.equal(stateAfterRejectedLayout.payload.result.layout.layout, 'stack');
+  assert.deepEqual(stateAfterRejectedLayout.payload.result.workArea, stackedCard.payload.result.workArea);
 
   const shutdown = await client.request('shutdown');
   assert.equal(shutdown.type, 'ack');
