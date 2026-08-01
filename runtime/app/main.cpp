@@ -20,6 +20,7 @@ using notification_hub::transport::encode_frame;
 using notification_hub::transport::run_named_pipe_server;
 using notification_hub::scene::SceneWindow;
 using notification_hub::scene::WindowConfig;
+using notification_hub::scene::point_inside_card;
 
 constexpr std::string_view kTimestamp = "2026-08-01T00:00:00.000Z";
 
@@ -83,6 +84,23 @@ bool transport_self_test() {
     if (decoder.next().code != "TRANSPORT_FRAME_EMPTY") return false;
     decoder.append(std::string_view("\x01\x00\x10\0", 4));
     if (decoder.next().code != "TRANSPORT_FRAME_TOO_LARGE") return false;
+    return true;
+}
+
+bool hit_test_self_test() {
+    constexpr float width = 420.0f;
+    constexpr float height = 180.0f;
+    if (!point_inside_card(210.0f, 90.0f, width, height)) return false;
+    if (!point_inside_card(10.0f, 90.0f, width, height)) return false;
+    if (!point_inside_card(24.0f, 24.0f, width, height)) return false;
+    if (point_inside_card(0.0f, 0.0f, width, height)) return false;
+    if (point_inside_card(10.0f, 10.0f, width, height)) return false;
+    if (point_inside_card(11.0f, 11.0f, width, height)) return false;
+
+    const auto event = create_event(
+        "interaction-self-test", "hit-test", "INTERACTION_HIT_TEST_OK", "info", true,
+        "Card and transparent-region hit testing completed", std::string(kTimestamp));
+    std::cout << serialize_jsonl(event);
     return true;
 }
 
@@ -235,6 +253,11 @@ int main(int argc, char** argv) {
     if (argc > 1 && std::string_view(argv[1]) == "--render-self-test") {
         const bool passed = render_self_test();
         std::cout << "notification-hub-runtime render self-test: " << (passed ? "ok" : "failed") << "\n";
+        return passed ? 0 : 1;
+    }
+    if (argc > 1 && std::string_view(argv[1]) == "--hit-test-self-test") {
+        const bool passed = hit_test_self_test();
+        std::cout << "notification-hub-runtime hit-test self-test: " << (passed ? "ok" : "failed") << "\n";
         return passed ? 0 : 1;
     }
     if (argc > 2 && std::string_view(argv[1]) == "--pipe-server") {

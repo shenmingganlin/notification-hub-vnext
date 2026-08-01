@@ -27,6 +27,7 @@ add_test(NAME runtime_protocol_self_test COMMAND notification-hub-runtime --prot
 add_test(NAME runtime_transport_self_test COMMAND notification-hub-runtime --transport-self-test)
 add_test(NAME runtime_window_self_test COMMAND notification-hub-runtime --window-self-test)
 add_test(NAME runtime_render_self_test COMMAND notification-hub-runtime --render-self-test)
+add_test(NAME runtime_hit_test_self_test COMMAND notification-hub-runtime --hit-test-self-test)
 
 find_program(NODE_EXECUTABLE node)
 if (NODE_EXECUTABLE)

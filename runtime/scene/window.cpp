@@ -2,6 +2,7 @@
 
 #ifdef _WIN32
 #include <windows.h>
+#include <windowsx.h>
 #endif
 
 #include <chrono>
@@ -27,6 +28,14 @@ LRESULT CALLBACK window_proc(HWND hwnd, UINT message, WPARAM wparam, LPARAM lpar
     }
 
     switch (message) {
+    case WM_NCHITTEST: {
+        if (window == nullptr) return DefWindowProcW(hwnd, message, wparam, lparam);
+        POINT point{GET_X_LPARAM(lparam), GET_Y_LPARAM(lparam)};
+        ScreenToClient(hwnd, &point);
+        return window->hit_test_client_point(static_cast<float>(point.x), static_cast<float>(point.y))
+            ? HTCLIENT
+            : HTTRANSPARENT;
+    }
     case WM_PAINT: {
         PAINTSTRUCT paint{};
         const auto device_context = BeginPaint(hwnd, &paint);
@@ -189,6 +198,10 @@ bool SceneWindow::is_frame_rendered() const noexcept {
     return frame_rendered_;
 }
 
+bool SceneWindow::hit_test_client_point(float x, float y) const noexcept {
+    return point_inside_card(x, y, static_cast<float>(config_.width), static_cast<float>(config_.height));
+}
+
 void* SceneWindow::native_handle() const noexcept {
     return hwnd_;
 }
@@ -205,7 +218,12 @@ bool SceneWindow::paint() {
 }
 
 bool SceneWindow::resize_render_target(int width, int height) {
-    return renderer_.resize(width, height);
+    const bool resized = renderer_.resize(width, height);
+    if (resized) {
+        config_.width = width;
+        config_.height = height;
+    }
+    return resized;
 }
 
 void SceneWindow::mark_first_paint() noexcept {

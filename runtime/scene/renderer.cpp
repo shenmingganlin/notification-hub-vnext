@@ -1,4 +1,5 @@
 #include "renderer.hpp"
+#include "geometry.hpp"
 
 #ifdef _WIN32
 #ifndef NOMINMAX
@@ -244,13 +245,14 @@ bool CardRenderer::draw(std::wstring_view title, std::wstring_view body) {
 
     const auto width = static_cast<float>(impl_->width);
     const auto height = static_cast<float>(impl_->height);
+    const auto bounds = card_bounds(width, height);
     const auto card = D2D1::RoundedRect(
-        D2D1::RectF(10.0f, 10.0f, (std::max)(20.0f, width - 10.0f), (std::max)(20.0f, height - 10.0f)),
-        14.0f,
-        14.0f);
+        D2D1::RectF(bounds.left, bounds.top, (std::max)(20.0f, bounds.right), (std::max)(20.0f, bounds.bottom)),
+        bounds.radius,
+        bounds.radius);
     impl_->d2d_context->FillRoundedRectangle(card, impl_->surface_brush.Get());
 
-    const auto accent = D2D1::RectF(10.0f, 10.0f, 14.0f, (std::max)(20.0f, height - 10.0f));
+    const auto accent = D2D1::RectF(bounds.left, bounds.top, bounds.left + 4.0f, (std::max)(20.0f, bounds.bottom));
     impl_->d2d_context->FillRectangle(accent, impl_->accent_brush.Get());
 
     const auto title_rect = D2D1::RectF(30.0f, 24.0f, (std::max)(36.0f, width - 24.0f), 56.0f);

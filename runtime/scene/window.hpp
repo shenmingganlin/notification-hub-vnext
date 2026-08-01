@@ -1,5 +1,6 @@
 #pragma once
 
+#include "geometry.hpp"
 #include "renderer.hpp"
 
 #include <string>
@@ -32,6 +33,7 @@ public:
     bool is_visible() const noexcept;
     bool is_renderer_ready() const noexcept;
     bool is_frame_rendered() const noexcept;
+    bool hit_test_client_point(float x, float y) const noexcept;
     void* native_handle() const noexcept;
     bool paint();
     bool resize_render_target(int width, int height);
