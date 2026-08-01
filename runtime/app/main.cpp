@@ -179,6 +179,95 @@ bool visual_self_test() {
 #endif
 }
 
+bool desktop_hit_test_self_test() {
+#ifndef _WIN32
+    std::cerr << "INTERACTION_UNSUPPORTED: Desktop hit testing requires Windows\n";
+    return false;
+#else
+    SceneWindow window(WindowConfig{
+        L"Notification Hub Desktop Hit Test Self Test",
+        L"Transparent region hit testing",
+        420,
+        180,
+        true});
+    if (!window.create() || !window.show() || !window.paint()) return false;
+
+    const auto hwnd = static_cast<HWND>(window.native_handle());
+    SetWindowPos(hwnd, HWND_TOP, 96, 96, 0, 0, SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW);
+    UpdateWindow(hwnd);
+    Sleep(50);
+    POINT origin{0, 0};
+    if (ClientToScreen(hwnd, &origin) == FALSE) return false;
+    const auto center = POINT{origin.x + 210, origin.y + 90};
+    const auto transparent_corner = POINT{origin.x, origin.y};
+    const auto center_window = WindowFromPoint(center);
+    const auto corner_window = WindowFromPoint(transparent_corner);
+    const bool card_owned = center_window == hwnd;
+    const bool corner_transparent = corner_window != hwnd;
+
+    window.request_close();
+    const auto pump_result = window.run_message_pump(false);
+    if (!card_owned || !corner_transparent || pump_result != 0 || window.is_created()) {
+        std::cerr << "desktop hit test: cardOwned=" << card_owned
+                  << " cornerTransparent=" << corner_transparent << "\n";
+        const auto event = create_event(
+            "desktop-interaction-self-test", "hit-tested", "INTERACTION_TRANSPARENT_HIT_FAILED", "error", false,
+            "Desktop WindowFromPoint hit testing did not match card geometry", std::string(kTimestamp));
+        std::cerr << serialize_jsonl(event);
+        return false;
+    }
+    const auto event = create_event(
+        "desktop-interaction-self-test", "hit-tested", "INTERACTION_TRANSPARENT_HIT_OK", "info", true,
+        "Desktop card hit and transparent corner hit testing completed", std::string(kTimestamp));
+    std::cout << serialize_jsonl(event);
+    return true;
+#endif
+}
+
+bool dpi_self_test() {
+#ifndef _WIN32
+    std::cerr << "DPI_UNSUPPORTED: Per-Monitor V2 DPI requires Windows\n";
+    return false;
+#else
+    SceneWindow window(WindowConfig{
+        L"Notification Hub DPI Self Test",
+        L"Per-Monitor V2 DPI contract",
+        420,
+        180,
+        true});
+    if (!window.create() || !window.show()) return false;
+
+    const auto hwnd = static_cast<HWND>(window.native_handle());
+    const auto dpi = GetDpiForWindow(hwnd);
+    const auto awareness = GetWindowDpiAwarenessContext(hwnd);
+    RECT client_rect{};
+    const bool size_valid = GetClientRect(hwnd, &client_rect) != FALSE
+        && client_rect.right - client_rect.left == 420
+        && client_rect.bottom - client_rect.top == 180;
+    const bool awareness_valid = AreDpiAwarenessContextsEqual(
+        awareness,
+        DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2) != FALSE;
+
+    window.request_close();
+    const auto pump_result = window.run_message_pump(false);
+    if (dpi == 0 || !size_valid || !awareness_valid || pump_result != 0 || window.is_created()) {
+        std::cerr << "dpi self test: dpi=" << dpi
+                  << " sizeValid=" << size_valid
+                  << " awarenessValid=" << awareness_valid << "\n";
+        const auto event = create_event(
+            "dpi-self-test", "dpi-validated", "DPI_REGRESSION_FAILED", "error", false,
+            "Per-Monitor V2 DPI contract validation failed", std::string(kTimestamp));
+        std::cerr << serialize_jsonl(event);
+        return false;
+    }
+    const auto event = create_event(
+        "dpi-self-test", "dpi-validated", "DPI_REGRESSION_OK", "info", true,
+        "Per-Monitor V2 DPI contract validated", std::string(kTimestamp));
+    std::cout << serialize_jsonl(event);
+    return true;
+#endif
+}
+
 bool desktop_visual_self_test() {
 #ifndef _WIN32
     std::cerr << "RENDERER_UNSUPPORTED: Desktop capture requires Windows\n";
@@ -536,6 +625,16 @@ int main(int argc, char** argv) {
     if (argc > 1 && std::string_view(argv[1]) == "--hit-test-self-test") {
         const bool passed = hit_test_self_test();
         std::cout << "notification-hub-runtime hit-test self-test: " << (passed ? "ok" : "failed") << "\n";
+        return passed ? 0 : 1;
+    }
+    if (argc > 1 && std::string_view(argv[1]) == "--desktop-hit-test-self-test") {
+        const bool passed = desktop_hit_test_self_test();
+        std::cout << "notification-hub-runtime desktop hit-test self-test: " << (passed ? "ok" : "failed") << "\n";
+        return passed ? 0 : 1;
+    }
+    if (argc > 1 && std::string_view(argv[1]) == "--dpi-self-test") {
+        const bool passed = dpi_self_test();
+        std::cout << "notification-hub-runtime dpi self-test: " << (passed ? "ok" : "failed") << "\n";
         return passed ? 0 : 1;
     }
     if (argc > 1 && std::string_view(argv[1]) == "--desktop-visual-self-test") {
