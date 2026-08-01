@@ -1,12 +1,14 @@
 #pragma once
 
+#include "renderer.hpp"
+
 #include <string>
-#include <string_view>
 
 namespace notification_hub::scene {
 
 struct WindowConfig {
     std::wstring title{L"Notification Hub"};
+    std::wstring body{L"Native scene surface ready"};
     int width{420};
     int height{180};
     bool tool_window{true};
@@ -28,7 +30,11 @@ public:
 
     bool is_created() const noexcept;
     bool is_visible() const noexcept;
+    bool is_renderer_ready() const noexcept;
+    bool is_frame_rendered() const noexcept;
     void* native_handle() const noexcept;
+    bool paint();
+    bool resize_render_target(int width, int height);
     void mark_first_paint() noexcept;
     void mark_native_destroyed() noexcept;
 
@@ -38,6 +44,8 @@ private:
     bool class_registered_{};
     bool visible_{};
     bool first_paint_seen_{};
+    bool frame_rendered_{};
+    CardRenderer renderer_;
     std::wstring class_name_{L"NotificationHubVNextSceneWindow"};
 };
 

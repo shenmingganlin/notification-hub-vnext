@@ -30,11 +30,19 @@ LRESULT CALLBACK window_proc(HWND hwnd, UINT message, WPARAM wparam, LPARAM lpar
     case WM_PAINT: {
         PAINTSTRUCT paint{};
         const auto device_context = BeginPaint(hwnd, &paint);
-        FillRect(device_context, &paint.rcPaint, static_cast<HBRUSH>(GetStockObject(BLACK_BRUSH)));
+        const bool rendered = window != nullptr && window->paint();
+        if (!rendered) {
+            FillRect(device_context, &paint.rcPaint, static_cast<HBRUSH>(GetStockObject(BLACK_BRUSH)));
+        }
         EndPaint(hwnd, &paint);
         if (window != nullptr) window->mark_first_paint();
         return 0;
     }
+    case WM_SIZE:
+        if (window != nullptr) {
+            window->resize_render_target(LOWORD(lparam), HIWORD(lparam));
+        }
+        return 0;
     case WM_ERASEBKGND:
         return 1;
     case WM_CLOSE:
@@ -81,7 +89,7 @@ bool SceneWindow::create() {
     }
 
     DWORD style = WS_POPUP;
-    DWORD extended_style = WS_EX_LAYERED | WS_EX_NOACTIVATE;
+    DWORD extended_style = WS_EX_NOACTIVATE;
     if (config_.tool_window) extended_style |= WS_EX_TOOLWINDOW;
 
     RECT bounds{0, 0, config_.width, config_.height};
@@ -102,7 +110,7 @@ bool SceneWindow::create() {
     if (hwnd == nullptr) return false;
 
     hwnd_ = hwnd;
-    SetLayeredWindowAttributes(hwnd, 0, 255, LWA_ALPHA);
+    renderer_.initialize(hwnd_, config_.width, config_.height);
     return true;
 #else
     return false;
@@ -156,6 +164,7 @@ int SceneWindow::run_message_pump(bool close_after_first_paint) {
 
 void SceneWindow::destroy() {
 #ifdef _WIN32
+    renderer_.reset();
     if (hwnd_ != nullptr) {
         DestroyWindow(static_cast<HWND>(hwnd_));
         hwnd_ = nullptr;
@@ -172,8 +181,31 @@ bool SceneWindow::is_visible() const noexcept {
     return visible_;
 }
 
+bool SceneWindow::is_renderer_ready() const noexcept {
+    return renderer_.is_ready();
+}
+
+bool SceneWindow::is_frame_rendered() const noexcept {
+    return frame_rendered_;
+}
+
 void* SceneWindow::native_handle() const noexcept {
     return hwnd_;
+}
+
+bool SceneWindow::paint() {
+#ifdef _WIN32
+    if (hwnd_ == nullptr || !renderer_.is_ready()) return false;
+    const bool rendered = renderer_.draw(config_.title, config_.body);
+    frame_rendered_ = frame_rendered_ || rendered;
+    return rendered;
+#else
+    return false;
+#endif
+}
+
+bool SceneWindow::resize_render_target(int width, int height) {
+    return renderer_.resize(width, height);
 }
 
 void SceneWindow::mark_first_paint() noexcept {
@@ -183,6 +215,7 @@ void SceneWindow::mark_first_paint() noexcept {
 void SceneWindow::mark_native_destroyed() noexcept {
     hwnd_ = nullptr;
     visible_ = false;
+    renderer_.reset();
 }
 
 }  // namespace notification_hub::scene

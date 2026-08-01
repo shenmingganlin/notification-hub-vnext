@@ -86,12 +86,57 @@ bool transport_self_test() {
     return true;
 }
 
+bool render_self_test() {
+#ifndef _WIN32
+    std::cerr << "RENDERER_UNSUPPORTED: Native card rendering requires Windows\n";
+    return false;
+#else
+    SceneWindow window(WindowConfig{
+        L"Notification Hub Render Self Test",
+        L"Direct2D and DirectWrite card surface",
+        420,
+        180,
+        true});
+    if (!window.create() || !window.is_renderer_ready()) {
+        const auto event = create_event(
+            "render-self-test", "renderer-created", "RENDERER_RESOURCE_FAILED", "error", false,
+            "Direct2D or DirectWrite resources could not be initialized", std::string(kTimestamp));
+        std::cerr << serialize_jsonl(event);
+        return false;
+    }
+    if (!window.show()) {
+        const auto event = create_event(
+            "render-self-test", "shown", "RENDERER_WINDOW_SHOW_FAILED", "error", false,
+            "Rendered scene window show failed", std::string(kTimestamp));
+        std::cerr << serialize_jsonl(event);
+        return false;
+    }
+    if (window.run_message_pump(true) != 0 || !window.is_frame_rendered()) {
+        const auto event = create_event(
+            "render-self-test", "renderer-drawn", "RENDERER_FRAME_TIMEOUT", "error", false,
+            "Direct2D card surface did not render a frame", std::string(kTimestamp));
+        std::cerr << serialize_jsonl(event);
+        return false;
+    }
+    const auto event = create_event(
+        "render-self-test", "renderer-drawn", "RENDERER_FRAME_RENDERED", "info", true,
+        "Direct2D and DirectWrite card surface rendered", std::string(kTimestamp));
+    std::cout << serialize_jsonl(event);
+    return true;
+#endif
+}
+
 bool window_self_test() {
 #ifndef _WIN32
     std::cerr << "WINDOW_UNSUPPORTED: Native Scene Window requires Windows\\n";
     return false;
 #else
-    SceneWindow window(WindowConfig{L"Notification Hub Self Test", 320, 120, true});
+    SceneWindow window(WindowConfig{
+        L"Notification Hub Self Test",
+        L"Native scene window lifecycle",
+        320,
+        120,
+        true});
     if (!window.create()) {
         const auto event = create_event(
             "window-self-test", "renderer-created", "RENDERER_WINDOW_CREATE_FAILED", "error", false,
@@ -185,6 +230,11 @@ int main(int argc, char** argv) {
     if (argc > 1 && std::string_view(argv[1]) == "--window-self-test") {
         const bool passed = window_self_test();
         std::cout << "notification-hub-runtime window self-test: " << (passed ? "ok" : "failed") << "\n";
+        return passed ? 0 : 1;
+    }
+    if (argc > 1 && std::string_view(argv[1]) == "--render-self-test") {
+        const bool passed = render_self_test();
+        std::cout << "notification-hub-runtime render self-test: " << (passed ? "ok" : "failed") << "\n";
         return passed ? 0 : 1;
     }
     if (argc > 2 && std::string_view(argv[1]) == "--pipe-server") {

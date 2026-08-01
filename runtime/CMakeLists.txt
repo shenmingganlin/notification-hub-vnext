@@ -5,6 +5,7 @@ add_executable(notification-hub-runtime
   transport/frame.cpp
   transport/named_pipe.cpp
   scene/window.cpp
+  scene/renderer.cpp
 )
 
 target_include_directories(notification-hub-runtime PRIVATE
@@ -18,13 +19,14 @@ target_compile_definitions(notification-hub-runtime PRIVATE
 )
 
 if (WIN32)
-  target_link_libraries(notification-hub-runtime PRIVATE user32 gdi32)
+  target_link_libraries(notification-hub-runtime PRIVATE user32 gdi32 d2d1 dwrite)
 endif()
 
 add_test(NAME runtime_smoke COMMAND notification-hub-runtime --self-test)
 add_test(NAME runtime_protocol_self_test COMMAND notification-hub-runtime --protocol-self-test)
 add_test(NAME runtime_transport_self_test COMMAND notification-hub-runtime --transport-self-test)
 add_test(NAME runtime_window_self_test COMMAND notification-hub-runtime --window-self-test)
+add_test(NAME runtime_render_self_test COMMAND notification-hub-runtime --render-self-test)
 
 find_program(NODE_EXECUTABLE node)
 if (NODE_EXECUTABLE)
