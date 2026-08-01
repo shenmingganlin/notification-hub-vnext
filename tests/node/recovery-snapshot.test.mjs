@@ -87,6 +87,38 @@ test('recovery snapshot persists atomically and validates on load', async () => 
   }
 });
 
+test('recovery snapshot replaces entries by key and preserves distinct replay order', () => {
+  const snapshot = createRecoverySnapshot();
+  addRecoveryEntry(snapshot, {
+    key: 'scene-mode',
+    type: 'scene.set-mode',
+    payload: { layout: 'stack', direction: 'down', anchor: 'top-right', spacing: 8 }
+  });
+  addRecoveryEntry(snapshot, {
+    key: 'provider-mode',
+    type: 'scene.set-mode',
+    payload: { layout: 'stack', direction: 'down', anchor: 'top-right', spacing: 10 }
+  });
+  addRecoveryEntry(snapshot, {
+    key: 'scene-mode',
+    type: 'scene.set-mode',
+    payload: { layout: 'shelf', direction: 'right', anchor: 'bottom-left', spacing: 12 }
+  });
+
+  assert.deepEqual(snapshot.entries, [
+    {
+      key: 'scene-mode',
+      type: 'scene.set-mode',
+      payload: { layout: 'shelf', direction: 'right', anchor: 'bottom-left', spacing: 12 }
+    },
+    {
+      key: 'provider-mode',
+      type: 'scene.set-mode',
+      payload: { layout: 'stack', direction: 'down', anchor: 'top-right', spacing: 10 }
+    }
+  ]);
+});
+
 test('recovery snapshot rejects unsupported commands and malformed files', async () => {
   const snapshot = createRecoverySnapshot();
   assert.throws(

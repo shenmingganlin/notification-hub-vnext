@@ -7,6 +7,189 @@ import { addRecoveryEntry, createRecoverySnapshot } from '../../plugin/runtime/r
 
 const runtimePath = process.argv[2];
 
+async function runRecoveryScenario(t, suffix, entries) {
+  const pipeName = `\\\\.\\pipe\\notification-hub-vnext-recovery-${suffix}-${process.pid}`;
+  const recoverySnapshot = createRecoverySnapshot({ entries });
+  const manager = new RuntimeProcessManager({
+    runtimePath,
+    pipeName,
+    runtimeArgs: ['--exit-after-health'],
+    restartRuntimeArgs: [],
+    readyTimeoutMs: 3000,
+    restartDelayMs: 10,
+    maxRestartAttempts: 2,
+    recoverySnapshot
+  });
+  const client = new PipeClient({
+    pipeName,
+    connectTimeoutMs: 3000,
+    requestTimeoutMs: 3000,
+    maxReconnectAttempts: 5,
+    reconnectDelayMs: 20
+  });
+  const managerStates = [];
+  const recoveryEvents = [];
+  manager.on('state', (change) => managerStates.push(change));
+  manager.on('recovery-applied', (event) => recoveryEvents.push(event));
+  manager.setRecoveryClient(client);
+
+  t.after(async () => {
+    await client.close();
+    await manager.stop();
+  });
+
+  await manager.start();
+  await client.request('hello', { clientVersion: `recovery-${suffix}` });
+  await client.request('health');
+  await new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      clearInterval(poll);
+      reject(new Error(`Runtime did not recover; states=${JSON.stringify(managerStates)}`));
+    }, 3000);
+    const check = () => {
+      if (!managerStates.some((change) => change.state === 'crashed')) return;
+      if (!managerStates.some((change) => change.state === 'running' && change.reason === 'ready')) return;
+      if (recoveryEvents.length !== entries.length) return;
+      clearTimeout(timer);
+      clearInterval(poll);
+      resolve();
+    };
+    const poll = setInterval(check, 10);
+    check();
+  });
+
+  return { manager, client, managerStates, recoveryEvents, health: await client.request('health') };
+}
+
+test('RuntimeProcessManager restores the last replayed layout with no cards', async (t) => {
+  if (!runtimePath) {
+    t.skip('requires a Runtime executable path; CTest supplies it');
+    return;
+  }
+
+  const result = await runRecoveryScenario(t, 'empty-scene', [
+    {
+      key: 'stack-mode',
+      type: 'scene.set-mode',
+      payload: {
+        layout: 'stack',
+        direction: 'down',
+        anchor: 'top-right',
+        spacing: 8,
+        workAreaWidth: 800,
+        workAreaHeight: 600,
+        dpiScale: 1
+      }
+    },
+    {
+      key: 'shelf-mode',
+      type: 'scene.set-mode',
+      payload: {
+        layout: 'shelf',
+        direction: 'right',
+        anchor: 'bottom-left',
+        spacing: 12,
+        workAreaWidth: 800,
+        workAreaHeight: 600,
+        dpiScale: 1
+      }
+    }
+  ]);
+
+  assert.equal(result.health.payload.result.layout.layout, 'shelf');
+  assert.equal(result.health.payload.result.layout.direction, 'right');
+  assert.deepEqual(result.health.payload.result.sceneCards, []);
+  assert.deepEqual(result.recoveryEvents.map((event) => event.key), ['stack-mode', 'shelf-mode']);
+});
+
+test('RuntimeProcessManager reapplies recovery layout when cards follow the mode', async (t) => {
+  if (!runtimePath) {
+    t.skip('requires a Runtime executable path; CTest supplies it');
+    return;
+  }
+
+  const result = await runRecoveryScenario(t, 'layout-before-card', [
+    {
+      key: 'shelf-mode',
+      type: 'scene.set-mode',
+      payload: {
+        layout: 'shelf',
+        direction: 'right',
+        anchor: 'bottom-left',
+        spacing: 12,
+        workAreaWidth: 800,
+        workAreaHeight: 600,
+        dpiScale: 1
+      }
+    },
+    {
+      key: 'card-a',
+      type: 'scene.create',
+      payload: {
+        id: 'card-a',
+        title: 'Card A',
+        body: 'Created after shelf recovery',
+        x: 700,
+        y: 80,
+        width: 320,
+        height: 160
+      }
+    }
+  ]);
+
+  assert.equal(result.health.payload.result.layout.layout, 'shelf');
+  assert.deepEqual(result.health.payload.result.sceneCards.map((card) => ({
+    id: card.id,
+    x: card.x,
+    y: card.y
+  })), [{ id: 'card-a', x: 0, y: 440 }]);
+  assert.deepEqual(result.recoveryEvents.map((event) => event.key), ['shelf-mode', 'card-a']);
+});
+
+test('RuntimeProcessManager reapplies recovery layout when cards precede the mode', async (t) => {
+  if (!runtimePath) {
+    t.skip('requires a Runtime executable path; CTest supplies it');
+    return;
+  }
+
+  const result = await runRecoveryScenario(t, 'card-before-layout', [
+    {
+      key: 'card-a',
+      type: 'scene.create',
+      payload: {
+        id: 'card-a',
+        title: 'Card A',
+        body: 'Created before shelf recovery',
+        x: 700,
+        y: 80,
+        width: 320,
+        height: 160
+      }
+    },
+    {
+      key: 'shelf-mode',
+      type: 'scene.set-mode',
+      payload: {
+        layout: 'shelf',
+        direction: 'right',
+        anchor: 'bottom-left',
+        spacing: 12,
+        workAreaWidth: 800,
+        workAreaHeight: 600,
+        dpiScale: 1
+      }
+    }
+  ]);
+
+  assert.equal(result.health.payload.result.layout.layout, 'shelf');
+  assert.deepEqual(result.health.payload.result.sceneCards.map((card) => ({
+    id: card.id,
+    x: card.x,
+    y: card.y
+  })), [{ id: 'card-a', x: 0, y: 440 }]);
+  assert.deepEqual(result.recoveryEvents.map((event) => event.key), ['card-a', 'shelf-mode']);
+});
+
 test('RuntimeProcessManager restarts Runtime after a controlled exit', async (t) => {
   if (!runtimePath) {
     t.skip('requires a Runtime executable path; CTest supplies it');

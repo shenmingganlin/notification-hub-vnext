@@ -13,7 +13,7 @@
 ## Explicit non-goals
 
 - 不新增滚动、换行、动画或多显示器拓扑。
-- 不改变 Node recovery 的 replay 顺序；最后一次有效 `scene.set-mode` 仍由恢复回放建立 Runtime 状态。
+- 不改变 Node recovery 的 replay 顺序；同一个 recovery key 由最后一次写入覆盖，不同 key 按 entries 顺序重放，最后一次成功的 `scene.set-mode` 建立 Runtime 状态。
 - 不改变 fixed card order 契约。
 
 ## Vertical slices

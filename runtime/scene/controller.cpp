@@ -53,6 +53,7 @@ public:
     std::vector<std::string> card_order;
     StackLayoutOptions active_layout{};
     bool has_active_layout{};
+    bool active_layout_uses_provider{};
     WorkAreaSnapshot provider_work_area{};
     WorkAreaSnapshot active_work_area{};
 };
@@ -169,6 +170,29 @@ bool RuntimeSceneController::create_card(
     impl_->cards.emplace(card.id, stored_card);
     impl_->card_windows.emplace(card.id, std::move(window));
     impl_->card_order.push_back(card.id);
+
+    if (impl_->has_active_layout) {
+        auto reapply_options = impl_->active_layout;
+        if (impl_->active_layout_uses_provider) {
+            reapply_options.work_area_width = 0;
+            reapply_options.work_area_height = 0;
+            reapply_options.dpi_scale = 1.0f;
+            reapply_options.work_area_left = 0;
+            reapply_options.work_area_top = 0;
+            reapply_options.work_area_is_fallback = false;
+            reapply_options.work_area_source.clear();
+        }
+        std::string layout_error_code;
+        std::string layout_error_message;
+        if (!apply_stack_layout(reapply_options, layout_error_code, layout_error_message)) {
+            impl_->card_order.pop_back();
+            impl_->card_windows.erase(card.id);
+            impl_->cards.erase(card.id);
+            error_code = layout_error_code;
+            error_message = layout_error_message;
+            return false;
+        }
+    }
     return true;
 }
 
@@ -305,6 +329,7 @@ bool RuntimeSceneController::apply_stack_layout(
         options.mode = requested_options.mode;
         impl_->active_layout = options;
         impl_->has_active_layout = true;
+        impl_->active_layout_uses_provider = !has_explicit_work_area;
         return true;
     }
 
@@ -360,6 +385,7 @@ bool RuntimeSceneController::apply_stack_layout(
     options.mode = requested_options.mode;
     impl_->active_layout = options;
     impl_->has_active_layout = true;
+    impl_->active_layout_uses_provider = !has_explicit_work_area;
     return true;
 }
 
