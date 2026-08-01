@@ -22,6 +22,7 @@ public:
 
     bool apply_window_state(const SceneWindowState& state, std::string& error_code, std::string& error_message);
     bool get_window_state(SceneWindowState& state) const noexcept;
+    std::string state_json() const;
     std::string state_result_json(bool deduplicated) const;
     void pump_messages();
     bool has_window() const noexcept;

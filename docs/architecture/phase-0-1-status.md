@@ -27,6 +27,7 @@
 - recovery snapshot 增加 `scene.update` 窗口几何 entry，严格校验 `x/y/width/height`，重启后按顺序恢复到 Runtime 状态层。
 - Runtime Named Pipe 严格接收 `scene.update`，通过 RuntimeSceneController 应用到真实 Native HWND，并在 ACK 中回显实际窗口几何；非法尺寸返回 `RUNTIME_SCENE_STATE_INVALID`。
 - 增加 Runtime Scene Controller self-test，直接验证 HWND 位置和客户区尺寸已应用。
+- ProcessManager 重启 smoke 已验证 Runtime 重启后按快照顺序重放 `scene.update`，并通过重启后 `health` 读取真实恢复窗口几何。
 - 重启后按快照顺序重放恢复命令，并对失败停止后续恢复、输出结构化诊断。
 - 协议 envelope 增加可选 `idempotencyKey`，Runtime 对重复请求去重并拒绝同 key 不同内容的冲突请求。
 - 建立最小 Win32 Scene Window，支持 Per-Monitor V2 DPI、非激活显示、消息泵、自动关闭和生命周期诊断。
@@ -45,7 +46,7 @@
 
 ## 当前阶段
 
-Phase 2 已完成基础闭环，Phase 4 正在推进，Phase 5 已开始。Node.js 与 C++ Runtime 已具备协议、诊断、framing、最小 Named Pipe 通信、有限自动重连、Runtime 进程托管、幂等请求、基础恢复快照持久化、`scene.update` 窗口几何状态恢复协议、Runtime Scene Controller 到 Native HWND 的实际应用、最小 Win32 窗口生命周期、Direct2D/DirectWrite 卡片绘制、DirectComposition 预乘 alpha surface、离屏结构性像素回归、卡片命中、关闭、基础拖动交互、桌面区域合成回归、桌面透明命中、DPI 基础契约和受控 `WM_DPICHANGED` 几何同步；Runtime 重启后的完整窗口恢复、真实跨显示器 DPI 和完整 Scene 状态重建尚未完全收口。
+Phase 2 已完成基础闭环，Phase 4 正在推进，Phase 5 已开始。Node.js 与 C++ Runtime 已具备协议、诊断、framing、最小 Named Pipe 通信、有限自动重连、Runtime 进程托管、幂等请求、基础恢复快照持久化、`scene.update` 窗口几何状态恢复协议、Runtime Scene Controller 到 Native HWND 的实际应用、Runtime 重启后的窗口几何恢复、最小 Win32 窗口生命周期、Direct2D/DirectWrite 卡片绘制、DirectComposition 预乘 alpha surface、离屏结构性像素回归、卡片命中、关闭、基础拖动交互、桌面区域合成回归、桌面透明命中、DPI 基础契约和受控 `WM_DPICHANGED` 几何同步；真实跨显示器 DPI 和完整 Scene 状态重建尚未完全收口。
 
 ## 标准验证命令
 

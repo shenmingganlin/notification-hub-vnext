@@ -20,6 +20,11 @@ test('RuntimeProcessManager restarts Runtime after a controlled exit', async (t)
     type: 'config.update',
     payload: { profile: 'default', displayDurationMs: 4500 }
   });
+  addRecoveryEntry(recoverySnapshot, {
+    key: 'scene-window',
+    type: 'scene.update',
+    payload: { x: 137, y: 83, width: 500, height: 220 }
+  });
   const manager = new RuntimeProcessManager({
     runtimePath,
     pipeName,
@@ -74,8 +79,15 @@ test('RuntimeProcessManager restarts Runtime after a controlled exit', async (t)
   const recoveredHealth = await client.request('health');
   assert.equal(recoveredHealth.type, 'ack');
   assert.equal(recoveredHealth.payload.requestType, 'health');
-  assert.equal(recoveryEvents.length, 1);
+  assert.equal(recoveryEvents.length, 2);
   assert.equal(recoveryEvents[0].key, 'runtime-config');
+  assert.equal(recoveryEvents[1].key, 'scene-window');
+  assert.deepEqual(recoveredHealth.payload.result.sceneState, {
+    x: 137,
+    y: 83,
+    width: 500,
+    height: 220
+  });
   assert.ok(clientStates.some((change) => change.state === 'reconnecting'));
   assert.ok(managerStates.some((change) => change.state === 'starting'));
   assert.ok(managerStates.some((change) => change.state === 'crashed'));

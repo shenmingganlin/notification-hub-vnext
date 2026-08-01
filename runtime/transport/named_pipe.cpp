@@ -286,7 +286,11 @@ int run_named_pipe_server(std::string_view pipe_name, bool drop_after_health, bo
                     : "{\"status\":\"accepted\",\"deduplicated\":false}";
                 const auto result_json = parsed.message.type == "scene.update"
                     ? scene_controller.state_result_json(deduplicated)
-                    : std::string(generic_result);
+                    : (parsed.message.type == "health"
+                        ? std::string("{\"status\":\"accepted\",\"deduplicated\":")
+                            + (deduplicated ? "true" : "false")
+                            + ",\"sceneState\":" + scene_controller.state_json() + "}"
+                        : std::string(generic_result));
                 if (!send_payload(pipe, protocol::serialize_ack(parsed.message, result_json))) {
                     std::cerr << "TRANSPORT_PIPE_WRITE_FAILED: " << GetLastError() << "\n";
                     close_pipe(pipe);

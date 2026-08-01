@@ -93,6 +93,15 @@ bool RuntimeSceneController::get_window_state(SceneWindowState& state) const noe
 #endif
 }
 
+std::string RuntimeSceneController::state_json() const {
+    SceneWindowState state{};
+    if (!get_window_state(state) && impl_ != nullptr) state = impl_->state;
+    return std::string("{\"x\":") + std::to_string(state.x)
+        + ",\"y\":" + std::to_string(state.y)
+        + ",\"width\":" + std::to_string(state.width)
+        + ",\"height\":" + std::to_string(state.height) + "}";
+}
+
 std::string RuntimeSceneController::state_result_json(bool deduplicated) const {
     SceneWindowState state{};
     if (!get_window_state(state) && impl_ != nullptr) state = impl_->state;
