@@ -2,6 +2,7 @@ import { EventEmitter } from 'node:events';
 import { spawn } from 'node:child_process';
 
 import { validateRecoverySnapshot } from './recovery-snapshot.js';
+import { selectRecoveryPlan } from './recovery-plan.js';
 
 function processError(code, message, details = {}) {
   return Object.assign(new Error(message), { code, details });
@@ -17,6 +18,7 @@ export class RuntimeProcessManager extends EventEmitter {
     restartDelayMs = 25,
     maxRestartAttempts = 2,
     autoRestart = true,
+    sceneState,
     recoverySnapshot,
     recoveryClient,
     spawnOptions = {}
@@ -39,7 +41,14 @@ export class RuntimeProcessManager extends EventEmitter {
     this.restartDelayMs = restartDelayMs;
     this.maxRestartAttempts = maxRestartAttempts;
     this.autoRestart = autoRestart;
-    this.recoverySnapshot = recoverySnapshot ? validateRecoverySnapshot(recoverySnapshot) : null;
+    this.recoverySource = null;
+    this.recoveryDiagnostics = [];
+    if (sceneState !== undefined) {
+      this.applyRecoveryPlan(selectRecoveryPlan({ sceneState, recoverySnapshot }));
+    } else {
+      this.recoverySnapshot = recoverySnapshot ? validateRecoverySnapshot(recoverySnapshot) : null;
+      this.recoverySource = this.recoverySnapshot ? 'recovery-snapshot' : null;
+    }
     this.recoveryClient = recoveryClient ?? null;
     this.spawnOptions = { windowsHide: true, ...spawnOptions };
     this.child = null;
@@ -169,6 +178,27 @@ export class RuntimeProcessManager extends EventEmitter {
 
   setRecoverySnapshot(snapshot) {
     this.recoverySnapshot = validateRecoverySnapshot(snapshot);
+    this.recoverySource = 'recovery-snapshot';
+    this.recoveryDiagnostics = [];
+    return this.recoverySnapshot;
+  }
+
+  setRecoveryState({ sceneState, recoverySnapshot } = {}) {
+    const plan = selectRecoveryPlan({ sceneState, recoverySnapshot });
+    this.applyRecoveryPlan(plan);
+    return plan;
+  }
+
+  applyRecoveryPlan(plan) {
+    if (!plan || typeof plan !== 'object' || !plan.snapshot) {
+      throw processError('RUNTIME_RECOVERY_PLAN_INVALID', 'Recovery plan must include a snapshot');
+    }
+    this.recoverySnapshot = validateRecoverySnapshot(plan.snapshot);
+    this.recoverySource = plan.source ?? 'recovery-snapshot';
+    this.recoveryDiagnostics = Array.isArray(plan.diagnostics) ? [...plan.diagnostics] : [];
+    for (const diagnostic of this.recoveryDiagnostics) {
+      this.emitDiagnostic(diagnostic.code, diagnostic.message, diagnostic);
+    }
     return this.recoverySnapshot;
   }
 
