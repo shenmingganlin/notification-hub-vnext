@@ -14,12 +14,15 @@
 - 建立 C++ Runtime 协议 envelope 解析、严格字段校验和 JSONL 诊断输出。
 - 建立 4 字节 little-endian 长度前缀 framing 编解码器。
 - framing 支持增量接收、分片、粘包、截断和消息大小上限。
-- Node.js 测试通过：9/9。
-- CTest 通过：3/3。
+- 建立 Windows Named Pipe 一次性服务端与 Node.js 客户端。
+- 完成 `hello`、`health`、`shutdown` 的跨进程 ACK 闭环。
+- 增加连接超时、ACK 超时、读写失败和断开错误码。
+- Node.js 测试通过：9/9，Named Pipe smoke 单独由 CTest 执行。
+- CTest 通过：4/4。
 
 ## 当前阶段
 
-Phase 2 正在推进。Node.js 与 C++ Runtime 已分别具备可测试的协议和诊断基础，传输 framing 已完成；Windows Named Pipe API、Runtime 生命周期和重连尚未接入。
+Phase 2 已完成基础闭环，Phase 4 正在推进。Node.js 与 C++ Runtime 已具备协议、诊断、framing 和最小 Named Pipe 通信能力；Runtime 生命周期管理、ACK 重试、自动重连和状态重建尚未接入。
 
 ## 标准验证命令
 
@@ -42,4 +45,4 @@ ctest --preset debug-vs2026
 
 ## 下一步
 
-进入 Named Pipe Runtime 骨架：把已完成的 framing 接入 Windows Named Pipe 服务端和 Node.js 客户端，再增加请求、ACK、超时和断开诊断。
+继续完善 Named Pipe Runtime：增加连接生命周期管理、ACK 重试、自动重连、Runtime 重启后的状态重建和故障注入。

@@ -3,6 +3,7 @@ add_executable(notification-hub-runtime
   diagnostics/event.cpp
   protocol/message.cpp
   transport/frame.cpp
+  transport/named_pipe.cpp
 )
 
 target_include_directories(notification-hub-runtime PRIVATE
@@ -18,3 +19,14 @@ target_compile_definitions(notification-hub-runtime PRIVATE
 add_test(NAME runtime_smoke COMMAND notification-hub-runtime --self-test)
 add_test(NAME runtime_protocol_self_test COMMAND notification-hub-runtime --protocol-self-test)
 add_test(NAME runtime_transport_self_test COMMAND notification-hub-runtime --transport-self-test)
+
+find_program(NODE_EXECUTABLE node)
+if (NODE_EXECUTABLE)
+  add_test(
+    NAME runtime_named_pipe_smoke
+    COMMAND "${NODE_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/node/named-pipe-smoke.test.mjs" "$<TARGET_FILE:notification-hub-runtime>"
+  )
+  set_tests_properties(runtime_named_pipe_smoke PROPERTIES
+    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+  )
+endif()

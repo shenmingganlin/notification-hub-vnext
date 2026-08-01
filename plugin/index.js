@@ -11,3 +11,4 @@ export const pluginName = 'notification-hub-vnext';
 export * from './protocol/index.js';
 export * from './diagnostics/index.js';
 export * from './diagnostics/error-codes.js';
+export * from './runtime/pipe-client.js';

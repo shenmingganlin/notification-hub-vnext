@@ -47,8 +47,10 @@ public:
                 if (!parse_integer(result.message.protocol_version)) return fail("PROTOCOL_INVALID_MESSAGE", "protocolVersion must be an integer");
             } else if (name == "requestId") {
                 if (!parse_string(result.message.request_id)) return fail("PROTOCOL_INVALID_MESSAGE", "requestId must be a string");
+                request_id_ = result.message.request_id;
             } else if (name == "traceId") {
                 if (!parse_string(result.message.trace_id)) return fail("PROTOCOL_INVALID_MESSAGE", "traceId must be a string");
+                trace_id_ = result.message.trace_id;
             } else if (name == "type") {
                 if (!parse_string(result.message.type)) return fail("PROTOCOL_INVALID_MESSAGE", "type must be a string");
             } else if (name == "timestamp") {
@@ -90,7 +92,12 @@ private:
 
     ParseResult fail(std::string code, std::string message) const {
         ParseResult result;
-        result.error = {std::move(code), std::move(message), {}, {}};
+        result.error = {
+            std::move(code),
+            std::move(message),
+            request_id_,
+            trace_id_
+        };
         return result;
     }
 
@@ -235,6 +242,8 @@ private:
 
     std::string_view input_;
     size_t position_{};
+    std::string request_id_;
+    std::string trace_id_;
 };
 
 }  // namespace

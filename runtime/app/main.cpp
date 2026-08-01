@@ -1,6 +1,7 @@
 #include "../diagnostics/event.hpp"
 #include "../protocol/message.hpp"
 #include "../transport/frame.hpp"
+#include "../transport/named_pipe.hpp"
 
 #include <iostream>
 #include <string_view>
@@ -15,6 +16,7 @@ using notification_hub::protocol::serialize_ack;
 using notification_hub::transport::FrameDecoder;
 using notification_hub::transport::FrameStatus;
 using notification_hub::transport::encode_frame;
+using notification_hub::transport::run_named_pipe_server;
 
 constexpr std::string_view kTimestamp = "2026-08-01T00:00:00.000Z";
 
@@ -141,6 +143,9 @@ int main(int argc, char** argv) {
         const bool passed = transport_self_test();
         std::cout << "notification-hub-runtime transport self-test: " << (passed ? "ok" : "failed") << "\n";
         return passed ? 0 : 1;
+    }
+    if (argc > 2 && std::string_view(argv[1]) == "--pipe-server") {
+        return run_named_pipe_server(argv[2]);
     }
 
     std::cout << "notification-hub-runtime " << NOTIFICATION_HUB_VERSION << "\n";
