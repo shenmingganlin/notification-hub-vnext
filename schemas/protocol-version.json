@@ -1,0 +1,25 @@
+{
+  "protocolVersion": 1,
+  "status": "alpha",
+  "supportedMessageTypes": [
+    "hello",
+    "health",
+    "capabilities",
+    "scene.create",
+    "scene.update",
+    "scene.dismiss",
+    "scene.drag",
+    "scene.set-mode",
+    "config.update",
+    "diagnostic.subscribe",
+    "shutdown",
+    "ack",
+    "error"
+  ],
+  "framing": {
+    "lengthBytes": 4,
+    "byteOrder": "little-endian",
+    "encoding": "utf-8",
+    "payload": "json"
+  }
+}

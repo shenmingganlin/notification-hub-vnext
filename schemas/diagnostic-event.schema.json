@@ -1,0 +1,80 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://notification-hub-vnext.local/schemas/diagnostic-event.schema.json",
+  "title": "Notification Hub vNext diagnostic event",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "diagnosticId",
+    "traceId",
+    "stage",
+    "code",
+    "severity",
+    "recoverable",
+    "message",
+    "timestamp",
+    "context"
+  ],
+  "properties": {
+    "diagnosticId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "traceId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "notificationId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "stage": {
+      "type": "string",
+      "enum": [
+        "event-received",
+        "classified",
+        "profile-resolved",
+        "content-formatted",
+        "sound-resolved",
+        "transport-sent",
+        "runtime-accepted",
+        "scene-queued",
+        "layout-planned",
+        "physics-started",
+        "renderer-created",
+        "shown",
+        "hit-tested",
+        "drag-started",
+        "drag-ended",
+        "clicked",
+        "paused",
+        "resumed",
+        "dismissed",
+        "expired",
+        "fallback",
+        "error"
+      ]
+    },
+    "code": {
+      "type": "string",
+      "minLength": 1
+    },
+    "severity": {
+      "enum": ["trace", "info", "warning", "error", "fatal"]
+    },
+    "recoverable": {
+      "type": "boolean"
+    },
+    "message": {
+      "type": "string",
+      "minLength": 1
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "context": {
+      "type": "object"
+    }
+  }
+}

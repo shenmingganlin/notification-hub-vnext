@@ -9,7 +9,7 @@
     "node": ">=18"
   },
   "scripts": {
-    "check": "node --check plugin/index.js && node --check tests/node/smoke.test.mjs",
-    "test": "node tests/node/smoke.test.mjs"
+    "check": "node --check plugin/index.js && node --check plugin/protocol/index.js && node --check plugin/diagnostics/index.js && node --check tests/node/smoke.test.mjs && node --check tests/node/protocol-diagnostics.test.mjs",
+    "test": "node --test tests/node/*.test.mjs"
   }
 }
