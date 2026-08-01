@@ -29,6 +29,7 @@
 - 新增纯数学 stack 布局模块，支持方向、交叉轴锚点、间距、工作区边界、DPI 缩放和稳定错误码。
 - 新增工作区快照模型与 Windows 主显示器工作区查询适配器，统一输出物理像素矩形、DPI、来源和显式 fallback 标志；本阶段仍不宣称多显示器热插拔支持。
 - `scene.set-mode` 已接入 stack 布局，按卡片创建顺序计算并应用多卡片 HWND 几何；stack 配置也进入 recovery snapshot。
+- Work Area Provider 已接入 `scene.set-mode`：缺省工作区由主显示器 Provider 提供，显式尺寸与 DPI 仍可作为覆盖；ACK/health 回显工作区来源、DPI 和 fallback 状态。
 - Runtime Named Pipe 严格接收单窗口、多卡片和布局命令，通过 RuntimeSceneController 应用到真实 Native HWND，并在 ACK/health 中回显实际状态；非法 payload 返回稳定错误码。
 - 增加 Runtime Scene Controller self-test，直接验证 HWND 位置和客户区尺寸已应用。
 - ProcessManager 重启 smoke 已验证 Runtime 重启后按快照顺序重放窗口与卡片命令，并通过重启后 `health` 读取真实恢复几何和卡片集合。
@@ -50,7 +51,7 @@
 
 ## 当前阶段
 
-Phase 2 已完成基础闭环，Phase 4 正在推进，Phase 5 已开始。Node.js 与 C++ Runtime 已具备协议、诊断、framing、最小 Named Pipe 通信、有限自动重连、Runtime 进程托管、幂等请求、版本化恢复快照、fixed 布局多卡片创建/更新/关闭恢复、stack 布局数学与运行时接入、Runtime Scene Controller 到 Native HWND 的实际应用、Runtime 重启后的窗口与卡片状态恢复、最小 Win32 窗口生命周期、Direct2D/DirectWrite 卡片绘制、DirectComposition 预乘 alpha surface、离屏结构性像素回归、卡片命中、关闭、基础拖动交互、桌面区域合成回归、桌面透明命中、DPI 基础契约和受控 `WM_DPICHANGED` 几何同步；shelf/cascade/focus/freeform、真实跨显示器 DPI 和完整 Scene 状态重建尚未完全收口。
+Phase 2 已完成基础闭环，Phase 4 正在推进，Phase 5 已开始。Node.js 与 C++ Runtime 已具备协议、诊断、framing、最小 Named Pipe 通信、有限自动重连、Runtime 进程托管、幂等请求、版本化恢复快照、fixed 布局多卡片创建/更新/关闭恢复、stack 布局数学与运行时接入、Work Area Provider 默认工作区与显式覆盖、Runtime Scene Controller 到 Native HWND 的实际应用、Runtime 重启后的窗口与卡片状态恢复、最小 Win32 窗口生命周期、Direct2D/DirectWrite 卡片绘制、DirectComposition 预乘 alpha surface、离屏结构性像素回归、卡片命中、关闭、基础拖动交互、桌面区域合成回归、桌面透明命中、DPI 基础契约和受控 `WM_DPICHANGED` 几何同步；shelf/cascade/focus/freeform、真实跨显示器 DPI 和完整 Scene 状态重建尚未完全收口。
 
 ## 标准验证命令
 
@@ -73,4 +74,4 @@ ctest --preset debug-vs2026
 
 ## 下一步
 
-继续将工作区 Provider 接入 `scene.set-mode`，保留显式输入作为测试和策略覆盖；随后在统一物理像素工作区上实现 shelf。真实多显示器拓扑、显示器热插拔刷新和多显示器 DPI 拖动验证仍待完成。
+在统一物理像素工作区上实现 shelf。真实多显示器拓扑、显示器热插拔刷新和多显示器 DPI 拖动验证仍待完成。

@@ -2,9 +2,11 @@
 
 #include "window.hpp"
 #include "layout.hpp"
+#include "work_area.hpp"
 #include "../protocol/message.hpp"
 
 #include <algorithm>
+#include <cmath>
 #include <memory>
 #include <string>
 #include <unordered_map>
@@ -49,6 +51,8 @@ public:
     std::unordered_map<std::string, SceneCardState> cards;
     std::unordered_map<std::string, std::unique_ptr<SceneWindow>> card_windows;
     std::vector<std::string> card_order;
+    WorkAreaSnapshot provider_work_area{};
+    WorkAreaSnapshot active_work_area{};
 };
 
 RuntimeSceneController::~RuntimeSceneController() {
@@ -239,19 +243,50 @@ bool RuntimeSceneController::dismiss_card(
 }
 
 bool RuntimeSceneController::apply_stack_layout(
-    const StackLayoutOptions& options,
+    const StackLayoutOptions& requested_options,
     std::string& error_code,
     std::string& error_message) {
-    std::vector<StackCardInput> inputs;
-    if (impl_ == nullptr) {
-        const auto layout = layout_stack(inputs, options);
-        if (!layout.ok) {
-            error_code = layout.code;
-            error_message = layout.message;
+    if (impl_ == nullptr) impl_ = new Impl();
+    if (!valid_work_area(impl_->provider_work_area)) impl_->provider_work_area = query_primary_work_area();
+
+    auto options = requested_options;
+    WorkAreaSnapshot effective_work_area{};
+    const bool has_explicit_work_area = requested_options.work_area_width > 0
+        || requested_options.work_area_height > 0
+        || requested_options.dpi_scale != 1.0f
+        || requested_options.work_area_left != 0
+        || requested_options.work_area_top != 0;
+    if (!has_explicit_work_area) {
+        if (!valid_work_area(impl_->provider_work_area)) {
+            error_code = "LAYOUT_WORK_AREA_INVALID";
+            error_message = "Runtime display work area provider returned an invalid snapshot";
             return false;
         }
-        return true;
+        effective_work_area = impl_->provider_work_area;
+        options.work_area_width = effective_work_area.rect.width;
+        options.work_area_height = effective_work_area.rect.height;
+        options.dpi_scale = effective_work_area.dpi_scale;
+        options.work_area_left = effective_work_area.rect.left;
+        options.work_area_top = effective_work_area.rect.top;
+        options.work_area_is_fallback = effective_work_area.is_fallback;
+        options.work_area_source = effective_work_area.source;
+    } else {
+        if (options.work_area_width <= 0 || options.work_area_height <= 0
+            || options.dpi_scale <= 0.0f || !std::isfinite(options.dpi_scale)) {
+            error_code = "LAYOUT_WORK_AREA_INVALID";
+            error_message = "Explicit stack layout work area override is invalid";
+            return false;
+        }
+        effective_work_area = WorkAreaSnapshot{
+            WorkAreaRect{0, 0, options.work_area_width, options.work_area_height},
+            options.dpi_scale,
+            false,
+            "explicit-override"};
+        options.work_area_source = effective_work_area.source;
+        options.work_area_is_fallback = effective_work_area.is_fallback;
     }
+
+    std::vector<StackCardInput> inputs;
     if (impl_->card_order.empty()) {
         const auto layout = layout_stack(inputs, options);
         if (!layout.ok) {
@@ -259,6 +294,7 @@ bool RuntimeSceneController::apply_stack_layout(
             error_message = layout.message;
             return false;
         }
+        impl_->active_work_area = effective_work_area;
         return true;
     }
 
@@ -277,6 +313,7 @@ bool RuntimeSceneController::apply_stack_layout(
         error_message = layout.message;
         return false;
     }
+    impl_->active_work_area = effective_work_area;
 
     for (const auto& placement : layout.placements) {
         auto card_it = impl_->cards.find(placement.id);
@@ -355,17 +392,38 @@ std::string RuntimeSceneController::cards_json() const {
     return result;
 }
 
+std::string RuntimeSceneController::work_area_json() const {
+    WorkAreaSnapshot snapshot{};
+    if (impl_ != nullptr && valid_work_area(impl_->active_work_area)) {
+        snapshot = impl_->active_work_area;
+    } else if (impl_ != nullptr && valid_work_area(impl_->provider_work_area)) {
+        snapshot = impl_->provider_work_area;
+    } else {
+        snapshot = query_primary_work_area();
+    }
+    if (!valid_work_area(snapshot)) return "null";
+    return std::string("{\"left\":") + std::to_string(snapshot.rect.left)
+        + ",\"top\":" + std::to_string(snapshot.rect.top)
+        + ",\"width\":" + std::to_string(snapshot.rect.width)
+        + ",\"height\":" + std::to_string(snapshot.rect.height)
+        + ",\"dpiScale\":" + std::to_string(snapshot.dpi_scale)
+        + ",\"isFallback\":" + (snapshot.is_fallback ? "true" : "false")
+        + ",\"source\":" + json_string(snapshot.source) + "}";
+}
+
 std::string RuntimeSceneController::state_result_json(bool deduplicated) const {
     return std::string("{\"status\":\"accepted\",\"deduplicated\":")
         + (deduplicated ? "true" : "false")
-        + ",\"sceneState\":" + state_json() + "}"
+        + ",\"sceneState\":" + state_json()
+        + ",\"workArea\":" + work_area_json() + "}"
         ;
 }
 
 std::string RuntimeSceneController::cards_result_json(bool deduplicated) const {
     return std::string("{\"status\":\"accepted\",\"deduplicated\":")
         + (deduplicated ? "true" : "false")
-        + ",\"sceneCards\":" + cards_json() + "}"
+        + ",\"sceneCards\":" + cards_json()
+        + ",\"workArea\":" + work_area_json() + "}"
         ;
 }
 

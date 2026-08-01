@@ -130,6 +130,8 @@ StackLayoutResult layout_stack(
                 "Stack card placement exceeds the work area",
                 card.id);
         }
+        placement.x += options.work_area_left;
+        placement.y += options.work_area_top;
         result.placements.push_back(std::move(placement));
     }
     return result;

@@ -53,7 +53,7 @@ float dpi_scale_for_monitor(HMONITOR monitor) noexcept {
 
 WorkAreaSnapshot query_primary_work_area() noexcept {
 #ifdef _WIN32
-    const auto monitor = MonitorFromPoint(POINT{0, 0}, MONITOR_DEFAULTTONEAREST);
+    const auto monitor = MonitorFromPoint(POINT{0, 0}, MONITOR_DEFAULTTOPRIMARY);
     MONITORINFO monitor_info{};
     monitor_info.cbSize = sizeof(monitor_info);
     if (monitor != nullptr && GetMonitorInfoW(monitor, &monitor_info) != FALSE) {

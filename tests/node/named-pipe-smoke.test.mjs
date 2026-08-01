@@ -148,6 +148,21 @@ test('Node client completes hello, health, and shutdown over Named Pipe', async 
   }, { retryable: false, idempotencyKey: 'card-b-dismiss' });
   assert.deepEqual(dismissedCard.payload.result.sceneCards.map((card) => card.id), ['card-a']);
 
+  const providerStackedCard = await client.request('scene.set-mode', {
+    layout: 'stack',
+    direction: 'down',
+    anchor: 'top-right',
+    spacing: 12
+  }, { retryable: false, idempotencyKey: 'scene-stack-provider-1' });
+  assert.equal(providerStackedCard.type, 'ack');
+  assert.ok(providerStackedCard.payload.result.workArea.width > 0);
+  assert.ok(providerStackedCard.payload.result.workArea.height > 0);
+  assert.ok(providerStackedCard.payload.result.workArea.dpiScale > 0);
+  assert.ok(['primary-monitor-work-area', 'virtual-screen-fallback'].includes(
+    providerStackedCard.payload.result.workArea.source
+  ));
+  assert.equal(typeof providerStackedCard.payload.result.workArea.isFallback, 'boolean');
+
   const stackedCard = await client.request('scene.set-mode', {
     layout: 'stack',
     direction: 'down',
@@ -163,6 +178,15 @@ test('Node client completes hello, health, and shutdown over Named Pipe', async 
     x: card.x,
     y: card.y
   })), [{ id: 'card-a', x: 480, y: 0 }]);
+  assert.deepEqual(stackedCard.payload.result.workArea, {
+    left: 0,
+    top: 0,
+    width: 800,
+    height: 600,
+    dpiScale: 1,
+    isFallback: false,
+    source: 'explicit-override'
+  });
 
   await assert.rejects(
     client.request('scene.set-mode', {
@@ -175,6 +199,17 @@ test('Node client completes hello, health, and shutdown over Named Pipe', async 
       dpiScale: 1
     }, { retryable: false }),
     (error) => error.code === 'LAYOUT_CARD_OUT_OF_BOUNDS'
+  );
+
+  await assert.rejects(
+    client.request('scene.set-mode', {
+      layout: 'stack',
+      direction: 'down',
+      anchor: 'top-right',
+      spacing: 12,
+      workAreaWidth: 800
+    }, { retryable: false }),
+    (error) => error.code === 'LAYOUT_INVALID'
   );
 
   const shutdown = await client.request('shutdown');

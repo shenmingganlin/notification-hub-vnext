@@ -37,6 +37,16 @@ test('recovery snapshot persists atomically and validates on load', async () => 
       }
     });
     addRecoveryEntry(snapshot, {
+      key: 'provider-mode',
+      type: 'scene.set-mode',
+      payload: {
+        layout: 'stack',
+        direction: 'down',
+        anchor: 'top-right',
+        spacing: 8
+      }
+    });
+    addRecoveryEntry(snapshot, {
       key: 'window',
       type: 'scene.update',
       payload: { x: 120, y: 80, width: 420, height: 180 }
@@ -98,6 +108,14 @@ test('recovery snapshot rejects unsupported commands and malformed files', async
       key: 'invalid-mode',
       type: 'scene.set-mode',
       payload: { layout: 'stack', direction: 'down', anchor: 'top-right', spacing: -1, workAreaWidth: 800, workAreaHeight: 600, dpiScale: 1 }
+    }),
+    (error) => error.code === 'RUNTIME_RECOVERY_INVALID_PAYLOAD'
+  );
+  assert.throws(
+    () => addRecoveryEntry(snapshot, {
+      key: 'partial-mode',
+      type: 'scene.set-mode',
+      payload: { layout: 'stack', direction: 'down', anchor: 'top-right', spacing: 8, workAreaWidth: 800 }
     }),
     (error) => error.code === 'RUNTIME_RECOVERY_INVALID_PAYLOAD'
   );

@@ -32,6 +32,10 @@ struct StackLayoutOptions {
     int work_area_width{};
     int work_area_height{};
     float dpi_scale{1.0f};
+    int work_area_left{};
+    int work_area_top{};
+    bool work_area_is_fallback{};
+    std::string work_area_source;
 };
 
 struct StackCardPlacement {

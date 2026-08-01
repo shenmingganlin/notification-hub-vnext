@@ -284,8 +284,12 @@ bool parse_scene_mode_payload(std::string_view payload, scene::StackLayoutOption
         return false;
     }
     skip();
+    const bool any_work_area_override = seen_work_area_width || seen_work_area_height || seen_dpi_scale;
+    const bool complete_work_area_override = seen_work_area_width
+        && seen_work_area_height
+        && seen_dpi_scale;
     if (position != payload.size() || !seen_layout || !seen_direction || !seen_anchor
-        || !seen_spacing || !seen_work_area_width || !seen_work_area_height || !seen_dpi_scale
+        || !seen_spacing || (any_work_area_override && !complete_work_area_override)
         || layout != "stack") return false;
     if (direction == "down") options.direction = scene::StackDirection::Down;
     else if (direction == "up") options.direction = scene::StackDirection::Up;
@@ -580,7 +584,8 @@ int run_named_pipe_server(std::string_view pipe_name, bool drop_after_health, bo
                             ? std::string("{\"status\":\"accepted\",\"deduplicated\":")
                                 + (deduplicated ? "true" : "false")
                                 + ",\"sceneState\":" + scene_controller.state_json()
-                                + ",\"sceneCards\":" + scene_controller.cards_json() + "}"
+                                + ",\"sceneCards\":" + scene_controller.cards_json()
+                                + ",\"workArea\":" + scene_controller.work_area_json() + "}"
                             : std::string(generic_result)));
                 if (!send_payload(pipe, protocol::serialize_ack(parsed.message, result_json))) {
                     std::cerr << "TRANSPORT_PIPE_WRITE_FAILED: " << GetLastError() << "\n";

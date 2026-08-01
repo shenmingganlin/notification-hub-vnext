@@ -67,11 +67,15 @@ function validateSceneDismissPayload(payload) {
 function validateSceneModePayload(payload) {
   const directions = new Set(['down', 'up', 'left', 'right']);
   const anchors = new Set(['top-left', 'top-right', 'bottom-left', 'bottom-right']);
+  const overrideFields = ['workAreaWidth', 'workAreaHeight', 'dpiScale'];
+  const hasAnyOverride = overrideFields.some((field) => field in payload);
+  const hasCompleteOverride = overrideFields.every((field) => field in payload);
   if (payload.layout !== 'stack' || !directions.has(payload.direction) || !anchors.has(payload.anchor)
     || !Number.isInteger(payload.spacing) || payload.spacing < 0
-    || !Number.isInteger(payload.workAreaWidth) || payload.workAreaWidth <= 0
-    || !Number.isInteger(payload.workAreaHeight) || payload.workAreaHeight <= 0
-    || typeof payload.dpiScale !== 'number' || !Number.isFinite(payload.dpiScale) || payload.dpiScale <= 0) {
+    || (hasAnyOverride && !hasCompleteOverride)
+    || (hasCompleteOverride && (!Number.isInteger(payload.workAreaWidth) || payload.workAreaWidth <= 0
+      || !Number.isInteger(payload.workAreaHeight) || payload.workAreaHeight <= 0
+      || typeof payload.dpiScale !== 'number' || !Number.isFinite(payload.dpiScale) || payload.dpiScale <= 0))) {
     throw recoveryError('RUNTIME_RECOVERY_INVALID_PAYLOAD', 'scene.set-mode requires a valid stack layout payload');
   }
   return payload;
