@@ -13,7 +13,7 @@ test('Node client completes hello, health, and shutdown over Named Pipe', async 
     return;
   }
   const pipeName = `\\\\.\\pipe\\notification-hub-vnext-smoke-${process.pid}`;
-  const runtime = spawn(runtimePath, ['--pipe-server', pipeName], {
+  const runtime = spawn(runtimePath, ['--pipe-server', pipeName, '--drop-after-health'], {
     stdio: ['ignore', 'pipe', 'pipe'],
     windowsHide: true
   });
@@ -44,7 +44,14 @@ test('Node client completes hello, health, and shutdown over Named Pipe', async 
   });
 
   await ready;
-  const client = new PipeClient({ pipeName, connectTimeoutMs: 3000, requestTimeoutMs: 3000 });
+  const client = new PipeClient({
+    pipeName,
+    connectTimeoutMs: 3000,
+    requestTimeoutMs: 3000,
+    reconnectDelayMs: 10
+  });
+  const states = [];
+  client.on('state', (change) => states.push(change));
   t.after(() => client.close());
 
   const hello = await client.request('hello', { clientVersion: 'node-smoke' });
@@ -56,6 +63,24 @@ test('Node client completes hello, health, and shutdown over Named Pipe', async 
   const health = await client.request('health');
   assert.equal(health.type, 'ack');
   assert.equal(health.payload.requestType, 'health');
+
+  await new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(`Runtime did not report disconnect; states=${JSON.stringify(states)}`)), 1500);
+    const check = () => {
+      if (!states.some((change) => change.state === 'disconnected')) return;
+      clearTimeout(timer);
+      client.off('state', check);
+      resolve();
+    };
+    client.on('state', check);
+    check();
+  });
+
+  const recoveredHealth = await client.request('health');
+  assert.equal(recoveredHealth.type, 'ack');
+  assert.equal(recoveredHealth.payload.requestType, 'health');
+  assert.ok(states.some((change) => change.state === 'reconnecting'));
+  assert.ok(states.filter((change) => change.state === 'connected').length >= 2);
 
   const shutdown = await client.request('shutdown');
   assert.equal(shutdown.type, 'ack');

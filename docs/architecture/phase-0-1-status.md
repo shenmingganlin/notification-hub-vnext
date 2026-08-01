@@ -17,12 +17,15 @@
 - 建立 Windows Named Pipe 一次性服务端与 Node.js 客户端。
 - 完成 `hello`、`health`、`shutdown` 的跨进程 ACK 闭环。
 - 增加连接超时、ACK 超时、读写失败和断开错误码。
+- Node 客户端增加 `connecting`、`connected`、`disconnected`、`reconnecting`、`closed` 状态。
+- 对 `hello`、`health`、`capabilities` 实现有限重连；非幂等请求默认不重放。
+- 增加 Runtime 主动断开故障注入，并验证断开后的第二次 health 恢复。
 - Node.js 测试通过：9/9，Named Pipe smoke 单独由 CTest 执行。
 - CTest 通过：4/4。
 
 ## 当前阶段
 
-Phase 2 已完成基础闭环，Phase 4 正在推进。Node.js 与 C++ Runtime 已具备协议、诊断、framing 和最小 Named Pipe 通信能力；Runtime 生命周期管理、ACK 重试、自动重连和状态重建尚未接入。
+Phase 2 已完成基础闭环，Phase 4 正在推进。Node.js 与 C++ Runtime 已具备协议、诊断、framing、最小 Named Pipe 通信和有限自动重连能力；Runtime 生命周期管理、完整 ACK 重试语义和状态重建尚未接入。
 
 ## 标准验证命令
 
@@ -45,4 +48,4 @@ ctest --preset debug-vs2026
 
 ## 下一步
 
-继续完善 Named Pipe Runtime：增加连接生命周期管理、ACK 重试、自动重连、Runtime 重启后的状态重建和故障注入。
+继续完善 Named Pipe Runtime：增加 Runtime 进程管理、重启后的状态重建、请求幂等键策略和更细粒度的故障注入。

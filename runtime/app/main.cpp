@@ -145,7 +145,8 @@ int main(int argc, char** argv) {
         return passed ? 0 : 1;
     }
     if (argc > 2 && std::string_view(argv[1]) == "--pipe-server") {
-        return run_named_pipe_server(argv[2]);
+        const bool drop_after_health = argc > 3 && std::string_view(argv[3]) == "--drop-after-health";
+        return run_named_pipe_server(argv[2], drop_after_health);
     }
 
     std::cout << "notification-hub-runtime " << NOTIFICATION_HUB_VERSION << "\n";
