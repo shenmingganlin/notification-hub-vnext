@@ -60,7 +60,11 @@ if (NODE_EXECUTABLE)
     NAME runtime_host_adapter_smoke
     COMMAND "${NODE_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/node/host-adapter-runtime-smoke.test.mjs" "$<TARGET_FILE:notification-hub-runtime>"
   )
-  set_tests_properties(runtime_named_pipe_smoke runtime_process_manager_smoke runtime_scene_state_persistence_smoke runtime_host_adapter_smoke PROPERTIES
+  add_test(
+    NAME runtime_host_adapter_restart_smoke
+    COMMAND "${NODE_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/node/host-adapter-restart-runtime-smoke.test.mjs" "$<TARGET_FILE:notification-hub-runtime>"
+  )
+  set_tests_properties(runtime_named_pipe_smoke runtime_process_manager_smoke runtime_scene_state_persistence_smoke runtime_host_adapter_smoke runtime_host_adapter_restart_smoke PROPERTIES
     WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
   )
 endif()

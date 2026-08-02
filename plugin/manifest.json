@@ -12,6 +12,12 @@
   "contributes": {
     "configuration": {
       "properties": {
+        "runtimeEnabled": {
+          "type": "boolean",
+          "title": "启用 Native Runtime",
+          "description": "启动独立的 Notification Hub vNext Native Scene Runtime。",
+          "default": true
+        },
         "sceneStatePersistenceEnabled": {
           "type": "boolean",
           "title": "SceneState 快照持久化",

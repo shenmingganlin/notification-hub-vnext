@@ -43,6 +43,7 @@
 - 新增 SceneState 快照生命周期适配器：PipeClient 发出只读 response 事件，RuntimeProcessManager 对有效 `sceneStateSnapshot` 做 debounce 写入，并在 stop 前 flush；失败通过结构化 diagnostic 暴露。
 - manifest 增加 SceneState 持久化启用开关、路径和 debounce 配置；配置工厂支持从 Hana host context 的 `dataDir/config` 解析路径，并新增真实 Runtime health 到文件落盘 smoke。
 - 新增 `RuntimeHostAdapter`，串联配置、SceneState/旧 recovery 选择、PipeClient、RuntimeProcessManager、hello、恢复 replay、首次 health 和 stop；首次安装的双文件缺失仅在 host startup 的 `allowEmpty` 路径下显式启动空 Scene。
+- vNext 入口已接入真实 Hana `onload/onunload`，默认从独立插件目录加载 `runtime/notification-hub-runtime.exe`，使用 `notification-hub-vnext-*` Named Pipe，并将启动失败限制在本插件诊断范围内。
 - 重启后按快照顺序重放恢复命令，并对失败停止后续恢复、输出结构化诊断。
 - 协议 envelope 增加可选 `idempotencyKey`，Runtime 对重复请求去重并拒绝同 key 不同内容的冲突请求。
 - 建立最小 Win32 Scene Window，支持 Per-Monitor V2 DPI、非激活显示、消息泵、自动关闭和生命周期诊断。
@@ -57,8 +58,8 @@
 - 增加桌面级 `WindowFromPoint` 透明区域命中测试，以及 Per-Monitor V2 DPI、窗口客户区尺寸和当前窗口 DPI 读取测试。
 - 接入 `WM_DPICHANGED` 建议矩形处理，验证 DPI 状态、窗口位置、客户区尺寸、渲染目标和命中几何同步。
 - 桌面 `WindowFromPoint` 命中 self-test 增加窗口显示后的短暂轮询，等待 HWND/Z-order 与 DComp surface 命中状态稳定，消除启动时序导致的偶发卡片区域未命中。
-- Node.js 测试通过：11 项中 11 项通过，2 项需要 Runtime 参数的测试由 CTest 执行。
-- CTest 通过：当前 18/18。
+- Node.js 测试通过：包含入口生命周期、运行时隔离配置和 Host Adapter 恢复覆盖；需要 Runtime 参数的测试由 CTest 执行。
+- CTest 通过：当前 21/21。
 
 ## 当前阶段
 
@@ -85,4 +86,4 @@ ctest --preset debug-vs2026
 
 ## 下一步
 
-继续收口 shelf 的视觉与交互边界，并将 `RuntimeHostAdapter` 接入完整 Hana 插件 `onload/onunload`；当前仍未伪造宿主自动启动接入。真实多显示器拓扑、显示器热插拔刷新和多显示器 DPI 拖动验证仍待完成。
+继续收口 shelf 的视觉与交互边界，并定义宿主配置热更新、Runtime 路径、Named Pipe 名称和关闭错误上报策略。真实多显示器拓扑、显示器热插拔刷新和多显示器 DPI 拖动验证仍待完成。
