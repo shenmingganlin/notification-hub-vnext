@@ -11,6 +11,7 @@
 #include <windows.h>
 #endif
 
+#include <chrono>
 #include <iostream>
 #include <limits>
 #include <string>
@@ -439,16 +440,20 @@ bool desktop_hit_test_self_test() {
                 SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW) == FALSE) continue;
         BringWindowToTop(hwnd);
         UpdateWindow(hwnd);
-        Sleep(50);
         POINT origin{0, 0};
         if (ClientToScreen(hwnd, &origin) == FALSE) continue;
         const auto center = POINT{origin.x + 210, origin.y + 90};
         const auto transparent_corner = POINT{origin.x, origin.y};
-        center_window = WindowFromPoint(center);
-        corner_window = WindowFromPoint(transparent_corner);
-        card_owned = center_window == hwnd;
-        corner_transparent = corner_window != hwnd;
-        if (card_owned) break;
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(500);
+        do {
+            center_window = WindowFromPoint(center);
+            corner_window = WindowFromPoint(transparent_corner);
+            card_owned = center_window == hwnd;
+            corner_transparent = corner_window != hwnd;
+            if (card_owned && corner_transparent) break;
+            Sleep(10);
+        } while (std::chrono::steady_clock::now() < deadline);
+        if (card_owned && corner_transparent) break;
     }
 
     window.request_close();

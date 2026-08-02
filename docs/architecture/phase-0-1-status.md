@@ -56,6 +56,7 @@
 - 当前环境中 `PrintWindow` 对 `WS_EX_NOREDIRECTIONBITMAP` 返回空白，屏幕区域回退能够采集到最终 DirectComposition 合成结果。
 - 增加桌面级 `WindowFromPoint` 透明区域命中测试，以及 Per-Monitor V2 DPI、窗口客户区尺寸和当前窗口 DPI 读取测试。
 - 接入 `WM_DPICHANGED` 建议矩形处理，验证 DPI 状态、窗口位置、客户区尺寸、渲染目标和命中几何同步。
+- 桌面 `WindowFromPoint` 命中 self-test 增加窗口显示后的短暂轮询，等待 HWND/Z-order 与 DComp surface 命中状态稳定，消除启动时序导致的偶发卡片区域未命中。
 - Node.js 测试通过：11 项中 11 项通过，2 项需要 Runtime 参数的测试由 CTest 执行。
 - CTest 通过：当前 18/18。
 
