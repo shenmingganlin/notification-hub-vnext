@@ -96,6 +96,16 @@ test('SceneState projection lets Runtime re-query provider work areas', () => {
   assert.doesNotThrow(() => createRecoverySnapshot({ entries }));
 });
 
+test('SceneState projection does not create a Native Scene window for an empty scene', () => {
+  const entries = sceneStateToRecoveryEntries(createState({
+    cardOrder: [],
+    cards: [],
+    layout: null
+  }));
+
+  assert.deepEqual(entries, []);
+});
+
 test('SceneState projection without layout preserves card geometry', () => {
   const entries = sceneStateToRecoveryEntries(createState({ layout: null }));
 

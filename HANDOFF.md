@@ -16,7 +16,8 @@ Current branch and checkpoint:
 
 ```text
 branch: main
-commit: 76faf40 feat: integrate isolated vnext plugin runtime
+previous committed checkpoint: b241aa3 docs: add codex handoff for vnext
+current fix set: vNext install/runtime regression fixes documented and verified below
 ```
 
 The legacy plugin must remain installed and running in parallel. It must not be replaced, stopped, edited, or used as a runtime dependency.
@@ -125,13 +126,37 @@ runtime/notification-hub-runtime.exe
 
 Do not hard-code a path into the old plugin directory. Do not reuse the legacy TCP helper, legacy data directory, or legacy process.
 
-## 6. Known manual-install incident
+## 6. Manual-install incident and resolution
 
 The release ZIP was generated and statically checked:
 
 ```text
 file: dist\notification-hub-vnext-0.1.0-alpha.1.zip
 sha256: 6472C25ACB6BC2037A328B6A01BA4DA83C5C928180415455201049A1689E2DD8
+```
+
+The first real Hana drag-and-drop attempt produced a red `EPERM / Permission denied` error while handling the vNext target directory. The failed attempt left a partial directory, and the vNext Runtime auto-started from that partial directory because `autoRestart: true`, creating a cleanup loop. This context was preserved before cleanup.
+
+The following fixes were then applied in the vNext source:
+
+- `runtime/transport/named_pipe.cpp`: avoid a blocking idle `ReadFile` on the Runtime UI thread; pump window messages while waiting for pipe data so transparent hit testing does not make the window appear hung.
+- `plugin/runtime/scene-state-recovery.js`: do not replay `scene.update` for a truly empty Scene, preventing an empty upper-left Native window from being created.
+- `plugin/index.js`: expose a JSON-safe plugin instance summary through `toJSON()`, preventing Hana install/lifecycle serialization from traversing the Runtime Host's Node timer graph.
+
+Focused regression tests were added in `tests/node/plugin-lifecycle.test.mjs` and `tests/node/scene-state-recovery.test.mjs`.
+
+After disabling the vNext plugin and reinstalling/enabling it through Hana's real UI, manual installation succeeded. Current verified state:
+
+- vNext plugin: `loaded/activated`;
+- vNext Runtime: running from the vNext install directory;
+- empty Scene: no main window handle is created;
+- legacy plugin and helper: remain installed and untouched.
+
+The verified release ZIP is:
+
+```text
+file: dist\notification-hub-vnext-0.1.0-alpha.1.zip
+sha256: 8A253EABB5F554333E0BDE5F823B3A9E0389421E3B81BDA4A0753C229F643ED2
 ```
 
 Static ZIP checks passed:
@@ -141,26 +166,27 @@ Static ZIP checks passed:
 - no nested `plugin/manifest.json` exists;
 - no legacy `notification-hub-0.2.1` reference was included.
 
-A real Hana drag-and-drop attempt produced a red `EPERM / Permission denied` error while handling the vNext target directory. The failed attempt left a partial directory containing `runtime/` and `schemas/`. The vNext Runtime was then auto-started from that partial directory because the process manager had `autoRestart: true`. Stopping it caused Hana to start a new vNext Runtime, producing a cleanup loop.
-
-The user explicitly confirmed cleanup. The vNext process was stopped only after path verification and the partial vNext directory was removed. Current verified state at handoff:
-
-- vNext install directory: absent;
-- vNext Runtime process: absent;
-- legacy plugin directory: present;
-- legacy helper: remains untouched.
-
-There is currently no confirmed successful manual installation of this ZIP. Treat the package as unverified for Hana installation.
-
-Do not repeatedly drag the same ZIP before deciding whether the installer needs a package or lifecycle change. If another attempt produces red text, preserve the complete screenshot and installer log before cleanup.
+Replacing the files in an already active vNext install directory can still produce Windows `EPERM` due to directory/process locks. That is a live-replacement limitation, not evidence that the confirmed disable-then-install workflow failed. Do not replace an active install in place; disable it first and use the real Hana drag-and-drop flow.
 
 ## 7. Current UI observation
 
-A screenshot also showed `Plugin internal error` after clicking a `恢复隐藏` action in a possible-follow-up panel. That error belongs to the panel action and was not evidence of vNext installation failure. Do not conflate it with the ZIP installer error.
+A screenshot also showed `Plugin internal error` after clicking a `恢复隐藏` action in a possible-follow-up panel. That error belongs to the panel action and was not evidence of vNext installation failure.
 
-The user also reported an apparently unresponsive invisible area near the upper-left corner. At the time of the latest inspection there was no vNext Runtime window or process, so that specific observation could not be attributed to the Native Runtime. Reproduce after a confirmed install and identify the owning window/process before changing hit-test code.
+The user reported an apparently unresponsive invisible area near the upper-left corner. After the named-pipe message-pump fix and the empty-Scene recovery fix, the user confirmed that the area disappeared and the vNext package installed normally.
 
-## 8. Required verification commands
+## 8. Recent vNext fixes
+
+The verified fix set consists of five source/test changes:
+
+- `plugin/index.js`
+- `plugin/runtime/scene-state-recovery.js`
+- `runtime/transport/named_pipe.cpp`
+- `tests/node/plugin-lifecycle.test.mjs`
+- `tests/node/scene-state-recovery.test.mjs`
+
+Do not modify the installed legacy plugin while validating or committing this fix set.
+
+## 9. Required verification commands
 
 Run from the repository root. Native commands require Visual Studio 2026 Developer PowerShell or an x64 Native Tools prompt.
 
@@ -175,16 +201,16 @@ git diff --check
 git status --short
 ```
 
-Expected historical results at the current checkpoint:
+Expected results for the current fix set:
 
 ```text
-npm test: 62 passed, 8 skipped, 0 failed
+npm test: 64 passed, 8 skipped, 0 failed
 CTest: 21/21 passed
 ```
 
 Re-run them before claiming any new fix is complete.
 
-## 9. Release ZIP command
+## 10. Release ZIP command
 
 After source changes and passing tests:
 
@@ -196,19 +222,15 @@ The script must produce a ZIP whose root contains `manifest.json` and whose Runt
 
 Before any manual installation attempt, inspect the ZIP entries and record the new SHA256. Static validation is necessary but insufficient.
 
-## 10. Recommended next investigation
+## 11. Recommended next investigation
 
 Priority order:
 
-1. Reproduce the Hana drag-and-drop install from a clean state and capture the exact installer error.
-2. Determine whether Hana's installer treats the temporary extraction directory and target directory as the same path when the plugin ID is new.
-3. Inspect Hana installer logs or implementation if available; do not guess from the ZIP alone.
-4. Review the vNext startup policy so a failed or incomplete installation cannot keep a Runtime alive and block cleanup.
-5. Consider setting `autoRestart: false` until the first successful handshake, or introducing an explicit installation/startup failure state. Any change must be backed by focused tests.
-6. After successful install, inspect all visible windows and process paths to identify the reported invisible upper-left region.
-7. Only then continue shelf visual/interaction work, host configuration hot reload, shutdown error reporting, and later multi-monitor work.
+1. Perform real Hana end-to-end acceptance with a non-empty card: display, drag, close, restart, and SceneState recovery.
+2. Verify that the legacy plugin remains functional and that all vNext Runtime/process paths stay isolated.
+3. Continue shelf visual/interaction work, host configuration hot reload, shutdown error reporting, and later multi-monitor work.
 
-## 11. Files that must travel with the project
+## 12. Files that must travel with the project
 
 For a Codex session using the same machine, open the entire repository directory. Do not copy only `plugin/`.
 
@@ -243,17 +265,17 @@ dist/
 node_modules/
 ```
 
-Keep `dist/notification-hub-vnext-0.1.0-alpha.1.zip` only when the next agent needs to inspect or manually install the exact historical artifact. Rebuild it after any source change.
+Keep `dist/notification-hub-vnext-0.1.0-alpha.1.zip` only when the next agent needs to inspect or manually install the exact artifact. Rebuild it after any source change.
 
-## 12. First prompt for the next Codex
+## 13. First prompt for the next Codex
 
 Use this prompt after opening the repository:
 
 ```text
-Read HANDOFF.md, README.md, docs/architecture/phase-0-1-status.md, and the latest git history before changing anything. Inspect the current worktree and do not touch the legacy notification-hub plugin. The vNext manual Hana drag-and-drop installation is not confirmed successful: a prior clean-ish attempt produced EPERM while handling notification-hub-vnext, and autoRestart caused a Runtime cleanup loop. First diagnose the installer/lifecycle boundary and reproduce only with explicit user approval for destructive cleanup. Run the existing Node and CTest suites before claiming any fix. Final validation must use Hana's real drag-and-drop UI; static ZIP inspection is not sufficient.
+Read HANDOFF.md, README.md, docs/architecture/phase-0-1-status.md, and the latest git history before changing anything. Inspect the current worktree and do not touch the legacy notification-hub plugin. The vNext manual Hana drag-and-drop installation has been confirmed successful after the documented Runtime message-pump, empty-Scene recovery, and JSON serialization fixes. Run the existing Node and CTest suites before changing behavior. Final validation must use Hana's real drag-and-drop UI; static ZIP inspection is not sufficient. Next, validate non-empty card display, drag, close, restart, and SceneState recovery.
 ```
 
-## 13. Recommended skills / operating habits
+## 14. Recommended skills / operating habits
 
 - disciplined bug diagnosis: reproduce, minimize, instrument, fix, regression-test;
 - test-driven development for lifecycle and installer behavior changes;

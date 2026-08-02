@@ -51,13 +51,15 @@ function layoutPayload(layout) {
 export function sceneStateToRecoveryEntries(state) {
   validateSceneState(state);
   const cardsById = new Map(state.cards.map((card) => [card.id, card]));
-  const entries = [
-    {
+  const entries = [];
+
+  if (state.cardOrder.length > 0 || state.layout !== null) {
+    entries.push({
       key: 'scene-window',
       type: 'scene.update',
       payload: cloneJson(state.sceneWindow)
-    }
-  ];
+    });
+  }
 
   if (state.layout !== null) {
     entries.push({

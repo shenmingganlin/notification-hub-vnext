@@ -371,8 +371,25 @@ int run_named_pipe_server(std::string_view pipe_name, bool drop_after_health, bo
         bool session_finished = false;
         while (!session_finished && !shutdown_requested) {
             scene_controller.pump_messages();
+            DWORD bytes_available = 0;
+            if (!PeekNamedPipe(pipe, nullptr, 0, nullptr, &bytes_available, nullptr)) {
+                const auto error = GetLastError();
+                if (error != ERROR_BROKEN_PIPE && error != ERROR_NO_DATA) {
+                    std::cerr << "TRANSPORT_PIPE_PEEK_FAILED: " << error << "\n";
+                    close_pipe(pipe);
+                    return 5;
+                }
+                session_finished = true;
+                break;
+            }
+            if (bytes_available == 0) {
+                Sleep(1);
+                continue;
+            }
             DWORD bytes_read = 0;
-            if (!ReadFile(pipe, read_buffer.data(), static_cast<DWORD>(read_buffer.size()), &bytes_read, nullptr)) {
+            const auto bytes_to_read = std::min<DWORD>(
+                static_cast<DWORD>(read_buffer.size()), bytes_available);
+            if (!ReadFile(pipe, read_buffer.data(), bytes_to_read, &bytes_read, nullptr)) {
                 const auto error = GetLastError();
                 if (error != ERROR_BROKEN_PIPE && error != ERROR_NO_DATA) {
                     std::cerr << "TRANSPORT_PIPE_READ_FAILED: " << error << "\n";

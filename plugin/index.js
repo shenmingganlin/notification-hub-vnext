@@ -11,6 +11,13 @@ export default class NotificationHubVNextPlugin {
     this.runtimeError = null;
   }
 
+  toJSON() {
+    return {
+      pluginName,
+      pluginVersion
+    };
+  }
+
   async onload() {
     const runtimeEnabled = this.readRuntimeEnabled();
     if (!runtimeEnabled) {

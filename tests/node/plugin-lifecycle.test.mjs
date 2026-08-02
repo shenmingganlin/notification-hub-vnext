@@ -60,6 +60,28 @@ test('vNext plugin owns one isolated RuntimeHostAdapter through onload/onunload'
   assert.equal(plugin.runtimeHost, null);
 });
 
+test('vNext plugin instance exposes a JSON-safe install response boundary', async () => {
+  const ctx = context();
+  let timer;
+  const adapter = new FakeAdapter();
+  adapter.start = async function start() {
+    timer = setTimeout(() => {}, 60_000);
+    this.timer = timer;
+  };
+  adapter.stop = async function stop() {
+    clearTimeout(timer);
+    this.timer = null;
+  };
+  const plugin = new NotificationHubVNextPlugin(ctx, { adapterFactory: () => adapter });
+
+  await plugin.onload();
+  const serialized = JSON.stringify({ id: pluginName, ctx, instance: plugin });
+
+  assert.match(serialized, /"pluginName":"notification-hub-vnext"/);
+  assert.match(serialized, /"pluginVersion":"0\.1\.0-alpha\.1"/);
+  await plugin.onunload();
+});
+
 test('vNext plugin does not start Runtime when disabled', async () => {
   const ctx = context({ runtimeEnabled: false });
   let factoryCalls = 0;
