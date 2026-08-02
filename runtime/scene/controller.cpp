@@ -115,12 +115,12 @@ bool RuntimeSceneController::apply_window_state(
     const auto hwnd = static_cast<HWND>(impl_->window->native_handle());
     if (hwnd == nullptr || SetWindowPos(
         hwnd,
-        nullptr,
+        HWND_TOPMOST,
         state.x,
         state.y,
         state.width,
         state.height,
-        SWP_NOZORDER | SWP_NOACTIVATE | SWP_SHOWWINDOW) == FALSE) {
+        SWP_NOACTIVATE | SWP_SHOWWINDOW) == FALSE) {
         error_code = "RUNTIME_SCENE_WINDOW_APPLY_FAILED";
         error_message = "Runtime scene window position or size could not be applied";
         return false;
@@ -168,12 +168,12 @@ bool RuntimeSceneController::create_card(
     const auto hwnd = static_cast<HWND>(window->native_handle());
     if (hwnd == nullptr || SetWindowPos(
         hwnd,
-        nullptr,
+        HWND_TOPMOST,
         card.window.x,
         card.window.y,
         card.window.width,
         card.window.height,
-        SWP_NOZORDER | SWP_NOACTIVATE | SWP_SHOWWINDOW) == FALSE) {
+        SWP_NOACTIVATE | SWP_SHOWWINDOW) == FALSE) {
         error_code = "RUNTIME_SCENE_WINDOW_APPLY_FAILED";
         error_message = "scene.create could not apply card geometry";
         return false;
@@ -243,12 +243,12 @@ bool RuntimeSceneController::update_card(
     const auto hwnd = static_cast<HWND>(window->native_handle());
     if (hwnd == nullptr || SetWindowPos(
         hwnd,
-        nullptr,
+        HWND_TOPMOST,
         card.window.x,
         card.window.y,
         card.window.width,
         card.window.height,
-        SWP_NOZORDER | SWP_NOACTIVATE | SWP_SHOWWINDOW) == FALSE) {
+        SWP_NOACTIVATE | SWP_SHOWWINDOW) == FALSE) {
         error_code = "RUNTIME_SCENE_WINDOW_APPLY_FAILED";
         error_message = "scene.update could not apply card geometry";
         return false;
@@ -384,12 +384,12 @@ bool RuntimeSceneController::apply_stack_layout(
         const auto hwnd = static_cast<HWND>(window->native_handle());
         if (hwnd == nullptr || SetWindowPos(
             hwnd,
-            nullptr,
+            HWND_TOPMOST,
             placement.x,
             placement.y,
             placement.width,
             placement.height,
-            SWP_NOZORDER | SWP_NOACTIVATE | SWP_SHOWWINDOW) == FALSE) {
+            SWP_NOACTIVATE | SWP_SHOWWINDOW) == FALSE) {
             error_code = "RUNTIME_SCENE_WINDOW_APPLY_FAILED";
             error_message = "stack layout could not apply card geometry";
             return false;
@@ -575,6 +575,36 @@ void RuntimeSceneController::pump_messages() {
         DispatchMessageW(&message);
     }
 #endif
+    if (impl_ == nullptr) return;
+
+    std::vector<std::string> dismissed_cards;
+    for (const auto& id : impl_->card_order) {
+        const auto card_it = impl_->cards.find(id);
+        const auto window_it = impl_->card_windows.find(id);
+        if (card_it == impl_->cards.end() || window_it == impl_->card_windows.end() || window_it->second == nullptr) {
+            dismissed_cards.push_back(id);
+            continue;
+        }
+        auto& window = window_it->second;
+        if (!window->is_created()) {
+            dismissed_cards.push_back(id);
+            continue;
+        }
+        int x = 0;
+        int y = 0;
+        if (window->get_window_position(x, y)) {
+            card_it->second.window.x = x;
+            card_it->second.window.y = y;
+        }
+    }
+
+    for (const auto& id : dismissed_cards) {
+        impl_->card_windows.erase(id);
+        impl_->cards.erase(id);
+        impl_->card_order.erase(
+            std::remove(impl_->card_order.begin(), impl_->card_order.end(), id),
+            impl_->card_order.end());
+    }
 }
 
 bool RuntimeSceneController::has_window() const noexcept {

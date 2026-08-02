@@ -32,6 +32,7 @@ using notification_hub::transport::run_named_pipe_server;
 using notification_hub::scene::Pixel;
 using notification_hub::scene::RuntimeSceneController;
 using notification_hub::scene::SceneWindow;
+using notification_hub::scene::SceneCardState;
 using notification_hub::scene::StackAnchor;
 using notification_hub::scene::StackCardInput;
 using notification_hub::scene::StackDirection;
@@ -333,6 +334,49 @@ bool scene_controller_self_test() {
         return false;
     }
 
+    const SceneCardState card{
+        "controller-card",
+        "Controller Card",
+        "Native controller interaction",
+        SceneWindowState{700, 150, 320, 160},
+        320,
+        160};
+    if (!controller.create_card(card, error_code, error_message)) {
+        std::cerr << "scene controller card create failed: " << error_code << " " << error_message << "\n";
+        return false;
+    }
+    controller.pump_messages();
+
+    const auto card_point = POINT{860, 230};
+    const auto card_hwnd = WindowFromPoint(card_point);
+    wchar_t class_name[128]{};
+    const bool card_hit = card_hwnd != nullptr
+        && GetClassNameW(card_hwnd, class_name, static_cast<int>(sizeof(class_name) / sizeof(class_name[0]))) > 0
+        && std::wstring(class_name) == L"NotificationHubVNextSceneWindow";
+    if (!card_hit) {
+        std::cerr << "scene controller card was not topmost at its center\n";
+        return false;
+    }
+
+    SendMessageW(card_hwnd, WM_LBUTTONDOWN, MK_LBUTTON, MAKELPARAM(80, 80));
+    SendMessageW(card_hwnd, WM_MOUSEMOVE, MK_LBUTTON, MAKELPARAM(140, 110));
+    SendMessageW(card_hwnd, WM_LBUTTONUP, 0, MAKELPARAM(140, 110));
+    controller.pump_messages();
+    const auto dragged_cards = controller.cards_json();
+    const bool drag_synced = dragged_cards.find("\"x\":760") != std::string::npos
+        && dragged_cards.find("\"y\":180") != std::string::npos;
+    if (!drag_synced) {
+        std::cerr << "scene controller card drag was not synchronized: " << dragged_cards << "\n";
+        return false;
+    }
+
+    SendMessageW(card_hwnd, WM_LBUTTONDOWN, MK_LBUTTON, MAKELPARAM(284, 36));
+    controller.pump_messages();
+    if (controller.cards_json() != "[]") {
+        std::cerr << "scene controller card close was not synchronized: " << controller.cards_json() << "\n";
+        return false;
+    }
+
     const auto event = create_event(
         "scene-controller-self-test", "state-applied", "RUNTIME_SCENE_WINDOW_APPLY_OK", "info", true,
         "Runtime scene controller applied state to the native window", std::string(kTimestamp));
@@ -432,13 +476,12 @@ bool desktop_hit_test_self_test() {
     for (const auto& candidate : candidates) {
         if (SetWindowPos(
                 hwnd,
-                HWND_TOPMOST,
+                nullptr,
                 candidate.x,
                 candidate.y,
                 0,
                 0,
-                SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW) == FALSE) continue;
-        BringWindowToTop(hwnd);
+                SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_SHOWWINDOW) == FALSE) continue;
         UpdateWindow(hwnd);
         POINT origin{0, 0};
         if (ClientToScreen(hwnd, &origin) == FALSE) continue;

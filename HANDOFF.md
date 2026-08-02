@@ -16,8 +16,8 @@ Current branch and checkpoint:
 
 ```text
 branch: main
-previous committed checkpoint: b241aa3 docs: add codex handoff for vnext
-current fix set: vNext install/runtime regression fixes documented and verified below
+previous committed checkpoint: 6c25504 fix: stabilize vnext install and idle runtime
+current fix set: native card interaction fixes documented and verified below
 ```
 
 The legacy plugin must remain installed and running in parallel. It must not be replaced, stopped, edited, or used as a runtime dependency.
@@ -168,15 +168,32 @@ Static ZIP checks passed:
 
 Replacing the files in an already active vNext install directory can still produce Windows `EPERM` due to directory/process locks. That is a live-replacement limitation, not evidence that the confirmed disable-then-install workflow failed. Do not replace an active install in place; disable it first and use the real Hana drag-and-drop flow.
 
+The follow-up native interaction fix set is now verified in the repository and Debug Runtime:
+
+- `runtime/scene/window.cpp`: keep scene/card windows topmost without activation; handle close-button press on `WM_LBUTTONDOWN` so a non-activating window does not lose the release message.
+- `runtime/scene/controller.cpp`: explicitly preserve topmost ordering during geometry updates; synchronize native drag coordinates into card state; remove cards whose native windows were destroyed.
+- `runtime/app/main.cpp`: extend the controller self-test to cover card hit testing, drag state synchronization, and close-on-press cleanup.
+
+The new Release ZIP after these native fixes is:
+
+```text
+file: dist\notification-hub-vnext-0.1.0-alpha.1.zip
+sha256: C8BF617964A1CB33E21053F7074E15F823F61326EE39ADDD6DA680A879614E6E
+```
+
+The previously installed Hana package with hash `8A253EABB5F554333E0BDE5F823B3A9E0389421E3B81BDA4A0753C229F643ED2` remains the manually verified package. The new `C8BF...` package has not yet been installed through Hana's UI; disable vNext before replacing it and do not treat the Debug Runtime acceptance as a substitute for that manual installation.
+
 ## 7. Current UI observation
 
 A screenshot also showed `Plugin internal error` after clicking a `恢复隐藏` action in a possible-follow-up panel. That error belongs to the panel action and was not evidence of vNext installation failure.
 
 The user reported an apparently unresponsive invisible area near the upper-left corner. After the named-pipe message-pump fix and the empty-Scene recovery fix, the user confirmed that the area disappeared and the vNext package installed normally.
 
+The native Debug Runtime and CTest now cover card center hit testing, drag coordinate synchronization, and close-button cleanup. A persistent-pipe acceptance run also confirmed that a close click removes the card from the subsequent health snapshot. Final validation of the new Release ZIP still requires the real Hana UI after reinstall.
+
 ## 8. Recent vNext fixes
 
-The verified fix set consists of five source/test changes:
+The previous install/lifecycle fix set consists of five source/test changes:
 
 - `plugin/index.js`
 - `plugin/runtime/scene-state-recovery.js`
@@ -185,6 +202,12 @@ The verified fix set consists of five source/test changes:
 - `tests/node/scene-state-recovery.test.mjs`
 
 Do not modify the installed legacy plugin while validating or committing this fix set.
+
+The current native interaction follow-up consists of:
+
+- `runtime/app/main.cpp`
+- `runtime/scene/controller.cpp`
+- `runtime/scene/window.cpp`
 
 ## 9. Required verification commands
 
@@ -226,9 +249,10 @@ Before any manual installation attempt, inspect the ZIP entries and record the n
 
 Priority order:
 
-1. Perform real Hana end-to-end acceptance with a non-empty card: display, drag, close, restart, and SceneState recovery.
-2. Verify that the legacy plugin remains functional and that all vNext Runtime/process paths stay isolated.
-3. Continue shelf visual/interaction work, host configuration hot reload, shutdown error reporting, and later multi-monitor work.
+1. Disable vNext in Hana and install the new `C8BF...` ZIP through the real drag-and-drop UI; confirm `loaded/activated` and the vNext Runtime path.
+2. Perform real Hana end-to-end acceptance with a non-empty card: display, drag, close, restart, and SceneState recovery.
+3. Verify that the legacy plugin remains functional and that all vNext Runtime/process paths stay isolated.
+4. Continue shelf visual/interaction work, host configuration hot reload, shutdown error reporting, and later multi-monitor work.
 
 ## 12. Files that must travel with the project
 
@@ -272,7 +296,7 @@ Keep `dist/notification-hub-vnext-0.1.0-alpha.1.zip` only when the next agent ne
 Use this prompt after opening the repository:
 
 ```text
-Read HANDOFF.md, README.md, docs/architecture/phase-0-1-status.md, and the latest git history before changing anything. Inspect the current worktree and do not touch the legacy notification-hub plugin. The vNext manual Hana drag-and-drop installation has been confirmed successful after the documented Runtime message-pump, empty-Scene recovery, and JSON serialization fixes. Run the existing Node and CTest suites before changing behavior. Final validation must use Hana's real drag-and-drop UI; static ZIP inspection is not sufficient. Next, validate non-empty card display, drag, close, restart, and SceneState recovery.
+Read HANDOFF.md, README.md, docs/architecture/phase-0-1-status.md, and the latest git history before changing anything. Inspect the current worktree and do not touch the legacy notification-hub plugin. The earlier vNext package was manually installed successfully; the new `C8BF...` package adds native topmost, drag-state, and close-button fixes and still requires real Hana drag-and-drop validation. Run the existing Node and CTest suites before changing behavior. Next, install the new package with vNext disabled, then validate non-empty card display, drag, close, restart, and SceneState recovery.
 ```
 
 ## 14. Recommended skills / operating habits

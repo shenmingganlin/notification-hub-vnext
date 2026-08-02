@@ -38,9 +38,10 @@ LRESULT CALLBACK window_proc(HWND hwnd, UINT message, WPARAM wparam, LPARAM lpar
     }
     case WM_LBUTTONDOWN:
         if (window != nullptr) {
-            if (window->begin_drag_client_point(
-                    static_cast<float>(GET_X_LPARAM(lparam)),
-                    static_cast<float>(GET_Y_LPARAM(lparam)))) {
+            const auto client_x = static_cast<float>(GET_X_LPARAM(lparam));
+            const auto client_y = static_cast<float>(GET_Y_LPARAM(lparam));
+            if (window->click_client_point(client_x, client_y)
+                || window->begin_drag_client_point(client_x, client_y)) {
                 SetCapture(hwnd);
             }
         }
@@ -170,7 +171,17 @@ bool SceneWindow::show() {
     ShowWindow(static_cast<HWND>(hwnd_), SW_SHOWNOACTIVATE);
     UpdateWindow(static_cast<HWND>(hwnd_));
     visible_ = IsWindowVisible(static_cast<HWND>(hwnd_)) != FALSE;
-    return visible_;
+    if (!visible_) return false;
+    const auto positioned = SetWindowPos(
+        static_cast<HWND>(hwnd_),
+        HWND_TOPMOST,
+        0,
+        0,
+        0,
+        0,
+        SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW) != FALSE;
+    if (positioned) BringWindowToTop(static_cast<HWND>(hwnd_));
+    return positioned;
 #else
     return false;
 #endif
