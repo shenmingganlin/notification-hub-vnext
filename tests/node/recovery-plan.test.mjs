@@ -140,6 +140,22 @@ test('RuntimeProcessManager records fallback diagnostics when SceneState is inva
   assert.equal(manager.recoveryDiagnostics[0].cause, 'RUNTIME_SCENE_STATE_VERSION_UNSUPPORTED');
 });
 
+test('loadRecoveryPlan can explicitly start empty when both sources are missing', async () => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), 'notification-hub-recovery-plan-'));
+  try {
+    const plan = await loadRecoveryPlan({
+      sceneStatePath: path.join(directory, 'scene-state.json'),
+      recoverySnapshotPath: path.join(directory, 'recovery.json'),
+      allowEmpty: true
+    });
+    assert.equal(plan.source, 'empty');
+    assert.deepEqual(plan.snapshot.entries, []);
+    assert.equal(plan.diagnostics[0].code, 'RUNTIME_RECOVERY_EMPTY_INITIAL_STATE');
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
 test('loadRecoveryPlan reports both invalid sources instead of silently starting empty', async () => {
   const directory = await mkdtemp(path.join(os.tmpdir(), 'notification-hub-recovery-plan-'));
   const scenePath = path.join(directory, 'scene-state.json');

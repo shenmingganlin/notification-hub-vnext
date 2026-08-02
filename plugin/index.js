@@ -20,3 +20,4 @@ export * from './runtime/recovery-plan.js';
 export * from './runtime/scene-state-store.js';
 export * from './runtime/scene-state-persistence.js';
 export * from './runtime/scene-state-config.js';
+export * from './runtime/host-adapter.js';

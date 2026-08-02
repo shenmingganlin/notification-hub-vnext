@@ -77,7 +77,7 @@ async function readSource(filePath, parser, source, attempts) {
   }
 }
 
-export async function loadRecoveryPlan({ sceneStatePath, recoverySnapshotPath } = {}) {
+export async function loadRecoveryPlan({ sceneStatePath, recoverySnapshotPath, allowEmpty = false } = {}) {
   const attempts = [];
   const sceneState = await readSource(sceneStatePath, parseSceneState, 'scene-state', attempts);
   const scenePlan = trySceneState(sceneState, attempts);
@@ -97,6 +97,18 @@ export async function loadRecoveryPlan({ sceneStatePath, recoverySnapshotPath } 
       source: 'recovery-snapshot',
       snapshot: legacyPlan,
       diagnostics: attempts.map(fallbackDiagnostic)
+    };
+  }
+
+  if (allowEmpty && (attempts.length === 0 || attempts.every((attempt) => attempt.kind === 'missing'))) {
+    return {
+      source: 'empty',
+      snapshot: createRecoverySnapshot(),
+      diagnostics: [{
+        code: 'RUNTIME_RECOVERY_EMPTY_INITIAL_STATE',
+        message: 'No persisted recovery source is available; starting with an empty SceneState',
+        attempts
+      }]
     };
   }
 
