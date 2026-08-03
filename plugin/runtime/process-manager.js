@@ -22,6 +22,7 @@ export class RuntimeProcessManager extends EventEmitter {
     recoverySnapshot,
     recoveryClient,
     sceneStatePersistence,
+    clientVersion = 'notification-hub-host',
     spawnOptions = {}
   } = {}) {
     super();
@@ -42,6 +43,7 @@ export class RuntimeProcessManager extends EventEmitter {
     this.restartDelayMs = restartDelayMs;
     this.maxRestartAttempts = maxRestartAttempts;
     this.autoRestart = autoRestart;
+    this.clientVersion = clientVersion;
     this.recoverySource = null;
     this.recoveryDiagnostics = [];
     if (sceneState !== undefined) {
@@ -53,6 +55,7 @@ export class RuntimeProcessManager extends EventEmitter {
     this.recoveryClient = null;
     this.sceneStatePersistence = null;
     this.persistenceResponseHandler = null;
+    this.persistenceEventHandler = null;
     this.spawnOptions = { windowsHide: true, ...spawnOptions };
     if (sceneStatePersistence !== undefined) this.setSceneStatePersistence(sceneStatePersistence);
     if (recoveryClient !== undefined) this.setRecoveryClient(recoveryClient);
@@ -173,12 +176,27 @@ export class RuntimeProcessManager extends EventEmitter {
       this.restartTimer = null;
       try {
         await this.start();
-        await this.restoreRecoverySnapshot();
+        await this.reconnectRuntimeClient();
         this.emit('restarted', { attempt });
       } catch (error) {
         this.emitDiagnostic(error.code ?? 'RUNTIME_START_FAILED', error.message, error.details);
       }
     }, this.restartDelayMs);
+  }
+
+  async reconnectRuntimeClient() {
+    if (!this.recoveryClient?.request) return this.restoreRecoverySnapshot();
+
+    // Reconnect even when there is no recovery entry so the host keeps ownership of the pipe.
+    await this.recoveryClient.request('hello', { clientVersion: this.clientVersion }, {
+      retryable: true,
+      maxAttempts: 2
+    });
+    await this.restoreRecoverySnapshot(this.recoveryClient);
+    return this.recoveryClient.request('health', {}, {
+      retryable: true,
+      maxAttempts: 2
+    });
   }
 
   setRecoverySnapshot(snapshot) {
@@ -211,12 +229,18 @@ export class RuntimeProcessManager extends EventEmitter {
     if (this.recoveryClient && this.persistenceResponseHandler) {
       this.recoveryClient.off?.('response', this.persistenceResponseHandler);
     }
+    if (this.recoveryClient && this.persistenceEventHandler) {
+      this.recoveryClient.off?.('event', this.persistenceEventHandler);
+    }
     this.recoveryClient = client;
-    if (this.sceneStatePersistence && client?.on) {
+    if (client?.on) {
       this.persistenceResponseHandler = (message) => this.observeSceneStateResponse(message);
-      client.on('response', this.persistenceResponseHandler);
+      if (this.sceneStatePersistence) client.on('response', this.persistenceResponseHandler);
+      this.persistenceEventHandler = (message) => this.observeSceneStateEvent(message);
+      client.on('event', this.persistenceEventHandler);
     } else {
       this.persistenceResponseHandler = null;
+      this.persistenceEventHandler = null;
     }
     return client;
   }
@@ -242,6 +266,33 @@ export class RuntimeProcessManager extends EventEmitter {
   observeSceneStateResponse(message) {
     const snapshot = message?.payload?.result?.sceneStateSnapshot;
     if (!snapshot || !this.sceneStatePersistence) return null;
+    return this.observeSceneStateSnapshot(snapshot, { updateRecovery: false });
+  }
+
+  observeSceneStateEvent(message) {
+    if (message?.type !== 'event' || message?.payload?.eventType !== 'scene.changed') return null;
+    const snapshot = message?.payload?.result?.sceneStateSnapshot;
+    if (!snapshot) return null;
+    return this.observeSceneStateSnapshot(snapshot, { updateRecovery: true });
+  }
+
+  observeSceneStateSnapshot(snapshot, { updateRecovery = false } = {}) {
+    if (updateRecovery) {
+      try {
+        this.applyRecoveryPlan(selectRecoveryPlan({
+          sceneState: snapshot,
+          recoverySnapshot: this.recoverySnapshot
+        }));
+      } catch (error) {
+        this.emitDiagnostic(
+          error.code ?? 'RUNTIME_SCENE_STATE_SYNC_FAILED',
+          error.message,
+          error.details
+        );
+        return null;
+      }
+    }
+    if (!this.sceneStatePersistence) return snapshot;
     try {
       return this.sceneStatePersistence.observe(snapshot);
     } catch (error) {

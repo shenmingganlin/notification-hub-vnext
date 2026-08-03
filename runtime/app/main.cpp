@@ -25,6 +25,7 @@ using notification_hub::diagnostics::serialize_jsonl;
 using notification_hub::protocol::Message;
 using notification_hub::protocol::parse_message;
 using notification_hub::protocol::serialize_ack;
+using notification_hub::protocol::serialize_event;
 using notification_hub::transport::FrameDecoder;
 using notification_hub::transport::FrameStatus;
 using notification_hub::transport::encode_frame;
@@ -361,25 +362,122 @@ bool scene_controller_self_test() {
     SendMessageW(card_hwnd, WM_LBUTTONDOWN, MK_LBUTTON, MAKELPARAM(80, 80));
     SendMessageW(card_hwnd, WM_MOUSEMOVE, MK_LBUTTON, MAKELPARAM(140, 110));
     SendMessageW(card_hwnd, WM_LBUTTONUP, 0, MAKELPARAM(140, 110));
-    controller.pump_messages();
+    const bool drag_changed = controller.pump_messages();
     const auto dragged_cards = controller.cards_json();
     const bool drag_synced = dragged_cards.find("\"x\":760") != std::string::npos
-        && dragged_cards.find("\"y\":180") != std::string::npos;
+        && dragged_cards.find("\"y\":180") != std::string::npos
+        && drag_changed;
     if (!drag_synced) {
         std::cerr << "scene controller card drag was not synchronized: " << dragged_cards << "\n";
         return false;
     }
 
     SendMessageW(card_hwnd, WM_LBUTTONDOWN, MK_LBUTTON, MAKELPARAM(284, 36));
-    controller.pump_messages();
-    if (controller.cards_json() != "[]") {
+    const bool close_changed = controller.pump_messages();
+    if (!close_changed || controller.cards_json() != "[]") {
         std::cerr << "scene controller card close was not synchronized: " << controller.cards_json() << "\n";
+        return false;
+    }
+
+    const auto scene_hwnd = FindWindowW(
+        L"NotificationHubVNextSceneWindow",
+        L"Notification Hub Runtime Scene");
+    if (scene_hwnd == nullptr) {
+        std::cerr << "scene controller main window was not found for close test\n";
+        return false;
+    }
+    SendMessageW(scene_hwnd, WM_LBUTTONDOWN, MK_LBUTTON, MAKELPARAM(462, 36));
+    const bool scene_close_changed = controller.pump_messages();
+    const auto closed_scene_snapshot = controller.scene_state_snapshot_json();
+    if (!scene_close_changed
+        || controller.has_window()
+        || closed_scene_snapshot.find("\"sceneWindow\":null") == std::string::npos) {
+        std::cerr << "scene controller main window close was not synchronized: "
+                  << closed_scene_snapshot << "\n";
         return false;
     }
 
     const auto event = create_event(
         "scene-controller-self-test", "state-applied", "RUNTIME_SCENE_WINDOW_APPLY_OK", "info", true,
         "Runtime scene controller applied state to the native window", std::string(kTimestamp));
+    std::cout << serialize_jsonl(event);
+    return true;
+#endif
+}
+
+bool controller_desktop_visual_self_test() {
+#ifndef _WIN32
+    std::cerr << "RENDERER_UNSUPPORTED: Controller desktop capture requires Windows\n";
+    return false;
+#else
+    RuntimeSceneController controller;
+    const SceneCardState card{
+        "controller-visual-card",
+        "Controller desktop visual",
+        "Real layered window pixels",
+        SceneWindowState{700, 150, 320, 160},
+        320,
+        160};
+    std::string error_code;
+    std::string error_message;
+    if (!controller.create_card(card, error_code, error_message)) {
+        std::cerr << "controller desktop visual card create failed: "
+                  << error_code << " " << error_message << "\n";
+        return false;
+    }
+    controller.pump_messages();
+
+    const auto center = POINT{card.window.x + (card.window.width / 2), card.window.y + (card.window.height / 2)};
+    const auto hwnd = WindowFromPoint(center);
+    RECT bounds{};
+    const bool geometry_valid = hwnd != nullptr
+        && GetWindowRect(hwnd, &bounds) != FALSE
+        && bounds.right - bounds.left == card.window.width
+        && bounds.bottom - bounds.top == card.window.height;
+
+    bool visible = false;
+    COLORREF surface = CLR_INVALID;
+    COLORREF accent = CLR_INVALID;
+    const auto screen_dc = GetDC(nullptr);
+    if (geometry_valid && screen_dc != nullptr) {
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(500);
+        do {
+            surface = GetPixel(screen_dc, bounds.left + 160, bounds.top + 132);
+            accent = GetPixel(screen_dc, bounds.left + 11, bounds.top + 80);
+            visible = surface != CLR_INVALID
+                && accent != CLR_INVALID
+                && GetRValue(surface) < 80
+                && GetGValue(surface) < 100
+                && GetGValue(accent) > GetRValue(accent) + 80;
+            if (!visible) Sleep(10);
+        } while (!visible && std::chrono::steady_clock::now() < deadline);
+    }
+    if (screen_dc != nullptr) ReleaseDC(nullptr, screen_dc);
+
+    controller.dismiss_card(card.id, error_code, error_message);
+    controller.pump_messages();
+    if (!geometry_valid || !visible || controller.cards_json() != "[]") {
+        std::cerr << "controller desktop visual: geometryValid=" << geometry_valid
+                  << " visible=" << visible
+                  << " surface=" << static_cast<int>(GetRValue(surface)) << ","
+                  << static_cast<int>(GetGValue(surface)) << ","
+                  << static_cast<int>(GetBValue(surface))
+                  << " accent=" << static_cast<int>(GetRValue(accent)) << ","
+                  << static_cast<int>(GetGValue(accent)) << ","
+                  << static_cast<int>(GetBValue(accent)) << "\n";
+        const auto event = create_event(
+            "controller-desktop-visual-self-test", "window-captured",
+            "RENDERER_CONTROLLER_DESKTOP_CAPTURE_FAILED", "error", false,
+            "RuntimeSceneController card pixels were not visible on the desktop",
+            std::string(kTimestamp));
+        std::cerr << serialize_jsonl(event);
+        return false;
+    }
+    const auto event = create_event(
+        "controller-desktop-visual-self-test", "window-captured",
+        "RENDERER_CONTROLLER_DESKTOP_CAPTURE_OK", "info", true,
+        "RuntimeSceneController card pixels were visible on the desktop",
+        std::string(kTimestamp));
     std::cout << serialize_jsonl(event);
     return true;
 #endif
@@ -455,7 +553,7 @@ bool desktop_hit_test_self_test() {
         420,
         180,
         true});
-    if (!window.create() || !window.show() || !window.paint()) return false;
+    if (!window.create() || !window.show()) return false;
 
     const auto hwnd = static_cast<HWND>(window.native_handle());
     const int virtual_left = GetSystemMetrics(SM_XVIRTUALSCREEN);
@@ -482,7 +580,7 @@ bool desktop_hit_test_self_test() {
                 0,
                 0,
                 SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_SHOWWINDOW) == FALSE) continue;
-        UpdateWindow(hwnd);
+        if (!window.paint()) continue;
         POINT origin{0, 0};
         if (ClientToScreen(hwnd, &origin) == FALSE) continue;
         const auto center = POINT{origin.x + 210, origin.y + 90};
@@ -765,6 +863,43 @@ bool close_interaction_self_test() {
 #endif
 }
 
+bool unicode_text_self_test() {
+#ifndef _WIN32
+    std::cerr << "TEXT_UNSUPPORTED: Native UTF-16 window text requires Windows\n";
+    return false;
+#else
+    const std::string title = "vNext " "\xE9\x80\x9A\xE7\x9F\xA5 " "\xF0\x9F\x8C\xB8";
+    SceneCardState card{
+        "unicode-card",
+        title,
+        "UTF-8 text conversion",
+        SceneWindowState{120, 140, 320, 120},
+        0,
+        0};
+    RuntimeSceneController controller;
+    std::string error_code;
+    std::string error_message;
+    if (!controller.create_card(card, error_code, error_message)) {
+        std::cerr << "unicode text card creation failed: " << error_code << " " << error_message << "\n";
+        return false;
+    }
+
+    constexpr wchar_t expected_title[] = {
+        L'v', L'N', L'e', L'x', L't', L' ', 0x901A, 0x77E5, L' ', 0xD83C, 0xDF38, L'\0'};
+    const auto found = FindWindowW(L"NotificationHubVNextSceneWindow", expected_title) != nullptr;
+    controller.dismiss_card(card.id, error_code, error_message);
+    if (!found) {
+        std::cerr << "unicode text conversion produced an unexpected native window title\n";
+        return false;
+    }
+    const auto event = create_event(
+        "text-self-test", "utf8-to-utf16", "TEXT_UTF8_TO_UTF16_OK", "info", true,
+        "UTF-8 card title was preserved in the native UTF-16 window title", std::string(kTimestamp));
+    std::cout << serialize_jsonl(event);
+    return true;
+#endif
+}
+
 bool render_self_test() {
 #ifndef _WIN32
     std::cerr << "RENDERER_UNSUPPORTED: Native card rendering requires Windows\n";
@@ -790,13 +925,17 @@ bool render_self_test() {
         std::cerr << serialize_jsonl(event);
         return false;
     }
-    if (window.run_message_pump(true) != 0 || !window.is_frame_rendered()) {
+    if (!window.paint() || !window.is_frame_rendered()) {
         const auto event = create_event(
             "render-self-test", "renderer-drawn", "RENDERER_FRAME_TIMEOUT", "error", false,
             "Direct2D card surface did not render a frame", std::string(kTimestamp));
         std::cerr << serialize_jsonl(event);
+        window.request_close();
+        window.run_message_pump(false);
         return false;
     }
+    window.request_close();
+    if (window.run_message_pump(false) != 0 || window.is_created()) return false;
     const auto event = create_event(
         "render-self-test", "renderer-drawn", "RENDERER_FRAME_RENDERED", "info", true,
         "Direct2D and DirectWrite card surface rendered", std::string(kTimestamp));
@@ -830,7 +969,13 @@ bool window_self_test() {
         std::cerr << serialize_jsonl(event);
         return false;
     }
-    if (window.run_message_pump(true) != 0 || window.is_created()) {
+    if (!window.paint() || !window.is_frame_rendered()) {
+        window.request_close();
+        window.run_message_pump(false);
+        return false;
+    }
+    window.request_close();
+    if (window.run_message_pump(false) != 0 || window.is_created()) {
         const auto event = create_event(
             "window-self-test", "dismissed", "RENDERER_WINDOW_CLOSE_FAILED", "error", false,
             "Native scene window did not close cleanly", std::string(kTimestamp));
@@ -874,6 +1019,14 @@ bool protocol_self_test() {
     if (ack.find("\"type\":\"ack\"") == std::string::npos ||
         ack.find("\"requestId\":\"req-test\"") == std::string::npos) {
         std::cerr << "ack correlation failed\n";
+        return false;
+    }
+    const auto scene_event = serialize_event(
+        "scene.changed", "evt-test", "trace-event", kTimestamp,
+        R"({"sceneStateSnapshot":{"cardOrder":[]}})");
+    if (!expect_valid(scene_event, "event")
+        || scene_event.find("\"eventType\":\"scene.changed\"") == std::string::npos) {
+        std::cerr << "scene changed event serialization failed\n";
         return false;
     }
 
@@ -936,6 +1089,11 @@ int main(int argc, char** argv) {
         std::cout << "notification-hub-runtime scene controller self-test: " << (passed ? "ok" : "failed") << "\n";
         return passed ? 0 : 1;
     }
+    if (argc > 1 && std::string_view(argv[1]) == "--controller-desktop-visual-self-test") {
+        const bool passed = controller_desktop_visual_self_test();
+        std::cout << "notification-hub-runtime controller desktop visual self-test: " << (passed ? "ok" : "failed") << "\n";
+        return passed ? 0 : 1;
+    }
     if (argc > 1 && std::string_view(argv[1]) == "--dpi-transition-self-test") {
         const bool passed = dpi_transition_self_test();
         std::cout << "notification-hub-runtime dpi transition self-test: " << (passed ? "ok" : "failed") << "\n";
@@ -964,6 +1122,11 @@ int main(int argc, char** argv) {
     if (argc > 1 && std::string_view(argv[1]) == "--close-interaction-self-test") {
         const bool passed = close_interaction_self_test();
         std::cout << "notification-hub-runtime close interaction self-test: " << (passed ? "ok" : "failed") << "\n";
+        return passed ? 0 : 1;
+    }
+    if (argc > 1 && std::string_view(argv[1]) == "--unicode-text-self-test") {
+        const bool passed = unicode_text_self_test();
+        std::cout << "notification-hub-runtime unicode text self-test: " << (passed ? "ok" : "failed") << "\n";
         return passed ? 0 : 1;
     }
     if (argc > 1 && std::string_view(argv[1]) == "--visual-self-test") {

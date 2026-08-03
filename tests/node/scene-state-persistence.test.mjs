@@ -21,6 +21,22 @@ const secondSnapshot = {
   sceneWindow: { x: 140, y: 90, width: 500, height: 220 }
 };
 
+const nativeChangedSnapshot = {
+  ...firstSnapshot,
+  updatedAt: '2026-08-01T12:00:02.000Z',
+  sceneWindow: { x: 240, y: 190, width: 420, height: 180 },
+  cardOrder: ['card-a'],
+  cards: [{
+    id: 'card-a',
+    title: 'Card A',
+    body: 'Native drag result',
+    x: 360,
+    y: 280,
+    width: 320,
+    height: 160
+  }]
+};
+
 test('SceneState persistence coordinator writes only the latest debounced snapshot', async () => {
   const saved = [];
   const scheduled = [];
@@ -94,6 +110,56 @@ test('RuntimeProcessManager persists snapshots observed from PipeClient response
 
   await manager.stop();
   assert.deepEqual(saved, [{ snapshot: secondSnapshot, filePath: 'scene-state.json' }]);
+});
+
+test('RuntimeProcessManager applies and persists native scene.changed events', async () => {
+  const saved = [];
+  const coordinator = new SceneStatePersistenceCoordinator({
+    filePath: 'scene-state.json',
+    debounceMs: 60_000,
+    save: async (snapshot, filePath) => saved.push({ snapshot, filePath })
+  });
+  const client = new EventEmitter();
+  const manager = new RuntimeProcessManager({
+    runtimePath: 'runtime.exe',
+    pipeName: '\\\\.\\pipe\\notification-hub-native-event-test',
+    autoRestart: false,
+    sceneStatePersistence: coordinator,
+    recoveryClient: client
+  });
+
+  client.emit('event', {
+    type: 'event',
+    payload: {
+      eventType: 'scene.changed',
+      result: { sceneStateSnapshot: nativeChangedSnapshot }
+    }
+  });
+
+  assert.deepEqual(manager.recoverySnapshot.entries, [
+    {
+      key: 'scene-window',
+      type: 'scene.update',
+      payload: nativeChangedSnapshot.sceneWindow
+    },
+    {
+      key: 'scene-card-card-a',
+      type: 'scene.create',
+      payload: {
+        id: 'card-a',
+        title: 'Card A',
+        body: 'Native drag result',
+        x: 360,
+        y: 280,
+        width: 320,
+        height: 160
+      }
+    }
+  ]);
+  assert.equal(saved.length, 0);
+
+  await manager.stop();
+  assert.deepEqual(saved, [{ snapshot: nativeChangedSnapshot, filePath: 'scene-state.json' }]);
 });
 
 test('RuntimeProcessManager still stops when the final SceneState flush fails', async () => {

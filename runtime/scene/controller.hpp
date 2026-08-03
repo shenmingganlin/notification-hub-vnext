@@ -44,7 +44,7 @@ public:
     std::string scene_state_snapshot_json() const;
     std::string state_result_json(bool deduplicated) const;
     std::string cards_result_json(bool deduplicated) const;
-    void pump_messages();
+    bool pump_messages();
     bool has_window() const noexcept;
 
 private:

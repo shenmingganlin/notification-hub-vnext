@@ -61,6 +61,72 @@ async function runRecoveryScenario(t, suffix, entries) {
   return { manager, client, managerStates, recoveryEvents, health: await client.request('health') };
 }
 
+test('RuntimeProcessManager re-handshakes after restart with an empty recovery snapshot', async (t) => {
+  if (!runtimePath) {
+    t.skip('requires a Runtime executable path; CTest supplies it');
+    return;
+  }
+
+  const pipeName = `\\\\.\\pipe\\notification-hub-vnext-empty-restart-${process.pid}`;
+  const manager = new RuntimeProcessManager({
+    runtimePath,
+    pipeName,
+    runtimeArgs: ['--exit-after-health'],
+    restartRuntimeArgs: [],
+    readyTimeoutMs: 3000,
+    restartDelayMs: 10,
+    maxRestartAttempts: 2,
+    recoverySnapshot: createRecoverySnapshot()
+  });
+  const client = new PipeClient({
+    pipeName,
+    connectTimeoutMs: 3000,
+    requestTimeoutMs: 3000,
+    maxReconnectAttempts: 5,
+    reconnectDelayMs: 20
+  });
+  const managerStates = [];
+  const responses = [];
+  const restarts = [];
+  manager.on('state', (change) => managerStates.push(change));
+  manager.on('restarted', (event) => restarts.push(event));
+  client.on('response', (message) => responses.push(message.payload?.requestType));
+  manager.setRecoveryClient(client);
+
+  t.after(async () => {
+    await client.close();
+    await manager.stop();
+  });
+
+  await manager.start();
+  await client.request('hello', { clientVersion: 'empty-restart-test' });
+  await client.request('health');
+
+  await new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      clearInterval(poll);
+      reject(new Error(`Runtime did not re-handshake after restart: ${JSON.stringify({ managerStates, responses, restarts })}`));
+    }, 3000);
+    const check = () => {
+      const helloCount = responses.filter((type) => type === 'hello').length;
+      const healthCount = responses.filter((type) => type === 'health').length;
+      const restarted = restarts.length > 0;
+      const crashed = managerStates.some((change) => change.state === 'crashed');
+      const runningAgain = managerStates.filter((change) => change.state === 'running' && change.reason === 'ready').length >= 2;
+      if (!crashed || !runningAgain || !restarted || helloCount < 2 || healthCount < 2) return;
+      clearTimeout(timer);
+      clearInterval(poll);
+      resolve();
+    };
+    const poll = setInterval(check, 10);
+    check();
+  });
+
+  assert.equal(client.connected, true);
+  assert.ok(responses.filter((type) => type === 'hello').length >= 2);
+  assert.ok(responses.filter((type) => type === 'health').length >= 2);
+});
+
 test('RuntimeProcessManager restores the last replayed layout with no cards', async (t) => {
   if (!runtimePath) {
     t.skip('requires a Runtime executable path; CTest supplies it');

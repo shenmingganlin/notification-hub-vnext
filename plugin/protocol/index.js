@@ -23,7 +23,8 @@ export const COMMAND_TYPES = Object.freeze([
 ]);
 
 export const RESPONSE_TYPES = Object.freeze(['ack', 'error']);
-export const MESSAGE_TYPES = Object.freeze([...COMMAND_TYPES, ...RESPONSE_TYPES]);
+export const EVENT_TYPES = Object.freeze(['scene.changed']);
+export const MESSAGE_TYPES = Object.freeze([...COMMAND_TYPES, ...RESPONSE_TYPES, 'event']);
 
 export const PROTOCOL_ERROR_CODES = Object.freeze({
   INVALID_MESSAGE: 'PROTOCOL_INVALID_MESSAGE',
@@ -57,6 +58,16 @@ function assertRequestType(type) {
       PROTOCOL_ERROR_CODES.UNKNOWN_TYPE,
       `Unknown command type: ${String(type)}`,
       { type }
+    );
+  }
+}
+
+function assertEventType(eventType) {
+  if (!EVENT_TYPES.includes(eventType)) {
+    throw protocolError(
+      PROTOCOL_ERROR_CODES.UNKNOWN_TYPE,
+      `Unknown event type: ${String(eventType)}`,
+      { eventType }
     );
   }
 }
@@ -134,6 +145,26 @@ export function createErrorResponse(request, { code, message, retryable = false,
   });
 }
 
+export function createEvent({
+  eventType,
+  result = {},
+  requestId = createId('evt'),
+  traceId = createId('trace'),
+  timestamp = new Date().toISOString()
+} = {}) {
+  assertEventType(eventType);
+  const message = {
+    protocolVersion: PROTOCOL_VERSION,
+    requestId,
+    traceId,
+    type: 'event',
+    timestamp,
+    payload: { eventType, result }
+  };
+  validateMessage(message);
+  return Object.freeze(message);
+}
+
 function createResponse({
   requestId,
   traceId,
@@ -189,6 +220,14 @@ export function validateMessage(message, { allowUnknownFields = false } = {}) {
   }
   if (!isRecord(message.payload)) {
     throw protocolError(PROTOCOL_ERROR_CODES.INVALID_PAYLOAD, 'payload must be an object');
+  }
+  if (message.type === 'event') {
+    if (!isNonEmptyString(message.payload.eventType) || !EVENT_TYPES.includes(message.payload.eventType)) {
+      throw protocolError(PROTOCOL_ERROR_CODES.UNKNOWN_TYPE, `Unknown event type: ${String(message.payload.eventType)}`);
+    }
+    if (!isRecord(message.payload.result)) {
+      throw protocolError(PROTOCOL_ERROR_CODES.INVALID_PAYLOAD, 'event payload result must be an object');
+    }
   }
   return message;
 }

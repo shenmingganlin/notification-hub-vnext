@@ -41,29 +41,30 @@
 - 新增 SceneState 优先、旧 recovery snapshot fallback 的恢复计划选择器；`RuntimeProcessManager` 可选接收 SceneState，旧入口与 replay 顺序保持兼容，fallback 以结构化 diagnostic 暴露。
 - 新增独立 SceneState 原子持久化 store：校验后写入临时文件，替换失败时尝试恢复旧目标；当前不猜测宿主默认路径。
 - 新增 SceneState 快照生命周期适配器：PipeClient 发出只读 response 事件，RuntimeProcessManager 对有效 `sceneStateSnapshot` 做 debounce 写入，并在 stop 前 flush；失败通过结构化 diagnostic 暴露。
+- 新增 Runtime → Host 的 `scene.changed` 非请求事件：Runtime 检测 Native Scene/卡片拖动与销毁后推送最新 `sceneStateSnapshot`，Host 同步内存恢复计划并持久化；主 Scene 窗口关闭以 `sceneWindow: null` 表示，恢复时不再复活。
 - manifest 增加 SceneState 持久化启用开关、路径和 debounce 配置；配置工厂支持从 Hana host context 的 `dataDir/config` 解析路径，并新增真实 Runtime health 到文件落盘 smoke。
 - 新增 `RuntimeHostAdapter`，串联配置、SceneState/旧 recovery 选择、PipeClient、RuntimeProcessManager、hello、恢复 replay、首次 health 和 stop；首次安装的双文件缺失仅在 host startup 的 `allowEmpty` 路径下显式启动空 Scene。
 - vNext 入口已接入真实 Hana `onload/onunload`，默认从独立插件目录加载 `runtime/notification-hub-runtime.exe`，使用 `notification-hub-vnext-*` Named Pipe，并将启动失败限制在本插件诊断范围内。
 - 重启后按快照顺序重放恢复命令，并对失败停止后续恢复、输出结构化诊断。
 - 协议 envelope 增加可选 `idempotencyKey`，Runtime 对重复请求去重并拒绝同 key 不同内容的冲突请求。
 - 建立最小 Win32 Scene Window，支持 Per-Monitor V2 DPI、非激活显示、消息泵、自动关闭和生命周期诊断。
-- 接入 Direct2D/DirectWrite 最小卡片表面，支持圆角背景、强调色、标题和正文绘制，并保留 GDI 回退。
-- 接入 D3D11、Direct2D device context 和 DirectComposition visual，使用预乘 alpha surface 提交到 HWND。
+- 接入 Direct2D/DirectWrite 最小卡片表面，支持圆角背景、强调色、标题和正文绘制，并通过 32 位 DIB 提交分层窗口。
+- 接入 D3D11、Direct2D/DirectWrite 离屏绘制与预乘 alpha 位图，通过 `WS_EX_LAYERED` + `UpdateLayeredWindow` 提交到 HWND。
 - 建立共享卡片几何契约，接入 `WM_NCHITTEST`，卡片本体返回 `HTCLIENT`，卡片外区域返回 `HTTRANSPARENT`。
 - 增加右上角关闭按钮绘制、按钮区域命中、`WM_LBUTTONUP` 关闭请求和窗口销毁闭环。
-- 增加独立离屏 D2D target 的结构性像素回归，验证透明角、卡片表面、强调条和关闭按钮区域；不读取 DirectComposition surface，避免合成器回读不稳定。
+- 增加独立离屏 D2D target 的结构性像素回归，并增加 RuntimeSceneController 真实桌面像素回归，验证透明角、卡片表面、强调条和关闭按钮区域。
 - 增加卡片拖动状态机，支持按下捕获、屏幕坐标位移、释放和捕获丢失清理。
 - 增加桌面合成截图 self-test：优先调用 `PrintWindow(PW_RENDERFULLCONTENT)`，空白时回退到固定窗口区域的屏幕 `BitBlt`，验证 HWND 最终输出。
-- 当前环境中 `PrintWindow` 对 `WS_EX_NOREDIRECTIONBITMAP` 返回空白，屏幕区域回退能够采集到最终 DirectComposition 合成结果。
+- 当前环境中 Native Scene 使用分层窗口提交，桌面回归直接采集最终屏幕区域并验证卡片像素可见。
 - 增加桌面级 `WindowFromPoint` 透明区域命中测试，以及 Per-Monitor V2 DPI、窗口客户区尺寸和当前窗口 DPI 读取测试。
 - 接入 `WM_DPICHANGED` 建议矩形处理，验证 DPI 状态、窗口位置、客户区尺寸、渲染目标和命中几何同步。
 - 桌面 `WindowFromPoint` 命中 self-test 增加窗口显示后的短暂轮询，等待 HWND/Z-order 与 DComp surface 命中状态稳定，消除启动时序导致的偶发卡片区域未命中。
 - Node.js 测试通过：包含入口生命周期、运行时隔离配置和 Host Adapter 恢复覆盖；需要 Runtime 参数的测试由 CTest 执行。
-- CTest 通过：当前 21/21。
+- CTest 通过：当前 25/25，覆盖 Runtime → Host 场景变更同步相关的 Controller/Named Pipe/ProcessManager 回归。
 
 ## 当前阶段
 
-Phase 2 已完成基础闭环，Phase 4 正在推进，Phase 5 已开始。Node.js 与 C++ Runtime 已具备协议、诊断、framing、最小 Named Pipe 通信、有限自动重连、Runtime 进程托管、幂等请求、版本化恢复快照、fixed 布局多卡片创建/更新/关闭恢复、stack/shelf 共享布局数学与运行时接入、Work Area Provider 默认工作区与显式覆盖、活动布局状态回显、按 recovery 顺序的 stack/shelf 模式恢复、布局前后卡片创建的重新布局、Runtime Scene Controller 到 Native HWND 的实际应用、Runtime 重启后的窗口与卡片状态恢复、最小 Win32 窗口生命周期、Direct2D/DirectWrite 卡片绘制、DirectComposition 预乘 alpha surface、离屏结构性像素回归、卡片命中、关闭、基础拖动交互、桌面区域合成回归、桌面透明命中、DPI 基础契约和受控 `WM_DPICHANGED` 几何同步；shelf/cascade/focus/freeform、真实跨显示器 DPI 和完整 Scene 状态重建尚未完全收口。
+Phase 2 已完成基础闭环，Phase 4 正在推进，Phase 5 已开始。Node.js 与 C++ Runtime 已具备协议、诊断、framing、最小 Named Pipe 通信、有限自动重连、Runtime 进程托管、幂等请求、版本化恢复快照、fixed 布局多卡片创建/更新/关闭恢复、stack/shelf 共享布局数学与运行时接入、Work Area Provider 默认工作区与显式覆盖、活动布局状态回显、按 recovery 顺序的 stack/shelf 模式恢复、布局前后卡片创建的重新布局、Runtime Scene Controller 到 Native HWND 的实际应用、Runtime 重启后的窗口与卡片状态恢复、最小 Win32 窗口生命周期、D2D/DirectWrite 离屏卡片绘制与分层窗口提交、离屏结构性像素回归、控制器级桌面像素回归、卡片命中、关闭、基础拖动交互、桌面透明命中、DPI 基础契约和受控 `WM_DPICHANGED` 几何同步；shelf/cascade/focus/freeform、真实跨显示器 DPI 和完整 Scene 状态重建尚未完全收口。
 
 ## 标准验证命令
 

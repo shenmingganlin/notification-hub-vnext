@@ -75,7 +75,7 @@ The current checkpoint includes:
 - Runtime process start, ready wait, exit monitoring, and bounded restart;
 - Runtime recovery replay after restart;
 - Win32 native scene window with Per-Monitor V2 DPI handling;
-- Direct2D/DirectWrite card rendering with D3D11/DirectComposition path and fallback;
+- Direct2D/DirectWrite offscreen card rendering with D3D11 and `WS_EX_LAYERED`/`UpdateLayeredWindow` presentation;
 - transparent-region hit testing through `WM_NCHITTEST` and `HTTRANSPARENT`;
 - close-button interaction and card dragging state machine;
 - desktop hit-test and rendering self-tests;
@@ -178,10 +178,10 @@ The new Release ZIP after these native fixes is:
 
 ```text
 file: dist\notification-hub-vnext-0.1.0-alpha.1.zip
-sha256: C8BF617964A1CB33E21053F7074E15F823F61326EE39ADDD6DA680A879614E6E
+sha256: 8FD9445485690B121CF17A745FFB067E9FE878315BCA7CD952D7343C4FA00A86
 ```
 
-The previously installed Hana package with hash `8A253EABB5F554333E0BDE5F823B3A9E0389421E3B81BDA4A0753C229F643ED2` remains the manually verified package. The new `C8BF...` package has not yet been installed through Hana's UI; disable vNext before replacing it and do not treat the Debug Runtime acceptance as a substitute for that manual installation.
+The previously installed Hana package with hash `8A253EABB5F554333E0BDE5F823B3A9E0389421E3B81BDA4A0753C229F643ED2` remains the manually verified package. The new `8FD9...` package has not yet been installed through Hana's UI; disable vNext before replacing it and do not treat the Debug Runtime acceptance as a substitute for that manual installation.
 
 ## 7. Current UI observation
 
@@ -189,7 +189,7 @@ A screenshot also showed `Plugin internal error` after clicking a `恢复隐藏`
 
 The user reported an apparently unresponsive invisible area near the upper-left corner. After the named-pipe message-pump fix and the empty-Scene recovery fix, the user confirmed that the area disappeared and the vNext package installed normally.
 
-The native Debug Runtime and CTest now cover card center hit testing, drag coordinate synchronization, and close-button cleanup. A persistent-pipe acceptance run also confirmed that a close click removes the card from the subsequent health snapshot. Final validation of the new Release ZIP still requires the real Hana UI after reinstall.
+The native Debug Runtime and CTest now cover card center hit testing, drag coordinate synchronization, card close cleanup, main Scene window close cleanup, and unsolicited `scene.changed` delivery. SceneState now records a closed main window as `sceneWindow: null`, so recovery does not recreate it. Final validation of the new Release ZIP still requires the real Hana UI after reinstall.
 
 ## 8. Recent vNext fixes
 
@@ -209,6 +209,23 @@ The current native interaction follow-up consists of:
 - `runtime/scene/controller.cpp`
 - `runtime/scene/window.cpp`
 
+The BUG-5 state synchronization fix consists of:
+
+- `plugin/protocol/index.js`
+- `plugin/runtime/pipe-client.js`
+- `plugin/runtime/process-manager.js`
+- `plugin/runtime/scene-state.js`
+- `plugin/runtime/scene-state-recovery.js`
+- `runtime/protocol/message.cpp`
+- `runtime/protocol/message.hpp`
+- `runtime/transport/named_pipe.cpp`
+- `schemas/scene-state.schema.json`
+- `tests/node/protocol-diagnostics.test.mjs`
+- `tests/node/scene-state-persistence.test.mjs`
+- `tests/node/scene-state-recovery.test.mjs`
+- `tests/node/scene-state.test.mjs`
+- `tests/node/named-pipe-scene-event.test.mjs`
+
 ## 9. Required verification commands
 
 Run from the repository root. Native commands require Visual Studio 2026 Developer PowerShell or an x64 Native Tools prompt.
@@ -227,8 +244,8 @@ git status --short
 Expected results for the current fix set:
 
 ```text
-npm test: 64 passed, 8 skipped, 0 failed
-CTest: 21/21 passed
+npm test: 69 passed, 11 skipped, 0 failed
+CTest: 25/25 passed
 ```
 
 Re-run them before claiming any new fix is complete.
@@ -249,7 +266,7 @@ Before any manual installation attempt, inspect the ZIP entries and record the n
 
 Priority order:
 
-1. Disable vNext in Hana and install the new `C8BF...` ZIP through the real drag-and-drop UI; confirm `loaded/activated` and the vNext Runtime path.
+1. Disable vNext in Hana and install the new `8FD9...` ZIP through the real drag-and-drop UI; confirm `loaded/activated` and the vNext Runtime path.
 2. Perform real Hana end-to-end acceptance with a non-empty card: display, drag, close, restart, and SceneState recovery.
 3. Verify that the legacy plugin remains functional and that all vNext Runtime/process paths stay isolated.
 4. Continue shelf visual/interaction work, host configuration hot reload, shutdown error reporting, and later multi-monitor work.

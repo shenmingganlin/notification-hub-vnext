@@ -106,6 +106,16 @@ test('SceneState projection does not create a Native Scene window for an empty s
   assert.deepEqual(entries, []);
 });
 
+test('SceneState projection does not restore a closed Native Scene window', () => {
+  const entries = sceneStateToRecoveryEntries(createState({
+    sceneWindow: null,
+    layout: null
+  }));
+
+  assert.deepEqual(entries.map((entry) => entry.type), ['scene.create', 'scene.create']);
+  assert.deepEqual(entries.map((entry) => entry.payload.id), ['card-b', 'card-a']);
+});
+
 test('SceneState projection without layout preserves card geometry', () => {
   const entries = sceneStateToRecoveryEntries(createState({ layout: null }));
 

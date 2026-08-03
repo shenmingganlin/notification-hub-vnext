@@ -136,7 +136,7 @@ bool SceneWindow::create() {
     }
 
     DWORD style = WS_POPUP;
-    DWORD extended_style = WS_EX_NOACTIVATE | WS_EX_NOREDIRECTIONBITMAP;
+    DWORD extended_style = WS_EX_NOACTIVATE | WS_EX_LAYERED;
     if (config_.tool_window) extended_style |= WS_EX_TOOLWINDOW;
 
     RECT bounds{0, 0, config_.width, config_.height};
@@ -158,7 +158,12 @@ bool SceneWindow::create() {
 
     hwnd_ = hwnd;
     dpi_ = GetDpiForWindow(hwnd);
-    renderer_.initialize(hwnd_, config_.width, config_.height);
+    if (!renderer_.initialize(hwnd_, config_.width, config_.height)) {
+        DestroyWindow(hwnd);
+        hwnd_ = nullptr;
+        visible_ = false;
+        return false;
+    }
     return true;
 #else
     return false;
@@ -169,7 +174,6 @@ bool SceneWindow::show() {
 #ifdef _WIN32
     if (hwnd_ == nullptr) return false;
     ShowWindow(static_cast<HWND>(hwnd_), SW_SHOWNOACTIVATE);
-    UpdateWindow(static_cast<HWND>(hwnd_));
     visible_ = IsWindowVisible(static_cast<HWND>(hwnd_)) != FALSE;
     if (!visible_) return false;
     const auto positioned = SetWindowPos(

@@ -55,6 +55,17 @@ test('SceneState accepts an empty scene without an active layout', () => {
   assert.deepEqual(state.cards, []);
 });
 
+test('SceneState accepts a closed scene window', () => {
+  const state = createSceneState({
+    sceneWindow: null,
+    cardOrder: ['card-a'],
+    cards: [{ id: 'card-a', title: 'Card A', body: '', x: 0, y: 0, width: 320, height: 160 }],
+    layout: null
+  });
+
+  assert.equal(state.sceneWindow, null);
+});
+
 test('SceneState accepts provider work areas with explicit fallback metadata', () => {
   const state = createSceneState({
     sceneWindow: { x: 0, y: 0, width: 420, height: 180 },

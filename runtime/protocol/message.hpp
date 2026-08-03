@@ -32,6 +32,11 @@ struct ParseResult {
 
 ParseResult parse_message(std::string_view serialized);
 std::string serialize_ack(const Message& request, std::string_view result_json = "{}");
+std::string serialize_event(std::string_view event_type,
+                           std::string_view request_id,
+                           std::string_view trace_id,
+                           std::string_view timestamp,
+                           std::string_view result_json = "{}");
 std::string serialize_error(const ProtocolError& error);
 std::string escape_json_string(std::string_view value);
 

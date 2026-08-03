@@ -25,7 +25,14 @@
       "format": "date-time"
     },
     "sceneWindow": {
-      "$ref": "#/$defs/geometry"
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "$ref": "#/$defs/geometry"
+        }
+      ]
     },
     "cardOrder": {
       "type": "array",

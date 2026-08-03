@@ -3,13 +3,16 @@ import test from 'node:test';
 
 import {
   COMMAND_TYPES,
+  EVENT_TYPES,
   PROTOCOL_ERROR_CODES,
   createAck,
+  createEvent,
   createErrorResponse,
   createHello,
   createHealthRequest,
   createCapabilitiesRequest,
   createRequest,
+  PipeClient,
   parseMessage,
   serializeMessage,
   validateMessage,
@@ -97,6 +100,48 @@ test('ack and error responses correlate to the request', () => {
   assert.equal(error.requestId, request.requestId);
   assert.equal(error.payload.code, 'TRANSPORT_DISCONNECTED');
   assert.equal(error.payload.retryable, true);
+});
+
+test('scene changed events use the versioned event envelope', () => {
+  assert.deepEqual(EVENT_TYPES, ['scene.changed']);
+  const event = createEvent({
+    eventType: 'scene.changed',
+    requestId: 'evt-scene',
+    traceId: 'trace-scene',
+    timestamp: fixedTime,
+    result: { sceneStateSnapshot: { cardOrder: [] } }
+  });
+
+  assert.equal(event.type, 'event');
+  assert.equal(event.payload.eventType, 'scene.changed');
+  assert.deepEqual(parseMessage(serializeMessage(event)), event);
+  expectProtocolError(
+    () => validateMessage({
+      ...event,
+      payload: { eventType: 'unknown', result: {} }
+    }),
+    PROTOCOL_ERROR_CODES.UNKNOWN_TYPE
+  );
+});
+
+test('PipeClient routes unsolicited scene changed frames to the event channel', () => {
+  const client = new PipeClient({ pipeName: '\\\\.\\pipe\\notification-hub-event-channel-test' });
+  const events = [];
+  const responses = [];
+  client.on('event', (message) => events.push(message));
+  client.on('response', (message) => responses.push(message));
+
+  client.handleMessage(serializeMessage(createEvent({
+    eventType: 'scene.changed',
+    requestId: 'evt-client',
+    traceId: 'trace-client',
+    timestamp: fixedTime,
+    result: { sceneStateSnapshot: { cardOrder: [] } }
+  })));
+
+  assert.equal(events.length, 1);
+  assert.equal(events[0].payload.eventType, 'scene.changed');
+  assert.deepEqual(responses, []);
 });
 
 test('protocol rejects malformed and incompatible messages with stable codes', () => {

@@ -17,7 +17,7 @@ constexpr std::string_view kCommands[] = {
 constexpr std::string_view kMessageTypes[] = {
     "hello", "health", "capabilities", "scene.create", "scene.update",
     "scene.dismiss", "scene.drag", "scene.set-mode", "config.update",
-    "diagnostic.subscribe", "shutdown", "ack", "error"
+    "diagnostic.subscribe", "shutdown", "ack", "error", "event"
 };
 
 class Parser {
@@ -280,6 +280,21 @@ std::string serialize_ack(const Message& request, std::string_view result_json) 
            << "\",\"type\":\"ack\",\"timestamp\":\"" << escape_json_string(request.timestamp)
            << "\",\"payload\":{\"requestType\":\"" << escape_json_string(request.type)
            << "\",\"accepted\":true,\"result\":" << result_json << "}}";
+    return output.str();
+}
+
+std::string serialize_event(
+    std::string_view event_type,
+    std::string_view request_id,
+    std::string_view trace_id,
+    std::string_view timestamp,
+    std::string_view result_json) {
+    std::ostringstream output;
+    output << "{\"protocolVersion\":1,\"requestId\":\"" << escape_json_string(request_id)
+           << "\",\"traceId\":\"" << escape_json_string(trace_id)
+           << "\",\"type\":\"event\",\"timestamp\":\"" << escape_json_string(timestamp)
+           << "\",\"payload\":{\"eventType\":\"" << escape_json_string(event_type)
+           << "\",\"result\":" << result_json << "}}";
     return output.str();
 }
 

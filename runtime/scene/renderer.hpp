@@ -31,8 +31,8 @@ public:
 
 private:
     struct Impl;
-    bool create_composition_surface(int width, int height);
     bool capture_offscreen(std::wstring_view title, std::wstring_view body);
+    bool update_layered_window();
     std::unique_ptr<Impl> impl_;
 };
 

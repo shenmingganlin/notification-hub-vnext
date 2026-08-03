@@ -6,11 +6,15 @@
 #include "frame.hpp"
 
 #include <charconv>
+#include <chrono>
 #include <cmath>
 #include <cctype>
 #include <cstdlib>
+#include <ctime>
+#include <iomanip>
 #include <limits>
 #include <iostream>
+#include <sstream>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -44,6 +48,19 @@ bool write_all(HANDLE pipe, const std::vector<std::uint8_t>& bytes) {
 bool send_payload(HANDLE pipe, std::string_view payload) {
     const auto encoded = encode_frame(payload);
     return encoded.ok && write_all(pipe, encoded.bytes);
+}
+
+std::string runtime_timestamp() {
+    const auto now = std::chrono::system_clock::now();
+    const auto time = std::chrono::system_clock::to_time_t(now);
+    std::tm utc{};
+    gmtime_s(&utc, &time);
+    const auto milliseconds = std::chrono::duration_cast<std::chrono::milliseconds>(
+        now.time_since_epoch()) % 1000;
+    std::ostringstream output;
+    output << std::put_time(&utc, "%Y-%m-%dT%H:%M:%S")
+           << '.' << std::setfill('0') << std::setw(3) << milliseconds.count() << 'Z';
+    return output.str();
 }
 
 void close_pipe(HANDLE pipe) {
@@ -339,6 +356,7 @@ int run_named_pipe_server(std::string_view pipe_name, bool drop_after_health, bo
     bool shutdown_requested = false;
     std::unordered_map<std::string, std::string> idempotency_cache;
     scene::RuntimeSceneController scene_controller;
+    std::uint64_t scene_event_sequence = 0;
 
     while (!shutdown_requested) {
         HANDLE pipe = CreateNamedPipeW(
@@ -370,7 +388,23 @@ int run_named_pipe_server(std::string_view pipe_name, bool drop_after_health, bo
         std::vector<char> read_buffer(16 * 1024);
         bool session_finished = false;
         while (!session_finished && !shutdown_requested) {
-            scene_controller.pump_messages();
+            if (scene_controller.pump_messages()) {
+                ++scene_event_sequence;
+                const auto sequence = std::to_string(scene_event_sequence);
+                const auto event_payload = std::string("{\"sceneStateSnapshot\":")
+                    + scene_controller.scene_state_snapshot_json() + "}";
+                const auto event = protocol::serialize_event(
+                    "scene.changed",
+                    "evt-runtime-scene-" + sequence,
+                    "trace-runtime-scene-" + sequence,
+                    runtime_timestamp(),
+                    event_payload);
+                if (!send_payload(pipe, event)) {
+                    std::cerr << "TRANSPORT_PIPE_WRITE_FAILED: " << GetLastError() << "\n";
+                    close_pipe(pipe);
+                    return 8;
+                }
+            }
             DWORD bytes_available = 0;
             if (!PeekNamedPipe(pipe, nullptr, 0, nullptr, &bytes_available, nullptr)) {
                 const auto error = GetLastError();

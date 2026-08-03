@@ -179,7 +179,9 @@ export function validateSceneState(state) {
   if (typeof state.updatedAt !== 'string' || Number.isNaN(Date.parse(state.updatedAt))) {
     throw sceneStateError('RUNTIME_SCENE_STATE_INVALID', 'SceneState updatedAt must be an ISO date-time');
   }
-  validateGeometry(state.sceneWindow, 'SceneState sceneWindow', 'RUNTIME_SCENE_STATE_WINDOW_INVALID');
+  if (state.sceneWindow !== null) {
+    validateGeometry(state.sceneWindow, 'SceneState sceneWindow', 'RUNTIME_SCENE_STATE_WINDOW_INVALID');
+  }
   if (!Array.isArray(state.cardOrder) || !state.cardOrder.every(isNonEmptyString)
     || new Set(state.cardOrder).size !== state.cardOrder.length) {
     throw sceneStateError(
