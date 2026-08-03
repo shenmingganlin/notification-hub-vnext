@@ -58,7 +58,7 @@ export default class NotificationHubVNextPlugin {
   }
 
   forwardRuntimeEvents(adapter) {
-    for (const event of ['diagnostic', 'stderr', 'stdout', 'exit', 'restarted']) {
+    for (const event of ['diagnostic', 'stderr', 'stdout', 'exit', 'restarted', 'scene.changed']) {
       adapter.on(event, (payload) => {
         this.ctx.log?.debug?.(`[notification-hub-vnext] runtime:${event}`, payload);
       });

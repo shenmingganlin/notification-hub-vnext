@@ -264,6 +264,15 @@ export class PipeClient extends EventEmitter {
       return;
     }
     if (message.type === 'event') {
+      this.emitDiagnostic(
+        'RUNTIME_EVENT_RECEIVED',
+        'Received unsolicited Runtime event',
+        {
+          eventType: message.payload?.eventType,
+          requestId: message.requestId,
+          traceId: message.traceId
+        }
+      );
       this.emit('event', message);
       return;
     }

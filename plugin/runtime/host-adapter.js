@@ -99,6 +99,7 @@ export class RuntimeHostAdapter extends EventEmitter {
       await this.manager.restoreRecoverySnapshot(this.client);
       const health = await this.client.request('health');
       this.emit('health', health);
+      this.manager.startSceneStateSync?.();
       this.setState('running');
       this.emit('started', { source: plan.source, health });
       return this;
@@ -152,7 +153,7 @@ export class RuntimeHostAdapter extends EventEmitter {
 
   forwardEvents(source, sourceName) {
     if (!source?.on) return;
-    for (const event of ['diagnostic', 'state', 'stdout', 'stderr', 'exit', 'restarted']) {
+    for (const event of ['diagnostic', 'state', 'stdout', 'stderr', 'exit', 'restarted', 'scene.changed']) {
       source.on(event, (payload) => this.emit(event, { source: sourceName, payload }));
     }
   }

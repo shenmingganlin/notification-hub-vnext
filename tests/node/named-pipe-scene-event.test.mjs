@@ -77,7 +77,7 @@ test('Named Pipe delivers native drag and close scene.changed events', async (t)
   }
 
   const pipeName = `\\\\.\\pipe\\notification-hub-vnext-scene-event-${process.pid}`;
-  const title = `pipe-scene-event-card-${process.pid}`;
+  const title = `🌸 pipe-scene-event-card-${process.pid}`;
   const runtime = spawn(runtimePath, ['--pipe-server', pipeName], {
     stdio: ['ignore', 'pipe', 'pipe'],
     windowsHide: true

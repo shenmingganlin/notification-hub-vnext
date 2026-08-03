@@ -162,6 +162,46 @@ test('RuntimeProcessManager applies and persists native scene.changed events', a
   assert.deepEqual(saved, [{ snapshot: nativeChangedSnapshot, filePath: 'scene-state.json' }]);
 });
 
+test('RuntimeProcessManager health sync persists a snapshot when unsolicited events are unavailable', async () => {
+  const saved = [];
+  const persistence = new SceneStatePersistenceCoordinator({
+    filePath: 'scene-state.json',
+    debounceMs: 0,
+    save: async (snapshot, filePath) => saved.push({ snapshot, filePath })
+  });
+  const syncedSnapshot = {
+    ...nativeChangedSnapshot,
+    updatedAt: '2026-08-01T12:00:03.000Z',
+    cards: [{ ...nativeChangedSnapshot.cards[0], x: 2063, y: 933 }]
+  };
+  const client = new EventEmitter();
+  client.request = async (type) => {
+    assert.equal(type, 'health');
+    return {
+      type: 'ack',
+      requestId: 'health-sync-request',
+      traceId: 'health-sync-trace',
+      payload: { result: { sceneStateSnapshot: syncedSnapshot } }
+    };
+  };
+  const manager = new RuntimeProcessManager({
+    runtimePath: 'runtime.exe',
+    pipeName: '\\\\.\\pipe\\health-sync',
+    sceneStatePersistence: persistence,
+    recoveryClient: client,
+    sceneStateSyncIntervalMs: 5
+  });
+  manager.state = 'running';
+  manager.startSceneStateSync();
+  await new Promise((resolve) => setTimeout(resolve, 30));
+  manager.stopSceneStateSync();
+  await persistence.flush();
+
+  assert.equal(saved.length, 1);
+  assert.deepEqual(saved.at(-1), { snapshot: syncedSnapshot, filePath: 'scene-state.json' });
+  assert.equal(manager.recoverySnapshot.entries.some((entry) => entry.key === 'scene-card-card-a'), true);
+});
+
 test('RuntimeProcessManager still stops when the final SceneState flush fails', async () => {
   let stopped = false;
   const persistence = {

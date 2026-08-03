@@ -128,8 +128,10 @@ test('PipeClient routes unsolicited scene changed frames to the event channel', 
   const client = new PipeClient({ pipeName: '\\\\.\\pipe\\notification-hub-event-channel-test' });
   const events = [];
   const responses = [];
+  const diagnostics = [];
   client.on('event', (message) => events.push(message));
   client.on('response', (message) => responses.push(message));
+  client.on('diagnostic', (diagnostic) => diagnostics.push(diagnostic));
 
   client.handleMessage(serializeMessage(createEvent({
     eventType: 'scene.changed',
@@ -142,6 +144,7 @@ test('PipeClient routes unsolicited scene changed frames to the event channel', 
   assert.equal(events.length, 1);
   assert.equal(events[0].payload.eventType, 'scene.changed');
   assert.deepEqual(responses, []);
+  assert.equal(diagnostics[0].code, 'RUNTIME_EVENT_RECEIVED');
 });
 
 test('protocol rejects malformed and incompatible messages with stable codes', () => {

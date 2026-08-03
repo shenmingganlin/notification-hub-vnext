@@ -11,6 +11,7 @@
 #include <cctype>
 #include <cstdlib>
 #include <ctime>
+#include <exception>
 #include <iomanip>
 #include <limits>
 #include <iostream>
@@ -391,18 +392,29 @@ int run_named_pipe_server(std::string_view pipe_name, bool drop_after_health, bo
             if (scene_controller.pump_messages()) {
                 ++scene_event_sequence;
                 const auto sequence = std::to_string(scene_event_sequence);
-                const auto event_payload = std::string("{\"sceneStateSnapshot\":")
-                    + scene_controller.scene_state_snapshot_json() + "}";
-                const auto event = protocol::serialize_event(
-                    "scene.changed",
-                    "evt-runtime-scene-" + sequence,
-                    "trace-runtime-scene-" + sequence,
-                    runtime_timestamp(),
-                    event_payload);
-                if (!send_payload(pipe, event)) {
-                    std::cerr << "TRANSPORT_PIPE_WRITE_FAILED: " << GetLastError() << "\n";
+                try {
+                    const auto event_payload = std::string("{\"sceneStateSnapshot\":")
+                        + scene_controller.scene_state_snapshot_json() + "}";
+                    const auto event = protocol::serialize_event(
+                        "scene.changed",
+                        "evt-runtime-scene-" + sequence,
+                        "trace-runtime-scene-" + sequence,
+                        runtime_timestamp(),
+                        event_payload);
+                    std::cerr << "RUNTIME_SCENE_EVENT_DETECTED sequence=" << sequence
+                              << " snapshotBytes=" << event_payload.size() << "\n";
+                    if (!send_payload(pipe, event)) {
+                        std::cerr << "RUNTIME_SCENE_EVENT_SEND_FAILED sequence=" << sequence
+                                  << " win32Error=" << GetLastError() << "\n";
+                        close_pipe(pipe);
+                        return 8;
+                    }
+                    std::cerr << "RUNTIME_SCENE_EVENT_SENT sequence=" << sequence << "\n";
+                } catch (const std::exception& error) {
+                    std::cerr << "RUNTIME_SCENE_EVENT_SERIALIZE_FAILED sequence=" << sequence
+                              << " message=" << error.what() << "\n";
                     close_pipe(pipe);
-                    return 8;
+                    return 12;
                 }
             }
             DWORD bytes_available = 0;

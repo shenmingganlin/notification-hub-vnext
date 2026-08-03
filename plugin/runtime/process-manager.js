@@ -8,6 +8,17 @@ function processError(code, message, details = {}) {
   return Object.assign(new Error(message), { code, details });
 }
 
+function sceneStateFingerprint(snapshot) {
+  if (snapshot === null || typeof snapshot !== 'object') return null;
+  try {
+    const comparable = JSON.parse(JSON.stringify(snapshot));
+    delete comparable.updatedAt;
+    return JSON.stringify(comparable);
+  } catch {
+    return null;
+  }
+}
+
 export class RuntimeProcessManager extends EventEmitter {
   constructor({
     runtimePath,
@@ -18,6 +29,7 @@ export class RuntimeProcessManager extends EventEmitter {
     restartDelayMs = 25,
     maxRestartAttempts = 2,
     autoRestart = true,
+    sceneStateSyncIntervalMs = 500,
     sceneState,
     recoverySnapshot,
     recoveryClient,
@@ -43,6 +55,13 @@ export class RuntimeProcessManager extends EventEmitter {
     this.restartDelayMs = restartDelayMs;
     this.maxRestartAttempts = maxRestartAttempts;
     this.autoRestart = autoRestart;
+    if (!Number.isFinite(sceneStateSyncIntervalMs) || sceneStateSyncIntervalMs < 0) {
+      throw processError(
+        'RUNTIME_SCENE_STATE_SYNC_INTERVAL_INVALID',
+        'sceneStateSyncIntervalMs must be a non-negative finite number'
+      );
+    }
+    this.sceneStateSyncIntervalMs = sceneStateSyncIntervalMs;
     this.clientVersion = clientVersion;
     this.recoverySource = null;
     this.recoveryDiagnostics = [];
@@ -62,6 +81,10 @@ export class RuntimeProcessManager extends EventEmitter {
     this.child = null;
     this.startPromise = null;
     this.restartTimer = null;
+    this.sceneStateSyncTimer = null;
+    this.sceneStateSyncInFlight = false;
+    this.sceneStateSyncGeneration = 0;
+    this.lastSceneStateFingerprint = null;
     this.intentionalStop = false;
     this.restartAttempts = 0;
     this.state = 'stopped';
@@ -264,19 +287,139 @@ export class RuntimeProcessManager extends EventEmitter {
   }
 
   observeSceneStateResponse(message) {
+    if (this.sceneStateSyncInFlight && message?.payload?.requestType === 'health') return null;
     const snapshot = message?.payload?.result?.sceneStateSnapshot;
-    if (!snapshot || !this.sceneStatePersistence) return null;
+    if (!snapshot) {
+      if (message?.type === 'ack' && message?.payload?.requestType === 'health') {
+        this.emitDiagnostic(
+          'RUNTIME_SCENE_STATE_RESPONSE_MISSING',
+          'Runtime health response did not include a sceneStateSnapshot',
+          { requestId: message.requestId, traceId: message.traceId }
+        );
+      }
+      return null;
+    }
     return this.observeSceneStateSnapshot(snapshot, { updateRecovery: false });
   }
 
   observeSceneStateEvent(message) {
-    if (message?.type !== 'event' || message?.payload?.eventType !== 'scene.changed') return null;
+    if (message?.type !== 'event') return null;
+    if (message?.payload?.eventType !== 'scene.changed') {
+      this.emitDiagnostic(
+        'RUNTIME_SCENE_EVENT_IGNORED',
+        'Ignored Runtime event with an unsupported event type',
+        { eventType: message?.payload?.eventType, requestId: message.requestId }
+      );
+      return null;
+    }
     const snapshot = message?.payload?.result?.sceneStateSnapshot;
-    if (!snapshot) return null;
-    return this.observeSceneStateSnapshot(snapshot, { updateRecovery: true });
+    if (!snapshot) {
+      this.emitDiagnostic(
+        'RUNTIME_SCENE_EVENT_INVALID',
+        'Runtime scene.changed event did not include a sceneStateSnapshot',
+        { requestId: message.requestId, traceId: message.traceId }
+      );
+      return null;
+    }
+    const observed = this.observeSceneStateSnapshot(snapshot, { updateRecovery: true });
+    if (observed) {
+      this.emit('scene.changed', {
+        source: 'event',
+        requestId: message.requestId,
+        traceId: message.traceId,
+        snapshot: observed
+      });
+      this.emitDiagnostic(
+        'RUNTIME_SCENE_EVENT_ACCEPTED',
+        'Runtime scene.changed event was accepted',
+        {
+          requestId: message.requestId,
+          traceId: message.traceId,
+          updatedAt: snapshot.updatedAt,
+          cardCount: Array.isArray(snapshot.cards) ? snapshot.cards.length : null
+        }
+      );
+    }
+    return observed;
+  }
+
+  startSceneStateSync() {
+    this.stopSceneStateSync();
+    if (this.sceneStateSyncIntervalMs <= 0
+      || !this.sceneStatePersistence
+      || !this.recoveryClient?.request) {
+      return false;
+    }
+    const generation = this.sceneStateSyncGeneration;
+
+    const poll = async () => {
+      if (generation !== this.sceneStateSyncGeneration
+        || this.intentionalStop
+        || this.state !== 'running'
+        || this.sceneStateSyncInFlight) return;
+      this.sceneStateSyncInFlight = true;
+      try {
+        const response = await this.recoveryClient.request('health', {}, {
+          retryable: true,
+          maxAttempts: 2
+        });
+        if (generation !== this.sceneStateSyncGeneration || this.intentionalStop) return;
+        const snapshot = response?.payload?.result?.sceneStateSnapshot;
+        if (!snapshot) {
+          this.emitDiagnostic(
+            'RUNTIME_SCENE_STATE_SYNC_EMPTY',
+            'Periodic Runtime health sync returned no sceneStateSnapshot',
+            { requestId: response?.requestId, traceId: response?.traceId }
+          );
+          return;
+        }
+        const observed = this.observeSceneStateSnapshot(snapshot, { updateRecovery: true });
+        if (observed) {
+          this.emit('scene.changed', {
+            source: 'health-sync',
+            requestId: response.requestId,
+            traceId: response.traceId,
+            snapshot: observed
+          });
+          this.emitDiagnostic(
+            'RUNTIME_SCENE_STATE_SYNC_ACCEPTED',
+            'Periodic Runtime health snapshot was accepted',
+            {
+              requestId: response.requestId,
+              traceId: response.traceId,
+              updatedAt: snapshot.updatedAt,
+              cardCount: Array.isArray(snapshot.cards) ? snapshot.cards.length : null
+            }
+          );
+        }
+      } catch (error) {
+        if (!this.intentionalStop) {
+          this.emitDiagnostic(
+            error.code ?? 'RUNTIME_SCENE_STATE_SYNC_FAILED',
+            error.message,
+            { ...(error.details ?? {}), source: 'health-sync' }
+          );
+        }
+      } finally {
+        if (generation === this.sceneStateSyncGeneration) this.sceneStateSyncInFlight = false;
+      }
+    };
+
+    this.sceneStateSyncTimer = setInterval(() => { void poll(); }, this.sceneStateSyncIntervalMs);
+    this.sceneStateSyncTimer.unref?.();
+    return true;
+  }
+
+  stopSceneStateSync() {
+    this.sceneStateSyncGeneration += 1;
+    if (this.sceneStateSyncTimer) clearInterval(this.sceneStateSyncTimer);
+    this.sceneStateSyncTimer = null;
+    this.sceneStateSyncInFlight = false;
   }
 
   observeSceneStateSnapshot(snapshot, { updateRecovery = false } = {}) {
+    const fingerprint = sceneStateFingerprint(snapshot);
+    if (fingerprint !== null && fingerprint === this.lastSceneStateFingerprint) return null;
     if (updateRecovery) {
       try {
         this.applyRecoveryPlan(selectRecoveryPlan({
@@ -292,9 +435,14 @@ export class RuntimeProcessManager extends EventEmitter {
         return null;
       }
     }
-    if (!this.sceneStatePersistence) return snapshot;
+    if (!this.sceneStatePersistence) {
+      this.lastSceneStateFingerprint = fingerprint;
+      return snapshot;
+    }
     try {
-      return this.sceneStatePersistence.observe(snapshot);
+      const observed = this.sceneStatePersistence.observe(snapshot);
+      this.lastSceneStateFingerprint = fingerprint;
+      return observed;
     } catch (error) {
       this.emitDiagnostic(
         error.code ?? 'RUNTIME_SCENE_STATE_PERSIST_FAILED',
@@ -354,11 +502,13 @@ export class RuntimeProcessManager extends EventEmitter {
     this.restartAttempts = 0;
     await this.start();
     await this.restoreRecoverySnapshot();
+    this.startSceneStateSync();
     this.emit('restarted', { attempt: 0, manual: true });
   }
 
   async stop() {
     this.intentionalStop = true;
+    this.stopSceneStateSync();
     let persistenceError = null;
     try {
       await this.flushSceneStatePersistence();
