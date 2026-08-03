@@ -6,6 +6,8 @@ Continue development of `notification-hub vNext`, a Windows-native notification 
 
 The repository is the complete source of truth. Do not reconstruct the project from chat history.
 
+Read `TOTAL-GOAL.md` first for the long-term product direction and completion criteria. Read this file next for the current implementation state, verified evidence, and active risks.
+
 Workspace:
 
 ```text
@@ -295,6 +297,7 @@ PLAN.md
 notification-hub-vnext-plan.md
 legacy-reference/notification-hub-0.2.1/
 notification-hub-0.2.1/        # reference only; do not edit for vNext
+TOTAL-GOAL.md
 HANDOFF.md
 ```
 
@@ -313,7 +316,7 @@ Keep `dist/notification-hub-vnext-0.1.0-alpha.1.zip` only when the next agent ne
 Use this prompt after opening the repository:
 
 ```text
-Read HANDOFF.md, README.md, docs/architecture/phase-0-1-status.md, and the latest git history before changing anything. Inspect the current worktree and do not touch the legacy notification-hub plugin. The earlier vNext package was manually installed successfully; the new `C8BF...` package adds native topmost, drag-state, and close-button fixes and still requires real Hana drag-and-drop validation. Run the existing Node and CTest suites before changing behavior. Next, install the new package with vNext disabled, then validate non-empty card display, drag, close, restart, and SceneState recovery.
+Read TOTAL-GOAL.md, HANDOFF.md, README.md, docs/architecture/phase-0-1-status.md, and the latest git history before changing anything. First state the total goal, current stage, active blockers, and how the proposed work preserves legacy isolation. Inspect the current worktree and do not touch the legacy notification-hub plugin. The earlier vNext package was manually installed successfully; the new `C8BF...` package adds native topmost, drag-state, and close-button fixes and still requires real Hana drag-and-drop validation. Run the existing Node and CTest suites before changing behavior. Next, install the new package with vNext disabled, then validate non-empty card display, drag, close, restart, and SceneState recovery.
 ```
 
 ## 14. Recommended skills / operating habits
