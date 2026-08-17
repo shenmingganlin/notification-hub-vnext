@@ -2,32 +2,52 @@
   "manifestVersion": 1,
   "id": "notification-hub-vnext",
   "name": "Notification Hub vNext",
-  "version": "0.1.0-alpha.1",
+  "version": "0.1.0-alpha.16",
   "description": "Notification Hub vNext for HanaAgent.",
   "minAppVersion": "0.158.0",
   "trust": "full-access",
   "activationEvents": [
     "onStartup"
   ],
+  "ui": {
+    "hostCapabilities": ["resource.pick"]
+  },
+  "capabilities": ["resource.materialize", "resource.write"],
   "contributes": {
+    "page": {
+      "title": {
+        "zh": "Notification Center",
+        "en": "Notification Center"
+      },
+      "route": "/notification-center",
+      "icon": "<svg viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.6\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9\"/><path d=\"M10 21h4\"/></svg>"
+    },
+    "widget": {
+      "title": "Notification Hub",
+      "route": "/widget"
+    },
+    "tools": [
+      "./tools/notification-hub-run-test.js"
+    ],
+    "routes": ["./routes/widget.js", "./routes/settings.js", "./routes/settings-sound.js", "./routes/settings-visual.js", "./routes/notification-center.js", "./routes/runtime.js", "./routes/diagnostics.js"],
     "configuration": {
       "properties": {
         "runtimeEnabled": {
           "type": "boolean",
-          "title": "启用 Native Runtime",
-          "description": "启动独立的 Notification Hub vNext Native Scene Runtime。",
+          "title": "启用桌面通知卡片",
+          "description": "让通知卡片显示在 Windows 桌面上。专业名称：Native Runtime。修改后需要重启 HanaAgent 才会生效。",
           "default": true
         },
         "sceneStatePersistenceEnabled": {
           "type": "boolean",
-          "title": "SceneState 快照持久化",
-          "description": "将 Runtime 回显的 SceneState 快照写入插件数据目录。",
+          "title": "记住卡片位置",
+          "description": "保存桌面卡片、位置和排列顺序，重启 HanaAgent 后恢复。专业名称：SceneState 持久化。",
           "default": true
         },
         "sceneStatePersistencePath": {
           "type": "string",
-          "title": "SceneState 快照路径",
-          "description": "相对 dataDir 的路径，或显式绝对路径。",
+          "title": "卡片状态保存位置",
+          "description": "决定把卡片位置和恢复信息保存到哪里。默认保存在插件数据目录的 scene-state.json 中。专业名称：SceneState Persistence Path。",
           "default": "scene-state.json",
           "ui": {
             "control": "text"
@@ -35,8 +55,8 @@
         },
         "sceneStatePersistenceDebounceMs": {
           "type": "integer",
-          "title": "SceneState 写入节流",
-          "description": "连续 Runtime 响应之间合并快照写入的等待时间，单位毫秒。",
+          "title": "位置保存等待时间",
+          "description": "拖动或更新卡片后，等待多久再写入保存文件，单位是毫秒。数值越小保存越及时，数值越大可减少频繁写盘。专业名称：SceneState Debounce。",
           "default": 100,
           "minimum": 0,
           "maximum": 60000,
@@ -46,5 +66,14 @@
         }
       }
     }
+  },
+  "dev": {
+    "scenarios": [
+      {
+        "id": "open-notification-center",
+        "title": "Open Notification Center",
+        "steps": [{ "openSurface": "/notification-center" }]
+      }
+    ]
   }
 }

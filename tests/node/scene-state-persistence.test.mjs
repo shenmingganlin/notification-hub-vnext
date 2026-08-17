@@ -4,6 +4,7 @@ import test from 'node:test';
 
 import { RuntimeProcessManager } from '../../plugin/runtime/process-manager.js';
 import { SceneStatePersistenceCoordinator } from '../../plugin/runtime/scene-state-persistence.js';
+import { addRecoveryEntry, createRecoverySnapshot } from '../../plugin/runtime/recovery-snapshot.js';
 
 const firstSnapshot = {
   sceneStateVersion: 1,
@@ -112,6 +113,79 @@ test('RuntimeProcessManager persists snapshots observed from PipeClient response
   assert.deepEqual(saved, [{ snapshot: secondSnapshot, filePath: 'scene-state.json' }]);
 });
 
+test('RuntimeProcessManager ignores intermediate scene.changed events during recovery replay', async () => {
+  const recoverySnapshot = {
+    recoveryVersion: 1,
+    protocolVersion: 1,
+    updatedAt: '2026-08-01T12:00:00.000Z',
+    entries: [
+      {
+        key: 'scene-window',
+        type: 'scene.update',
+        payload: { x: 120, y: 80, width: 420, height: 180 }
+      },
+      {
+        key: 'scene-card-card-a',
+        type: 'scene.create',
+        payload: {
+          id: 'card-a',
+          title: 'Card A',
+          body: 'Recovery card',
+          x: 140,
+          y: 90,
+          width: 320,
+          height: 160
+        }
+      }
+    ]
+  };
+  const intermediateSnapshot = {
+    ...nativeChangedSnapshot,
+    updatedAt: '2026-08-01T12:00:02.500Z',
+    cardOrder: [],
+    cards: [],
+    layout: null
+  };
+  const client = new EventEmitter();
+  const persistence = new SceneStatePersistenceCoordinator({
+    filePath: 'scene-state.json',
+    debounceMs: 60_000,
+    save: async () => { throw new Error('intermediate recovery snapshot must not be persisted'); }
+  });
+  const requests = [];
+  const manager = new RuntimeProcessManager({
+    runtimePath: 'runtime.exe',
+    pipeName: '\\\\.\\pipe\\notification-hub-recovery-event-gate',
+    autoRestart: false,
+    recoverySnapshot,
+    recoveryClient: client,
+    sceneStatePersistence: persistence
+  });
+  client.request = async (type, payload, options) => {
+    requests.push({ type, payload, options });
+    const message = { type: 'ack', payload: { requestType: type, result: { sceneStateSnapshot: intermediateSnapshot } } };
+    manager.observeSceneStateResponse(message);
+    if (type === 'scene.update') {
+      client.emit('event', {
+        type: 'event',
+        payload: {
+          eventType: 'scene.changed',
+          result: { sceneStateSnapshot: intermediateSnapshot }
+        }
+      });
+    }
+    return message;
+  };
+  await manager.restoreRecoverySnapshot(client);
+  assert.deepEqual(manager.recoverySnapshot, recoverySnapshot);
+  assert.equal(manager.recoveryInProgress, false);
+  assert.equal(requests.length, 2);
+  assert.equal(requests[0].options.retryable, true);
+  assert.equal(requests[0].options.maxAttempts, 2);
+  assert.equal(requests[0].options.idempotencyKey, 'recovery:2026-08-01T12:00:00.000Z:scene-window');
+  assert.equal(requests[1].options.idempotencyKey, 'recovery:2026-08-01T12:00:00.000Z:scene-card-card-a');
+});
+
 test('RuntimeProcessManager applies and persists native scene.changed events', async () => {
   const saved = [];
   const coordinator = new SceneStatePersistenceCoordinator({
@@ -160,6 +234,43 @@ test('RuntimeProcessManager applies and persists native scene.changed events', a
 
   await manager.stop();
   assert.deepEqual(saved, [{ snapshot: nativeChangedSnapshot, filePath: 'scene-state.json' }]);
+});
+
+test('RuntimeProcessManager forwards native scene.changed target metadata to consumers', () => {
+  const client = new EventEmitter();
+  const manager = new RuntimeProcessManager({
+    runtimePath: 'runtime.exe',
+    pipeName: '\\\\.\\pipe\\notification-hub-scene-change-metadata-test',
+    autoRestart: false,
+    recoveryClient: client
+  });
+  const forwarded = [];
+  manager.on('scene.changed', (payload) => forwarded.push(payload));
+  const change = {
+    status: 'changed',
+    reason: 'user-close',
+    target: 'card',
+    targetId: 'nh-vnext-notification-notification-closed',
+    recoverable: false,
+    notifyUser: false,
+    error: null
+  };
+
+  client.emit('event', {
+    type: 'event',
+    requestId: 'scene-change-event',
+    traceId: 'scene-change-trace',
+    payload: {
+      eventType: 'scene.changed',
+      result: {
+        sceneStateSnapshot: nativeChangedSnapshot,
+        change
+      }
+    }
+  });
+
+  assert.equal(forwarded.length, 1);
+  assert.deepEqual(forwarded[0].change, change);
 });
 
 test('RuntimeProcessManager health sync persists a snapshot when unsolicited events are unavailable', async () => {
@@ -243,4 +354,84 @@ test('RuntimeProcessManager ignores responses without SceneState snapshots', asy
   client.emit('response', { type: 'error', payload: { code: 'RUNTIME_TEST', message: 'test' } });
   await manager.stop();
   assert.deepEqual(observed, []);
+});
+
+test('RuntimeProcessManager skips one failed recovery entry and continues with later entries', async () => {
+  const recoverySnapshot = createRecoverySnapshot();
+  addRecoveryEntry(recoverySnapshot, {
+    key: 'broken-card',
+    type: 'scene.create',
+    payload: { id: 'broken-card', title: 'Broken card', body: 'x', x: 0, y: 0, width: 320, height: 160 }
+  });
+  addRecoveryEntry(recoverySnapshot, {
+    key: 'valid-card',
+    type: 'scene.create',
+    payload: { id: 'valid-card', title: 'Valid card', body: 'x', x: 0, y: 0, width: 320, height: 160 }
+  });
+  const requests = [];
+  const recoveryEvents = [];
+  const client = {
+    request: async (type, payload) => {
+      requests.push(payload.id);
+      if (payload.id === 'broken-card') {
+        throw Object.assign(new Error('window creation failed'), { code: 'RUNTIME_SCENE_WINDOW_APPLY_FAILED' });
+      }
+      return { type: 'ack', payload: { requestType: type, result: {} } };
+    }
+  };
+  const manager = new RuntimeProcessManager({
+    runtimePath: 'runtime.exe',
+    pipeName: '\\\\.\\pipe\\notification-hub-recovery-skip',
+    autoRestart: false,
+    recoverySnapshot,
+    recoveryClient: client
+  });
+  manager.on('recovery-skipped', (event) => recoveryEvents.push(event));
+
+  const results = await manager.restoreRecoverySnapshot(client);
+
+  assert.deepEqual(requests, ['broken-card', 'valid-card']);
+  assert.deepEqual(results.map((entry) => entry.skipped === true), [true, false]);
+  assert.deepEqual(manager.recoverySnapshot.entries.map((entry) => entry.key), ['valid-card']);
+  assert.equal(manager.recoveryDiagnostics.at(-1).cause, 'RUNTIME_SCENE_WINDOW_APPLY_FAILED');
+  assert.equal(recoveryEvents[0].key, 'broken-card');
+});
+
+test('RuntimeProcessManager ignores late SceneState responses after stop begins', async () => {
+  const saved = [];
+  const persistence = new SceneStatePersistenceCoordinator({
+    filePath: 'scene-state.json',
+    debounceMs: 60_000,
+    save: async (snapshot, filePath) => saved.push({ snapshot, filePath })
+  });
+  const client = new EventEmitter();
+  const manager = new RuntimeProcessManager({
+    runtimePath: 'runtime.exe',
+    pipeName: '\\\\.\\pipe\\notification-hub-persistence-late-response',
+    autoRestart: false,
+    sceneStatePersistence: persistence,
+    recoveryClient: client
+  });
+
+  client.emit('response', {
+    type: 'ack',
+    payload: { result: { sceneStateSnapshot: nativeChangedSnapshot } }
+  });
+  await manager.stop();
+
+  const emptySnapshot = {
+    ...nativeChangedSnapshot,
+    updatedAt: '2026-08-01T12:00:04.000Z',
+    sceneWindow: null,
+    cardOrder: [],
+    cards: [],
+    layout: null
+  };
+  client.emit('response', {
+    type: 'ack',
+    payload: { requestType: 'health', result: { sceneStateSnapshot: emptySnapshot } }
+  });
+
+  await persistence.flush();
+  assert.deepEqual(saved, [{ snapshot: nativeChangedSnapshot, filePath: 'scene-state.json' }]);
 });

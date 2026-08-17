@@ -9,10 +9,14 @@ const TOP_LEVEL_FIELDS = new Set([
   'sceneWindow',
   'cardOrder',
   'cards',
-  'layout'
+  'layout',
+  'behaviorChannels'
 ]);
 const WINDOW_FIELDS = new Set(['x', 'y', 'width', 'height']);
-const CARD_FIELDS = new Set(['id', 'title', 'body', 'x', 'y', 'width', 'height']);
+const CARD_FIELDS = new Set(['id', 'title', 'body', 'x', 'y', 'width', 'height', 'visual', 'presentation', 'behavior']);
+const VISUAL_PRESETS = new Set(['minimal', 'soft', 'accent', 'warning', 'critical']);
+const VISUAL_INTENSITIES = new Set(['reduced', 'balanced', 'expressive']);
+const VISUAL_CATEGORIES = new Set(['chat', 'channel', 'tool', 'error', 'plugin', 'model_service']);
 const LAYOUT_FIELDS = new Set(['mode', 'direction', 'anchor', 'spacing', 'workArea']);
 const WORK_AREA_FIELDS = new Set([
   'resolution',
@@ -105,6 +109,62 @@ function validateCard(card) {
     width: card.width,
     height: card.height
   }, 'SceneState card', 'RUNTIME_SCENE_STATE_CARD_INVALID');
+  if ('visual' in card) {
+    if (!isRecord(card.visual)
+      || typeof card.visual.enabled !== 'boolean'
+      || !VISUAL_PRESETS.has(card.visual.preset)
+      || !VISUAL_INTENSITIES.has(card.visual.intensity)
+      || (card.visual.category !== null && !VISUAL_CATEGORIES.has(card.visual.category))) {
+      throw sceneStateError('RUNTIME_SCENE_STATE_CARD_INVALID', 'SceneState card visual decision is invalid');
+    }
+    assertExactFields(card.visual, new Set(['enabled', 'preset', 'intensity', 'category']), 'SceneState card visual', 'RUNTIME_SCENE_STATE_CARD_INVALID');
+  }
+  if ('presentation' in card) {
+    if (!isRecord(card.presentation)
+      || !['eventId', 'categoryId', 'eventTypeId', 'visualProfileId'].every((field) => isNonEmptyString(card.presentation[field]))) {
+      throw sceneStateError('RUNTIME_SCENE_STATE_CARD_INVALID', 'SceneState card presentation metadata is invalid');
+    }
+    assertExactFields(card.presentation, new Set(['eventId', 'categoryId', 'eventTypeId', 'visualProfileId']), 'SceneState card presentation', 'RUNTIME_SCENE_STATE_CARD_INVALID');
+  }
+  if ('behavior' in card) {
+    if (!isRecord(card.behavior)
+      || !isNonEmptyString(card.behavior.behaviorProfileId)
+      || !isNonEmptyString(card.behavior.behaviorChannelId)) {
+      throw sceneStateError('RUNTIME_SCENE_STATE_CARD_INVALID', 'SceneState card behavior metadata is invalid');
+    }
+    assertExactFields(card.behavior, new Set(['behaviorProfileId', 'behaviorChannelId']), 'SceneState card behavior', 'RUNTIME_SCENE_STATE_CARD_INVALID');
+  }
+}
+
+function validateBehaviorChannels(channels, cardIds) {
+  if (!Array.isArray(channels)) {
+    throw sceneStateError('RUNTIME_SCENE_STATE_BEHAVIOR_INVALID', 'SceneState behaviorChannels must be an array');
+  }
+  const seenCards = new Set();
+  for (const channel of channels) {
+    assertExactFields(
+      channel,
+      new Set(['channelId', 'profileId', 'cardOrder']),
+      'SceneState behavior channel',
+      'RUNTIME_SCENE_STATE_BEHAVIOR_INVALID'
+    );
+    if (!isNonEmptyString(channel.channelId)
+      || !isNonEmptyString(channel.profileId)
+      || !Array.isArray(channel.cardOrder)
+      || !channel.cardOrder.every(isNonEmptyString)
+      || new Set(channel.cardOrder).size !== channel.cardOrder.length) {
+      throw sceneStateError('RUNTIME_SCENE_STATE_BEHAVIOR_INVALID', 'SceneState behavior channel metadata is invalid');
+    }
+    for (const cardId of channel.cardOrder) {
+      if (!cardIds.has(cardId) || seenCards.has(cardId)) {
+        throw sceneStateError(
+          'RUNTIME_SCENE_STATE_BEHAVIOR_INVALID',
+          'SceneState behavior channel cardOrder must reference each explicit card at most once'
+        );
+      }
+      seenCards.add(cardId);
+    }
+  }
 }
 
 function validateWorkArea(workArea) {
@@ -206,6 +266,7 @@ export function validateSceneState(state) {
       'SceneState cardOrder must contain every card id exactly once'
     );
   }
+  if ('behaviorChannels' in state) validateBehaviorChannels(state.behaviorChannels, cardIds);
   validateLayout(state.layout);
   return state;
 }
@@ -222,7 +283,8 @@ export function createSceneState(input = {}) {
     sceneWindow: input.sceneWindow,
     cardOrder: 'cardOrder' in input ? input.cardOrder : [],
     cards: 'cards' in input ? input.cards : [],
-    layout: 'layout' in input ? input.layout : null
+    layout: 'layout' in input ? input.layout : null,
+    ...(Object.hasOwn(input, 'behaviorChannels') ? { behaviorChannels: input.behaviorChannels } : {})
   };
   validateSceneState(state);
   return cloneJson(state);

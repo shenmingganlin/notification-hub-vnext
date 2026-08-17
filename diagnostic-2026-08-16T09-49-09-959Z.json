@@ -1,0 +1,809 @@
+{
+  "format": "notification-hub-diagnostics",
+  "version": 1,
+  "exportedAt": "2026-08-16T09:49:09.970Z",
+  "status": {
+    "pluginName": "notification-hub-vnext",
+    "pluginVersion": "0.1.0-alpha.16",
+    "generatedAt": "2026-08-16T09:49:09.970Z",
+    "runtime": {
+      "state": "running",
+      "message": "Runtime 正常运行",
+      "connected": true,
+      "clientState": "connected",
+      "pipeName": "\\\\.\\pipe\\notification-hub-vnext-42808-6cc6da89c53b",
+      "currentError": null,
+      "health": {
+        "cardCount": 0,
+        "layout": {
+          "layout": "shelf",
+          "direction": "right",
+          "anchor": "top-left",
+          "spacing": 10,
+          "workAreaWidth": 2560,
+          "workAreaHeight": 1528,
+          "dpiScale": 1.5,
+          "workAreaLeft": 0,
+          "workAreaTop": 0,
+          "workAreaIsFallback": false,
+          "workAreaSource": "primary-monitor-work-area"
+        },
+        "workArea": {
+          "left": 0,
+          "top": 0,
+          "width": 2560,
+          "height": 1528,
+          "dpiScale": 1.5,
+          "isFallback": false,
+          "source": "primary-monitor-work-area"
+        },
+        "sceneStateSnapshot": {
+          "sceneStateVersion": 1,
+          "protocolVersion": 1,
+          "updatedAt": "2026-08-16T09:49:09.969Z",
+          "sceneWindow": null,
+          "cardOrder": [],
+          "layout": {
+            "mode": "shelf",
+            "direction": "right",
+            "anchor": "top-left",
+            "spacing": 10,
+            "workArea": {
+              "resolution": "provider",
+              "left": 0,
+              "top": 0,
+              "width": 2560,
+              "height": 1528,
+              "dpiScale": 1.5,
+              "isFallback": false,
+              "source": "primary-monitor-work-area"
+            }
+          }
+        },
+        "sceneBehavior": {
+          "version": "v1",
+          "cardCount": 0,
+          "channelCount": 0,
+          "truncated": false,
+          "cards": [],
+          "channels": []
+        }
+      },
+      "sceneStatePersistence": {
+        "enabled": true,
+        "pending": false
+      }
+    },
+    "summary": {
+      "total": 52,
+      "errors": 4,
+      "warnings": 0,
+      "recoverable": 0,
+      "currentFailure": false
+    },
+    "diagnostics": [
+      {
+        "code": "RUNTIME_EVENT_RECEIVED",
+        "message": "Received unsolicited Runtime event",
+        "stage": "runtime",
+        "severity": "info",
+        "recoverable": false,
+        "details": {
+          "eventType": "scene.changed",
+          "requestId": "evt-runtime-scene-33",
+          "traceId": "trace-runtime-scene-33"
+        },
+        "timestamp": "2026-08-16T09:44:27.472Z",
+        "source": "runtime"
+      },
+      {
+        "code": "RUNTIME_EVENT_RECEIVED",
+        "message": "Received unsolicited Runtime event",
+        "stage": "runtime",
+        "severity": "info",
+        "recoverable": false,
+        "details": {
+          "eventType": "scene.changed",
+          "requestId": "evt-runtime-scene-32",
+          "traceId": "trace-runtime-scene-32"
+        },
+        "timestamp": "2026-08-16T09:44:08.326Z",
+        "source": "runtime"
+      },
+      {
+        "code": "RUNTIME_SCENE_EVENT_ACCEPTED",
+        "message": "Runtime scene.changed event was accepted",
+        "stage": "runtime",
+        "severity": "info",
+        "recoverable": false,
+        "details": {
+          "requestId": "evt-runtime-scene-31",
+          "traceId": "trace-runtime-scene-31",
+          "updatedAt": "2026-08-16T09:43:34.186Z",
+          "cardCount": 0
+        },
+        "timestamp": "2026-08-16T09:43:34.253Z",
+        "source": "runtime"
+      },
+      {
+        "code": "RUNTIME_EVENT_RECEIVED",
+        "message": "Received unsolicited Runtime event",
+        "stage": "runtime",
+        "severity": "info",
+        "recoverable": false,
+        "details": {
+          "eventType": "scene.changed",
+          "requestId": "evt-runtime-scene-31",
+          "traceId": "trace-runtime-scene-31"
+        },
+        "timestamp": "2026-08-16T09:43:34.189Z",
+        "source": "runtime"
+      },
+      {
+        "code": "RUNTIME_SCENE_EVENT_ACCEPTED",
+        "message": "Runtime scene.changed event was accepted",
+        "stage": "runtime",
+        "severity": "info",
+        "recoverable": false,
+        "details": {
+          "requestId": "evt-runtime-scene-30",
+          "traceId": "trace-runtime-scene-30",
+          "updatedAt": "2026-08-16T09:43:33.670Z",
+          "cardCount": 1
+        },
+        "timestamp": "2026-08-16T09:43:33.737Z",
+        "source": "runtime"
+      },
+      {
+        "code": "RUNTIME_EVENT_RECEIVED",
+        "message": "Received unsolicited Runtime event",
+        "stage": "runtime",
+        "severity": "info",
+        "recoverable": false,
+        "details": {
+          "eventType": "scene.changed",
+          "requestId": "evt-runtime-scene-30",
+          "traceId": "trace-runtime-scene-30"
+        },
+        "timestamp": "2026-08-16T09:43:33.671Z",
+        "source": "runtime"
+      },
+      {
+        "code": "RUNTIME_SCENE_EVENT_ACCEPTED",
+        "message": "Runtime scene.changed event was accepted",
+        "stage": "runtime",
+        "severity": "info",
+        "recoverable": false,
+        "details": {
+          "requestId": "evt-runtime-scene-29",
+          "traceId": "trace-runtime-scene-29",
+          "updatedAt": "2026-08-16T09:43:32.897Z",
+          "cardCount": 2
+        },
+        "timestamp": "2026-08-16T09:43:32.960Z",
+        "source": "runtime"
+      },
+      {
+        "code": "RUNTIME_EVENT_RECEIVED",
+        "message": "Received unsolicited Runtime event",
+        "stage": "runtime",
+        "severity": "info",
+        "recoverable": false,
+        "details": {
+          "eventType": "scene.changed",
+          "requestId": "evt-runtime-scene-29",
+          "traceId": "trace-runtime-scene-29"
+        },
+        "timestamp": "2026-08-16T09:43:32.897Z",
+        "source": "runtime"
+      },
+      {
+        "code": "RUNTIME_SCENE_EVENT_ACCEPTED",
+        "message": "Runtime scene.changed event was accepted",
+        "stage": "runtime",
+        "severity": "info",
+        "recoverable": false,
+        "details": {
+          "requestId": "evt-runtime-scene-28",
+          "traceId": "trace-runtime-scene-28",
+          "updatedAt": "2026-08-16T09:43:31.841Z",
+          "cardCount": 3
+        },
+        "timestamp": "2026-08-16T09:43:31.906Z",
+        "source": "runtime"
+      },
+      {
+        "code": "RUNTIME_EVENT_RECEIVED",
+        "message": "Received unsolicited Runtime event",
+        "stage": "runtime",
+        "severity": "info",
+        "recoverable": false,
+        "details": {
+          "eventType": "scene.changed",
+          "requestId": "evt-runtime-scene-28",
+          "traceId": "trace-runtime-scene-28"
+        },
+        "timestamp": "2026-08-16T09:43:31.841Z",
+        "source": "runtime"
+      },
+      {
+        "code": "RUNTIME_SCENE_EVENT_ACCEPTED",
+        "message": "Runtime scene.changed event was accepted",
+        "stage": "runtime",
+        "severity": "info",
+        "recoverable": false,
+        "details": {
+          "requestId": "evt-runtime-scene-27",
+          "traceId": "trace-runtime-scene-27",
+          "updatedAt": "2026-08-16T09:43:31.462Z",
+          "cardCount": 4
+        },
+        "timestamp": "2026-08-16T09:43:31.528Z",
+        "source": "runtime"
+      },
+      {
+        "code": "RUNTIME_EVENT_RECEIVED",
+        "message": "Received unsolicited Runtime event",
+        "stage": "runtime",
+        "severity": "info",
+        "recoverable": false,
+        "details": {
+          "eventType": "scene.changed",
+          "requestId": "evt-runtime-scene-27",
+          "traceId": "trace-runtime-scene-27"
+        },
+        "timestamp": "2026-08-16T09:43:31.463Z",
+        "source": "runtime"
+      },
+      {
+        "code": "LAYOUT_SHELF_OUT_OF_BOUNDS",
+        "message": "Behavior channel tool.main layout failed: Shelf cards exceed the work area width",
+        "stage": "scene-create",
+        "severity": "error",
+        "recoverable": false,
+        "details": {},
+        "timestamp": "2026-08-16T09:43:24.694Z",
+        "source": "scene-create"
+      },
+      {
+        "code": "LAYOUT_SHELF_OUT_OF_BOUNDS",
+        "message": "Behavior channel tool.main layout failed: Shelf cards exceed the work area width",
+        "stage": "scene-create",
+        "severity": "error",
+        "recoverable": false,
+        "details": {},
+        "timestamp": "2026-08-16T09:43:24.553Z",
+        "source": "scene-create"
+      },
+      {
+        "code": "RUNTIME_EVENT_RECEIVED",
+        "message": "Received unsolicited Runtime event",
+        "stage": "runtime",
+        "severity": "info",
+        "recoverable": false,
+        "details": {
+          "eventType": "scene.changed",
+          "requestId": "evt-runtime-scene-26",
+          "traceId": "trace-runtime-scene-26"
+        },
+        "timestamp": "2026-08-16T09:43:24.504Z",
+        "source": "runtime"
+      },
+      {
+        "code": "RUNTIME_EVENT_RECEIVED",
+        "message": "Received unsolicited Runtime event",
+        "stage": "runtime",
+        "severity": "info",
+        "recoverable": false,
+        "details": {
+          "eventType": "scene.changed",
+          "requestId": "evt-runtime-scene-25",
+          "traceId": "trace-runtime-scene-25"
+        },
+        "timestamp": "2026-08-16T09:43:23.729Z",
+        "source": "runtime"
+      },
+      {
+        "code": "RUNTIME_EVENT_RECEIVED",
+        "message": "Received unsolicited Runtime event",
+        "stage": "runtime",
+        "severity": "info",
+        "recoverable": false,
+        "details": {
+          "eventType": "scene.changed",
+          "requestId": "evt-runtime-scene-24",
+          "traceId": "trace-runtime-scene-24"
+        },
+        "timestamp": "2026-08-16T09:43:14.810Z",
+        "source": "runtime"
+      },
+      {
+        "code": "RUNTIME_EVENT_RECEIVED",
+        "message": "Received unsolicited Runtime event",
+        "stage": "runtime",
+        "severity": "info",
+        "recoverable": false,
+        "details": {
+          "eventType": "scene.changed",
+          "requestId": "evt-runtime-scene-23",
+          "traceId": "trace-runtime-scene-23"
+        },
+        "timestamp": "2026-08-16T09:43:00.164Z",
+        "source": "runtime"
+      },
+      {
+        "code": "RUNTIME_EVENT_RECEIVED",
+        "message": "Received unsolicited Runtime event",
+        "stage": "runtime",
+        "severity": "info",
+        "recoverable": false,
+        "details": {
+          "eventType": "scene.changed",
+          "requestId": "evt-runtime-scene-22",
+          "traceId": "trace-runtime-scene-22"
+        },
+        "timestamp": "2026-08-16T09:42:58.333Z",
+        "source": "runtime"
+      },
+      {
+        "code": "RUNTIME_EVENT_RECEIVED",
+        "message": "Received unsolicited Runtime event",
+        "stage": "runtime",
+        "severity": "info",
+        "recoverable": false,
+        "details": {
+          "eventType": "scene.changed",
+          "requestId": "evt-runtime-scene-21",
+          "traceId": "trace-runtime-scene-21"
+        },
+        "timestamp": "2026-08-16T09:42:57.961Z",
+        "source": "runtime"
+      },
+      {
+        "code": "RUNTIME_EVENT_RECEIVED",
+        "message": "Received unsolicited Runtime event",
+        "stage": "runtime",
+        "severity": "info",
+        "recoverable": false,
+        "details": {
+          "eventType": "scene.changed",
+          "requestId": "evt-runtime-scene-20",
+          "traceId": "trace-runtime-scene-20"
+        },
+        "timestamp": "2026-08-16T09:42:57.768Z",
+        "source": "runtime"
+      },
+      {
+        "code": "RUNTIME_EVENT_RECEIVED",
+        "message": "Received unsolicited Runtime event",
+        "stage": "runtime",
+        "severity": "info",
+        "recoverable": false,
+        "details": {
+          "eventType": "scene.changed",
+          "requestId": "evt-runtime-scene-19",
+          "traceId": "trace-runtime-scene-19"
+        },
+        "timestamp": "2026-08-16T09:42:44.464Z",
+        "source": "runtime"
+      },
+      {
+        "code": "LAYOUT_SHELF_OUT_OF_BOUNDS",
+        "message": "Behavior channel tool.main layout failed: Shelf cards exceed the work area width",
+        "stage": "scene-create",
+        "severity": "error",
+        "recoverable": false,
+        "details": {},
+        "timestamp": "2026-08-16T09:42:29.471Z",
+        "source": "scene-create"
+      },
+      {
+        "code": "RUNTIME_EVENT_RECEIVED",
+        "message": "Received unsolicited Runtime event",
+        "stage": "runtime",
+        "severity": "info",
+        "recoverable": false,
+        "details": {
+          "eventType": "scene.changed",
+          "requestId": "evt-runtime-scene-18",
+          "traceId": "trace-runtime-scene-18"
+        },
+        "timestamp": "2026-08-16T09:42:29.421Z",
+        "source": "runtime"
+      },
+      {
+        "code": "RUNTIME_EVENT_RECEIVED",
+        "message": "Received unsolicited Runtime event",
+        "stage": "runtime",
+        "severity": "info",
+        "recoverable": false,
+        "details": {
+          "eventType": "scene.changed",
+          "requestId": "evt-runtime-scene-17",
+          "traceId": "trace-runtime-scene-17"
+        },
+        "timestamp": "2026-08-16T09:42:27.925Z",
+        "source": "runtime"
+      },
+      {
+        "code": "RUNTIME_EVENT_RECEIVED",
+        "message": "Received unsolicited Runtime event",
+        "stage": "runtime",
+        "severity": "info",
+        "recoverable": false,
+        "details": {
+          "eventType": "scene.changed",
+          "requestId": "evt-runtime-scene-16",
+          "traceId": "trace-runtime-scene-16"
+        },
+        "timestamp": "2026-08-16T09:42:27.436Z",
+        "source": "runtime"
+      },
+      {
+        "code": "LAYOUT_SHELF_OUT_OF_BOUNDS",
+        "message": "Behavior channel chat.main layout failed: Shelf cards exceed the work area width",
+        "stage": "scene-create",
+        "severity": "error",
+        "recoverable": false,
+        "details": {},
+        "timestamp": "2026-08-16T09:42:27.223Z",
+        "source": "scene-create"
+      },
+      {
+        "code": "TRANSPORT_RECONNECT_RETRY",
+        "message": "Retrying health after transport failure",
+        "stage": "runtime",
+        "severity": "info",
+        "recoverable": false,
+        "details": {
+          "attempt": 1,
+          "maxAttempts": 2,
+          "requestId": "req-node-1407",
+          "cause": "TRANSPORT_ACK_TIMEOUT"
+        },
+        "timestamp": "2026-08-16T09:42:26.168Z",
+        "source": "runtime"
+      },
+      {
+        "code": "TRANSPORT_ACK_TIMEOUT",
+        "message": "ACK timed out for req-node-1407",
+        "stage": "runtime",
+        "severity": "info",
+        "recoverable": false,
+        "details": {
+          "requestId": "req-node-1407",
+          "traceId": "trace-node-1407",
+          "type": "health"
+        },
+        "timestamp": "2026-08-16T09:42:26.167Z",
+        "source": "runtime"
+      },
+      {
+        "code": "RUNTIME_EVENT_RECEIVED",
+        "message": "Received unsolicited Runtime event",
+        "stage": "runtime",
+        "severity": "info",
+        "recoverable": false,
+        "details": {
+          "eventType": "scene.changed",
+          "requestId": "evt-runtime-scene-15",
+          "traceId": "trace-runtime-scene-15"
+        },
+        "timestamp": "2026-08-16T09:42:18.579Z",
+        "source": "runtime"
+      },
+      {
+        "code": "RUNTIME_EVENT_RECEIVED",
+        "message": "Received unsolicited Runtime event",
+        "stage": "runtime",
+        "severity": "info",
+        "recoverable": false,
+        "details": {
+          "eventType": "scene.changed",
+          "requestId": "evt-runtime-scene-14",
+          "traceId": "trace-runtime-scene-14"
+        },
+        "timestamp": "2026-08-16T09:42:17.790Z",
+        "source": "runtime"
+      },
+      {
+        "code": "RUNTIME_EVENT_RECEIVED",
+        "message": "Received unsolicited Runtime event",
+        "stage": "runtime",
+        "severity": "info",
+        "recoverable": false,
+        "details": {
+          "eventType": "scene.changed",
+          "requestId": "evt-runtime-scene-13",
+          "traceId": "trace-runtime-scene-13"
+        },
+        "timestamp": "2026-08-16T09:42:09.336Z",
+        "source": "runtime"
+      },
+      {
+        "code": "RUNTIME_EVENT_RECEIVED",
+        "message": "Received unsolicited Runtime event",
+        "stage": "runtime",
+        "severity": "info",
+        "recoverable": false,
+        "details": {
+          "eventType": "scene.changed",
+          "requestId": "evt-runtime-scene-12",
+          "traceId": "trace-runtime-scene-12"
+        },
+        "timestamp": "2026-08-16T09:41:54.858Z",
+        "source": "runtime"
+      },
+      {
+        "code": "RUNTIME_EVENT_RECEIVED",
+        "message": "Received unsolicited Runtime event",
+        "stage": "runtime",
+        "severity": "info",
+        "recoverable": false,
+        "details": {
+          "eventType": "scene.changed",
+          "requestId": "evt-runtime-scene-11",
+          "traceId": "trace-runtime-scene-11"
+        },
+        "timestamp": "2026-08-16T09:41:54.693Z",
+        "source": "runtime"
+      },
+      {
+        "code": "RUNTIME_EVENT_RECEIVED",
+        "message": "Received unsolicited Runtime event",
+        "stage": "runtime",
+        "severity": "info",
+        "recoverable": false,
+        "details": {
+          "eventType": "scene.changed",
+          "requestId": "evt-runtime-scene-10",
+          "traceId": "trace-runtime-scene-10"
+        },
+        "timestamp": "2026-08-16T09:41:48.350Z",
+        "source": "runtime"
+      },
+      {
+        "code": "RUNTIME_EVENT_RECEIVED",
+        "message": "Received unsolicited Runtime event",
+        "stage": "runtime",
+        "severity": "info",
+        "recoverable": false,
+        "details": {
+          "eventType": "scene.changed",
+          "requestId": "evt-runtime-scene-9",
+          "traceId": "trace-runtime-scene-9"
+        },
+        "timestamp": "2026-08-16T09:41:47.148Z",
+        "source": "runtime"
+      },
+      {
+        "code": "RUNTIME_EVENT_RECEIVED",
+        "message": "Received unsolicited Runtime event",
+        "stage": "runtime",
+        "severity": "info",
+        "recoverable": false,
+        "details": {
+          "eventType": "scene.changed",
+          "requestId": "evt-runtime-scene-8",
+          "traceId": "trace-runtime-scene-8"
+        },
+        "timestamp": "2026-08-16T09:40:52.311Z",
+        "source": "runtime"
+      },
+      {
+        "code": "RUNTIME_EVENT_RECEIVED",
+        "message": "Received unsolicited Runtime event",
+        "stage": "runtime",
+        "severity": "info",
+        "recoverable": false,
+        "details": {
+          "eventType": "scene.changed",
+          "requestId": "evt-runtime-scene-7",
+          "traceId": "trace-runtime-scene-7"
+        },
+        "timestamp": "2026-08-16T09:40:26.846Z",
+        "source": "runtime"
+      },
+      {
+        "code": "RUNTIME_EVENT_RECEIVED",
+        "message": "Received unsolicited Runtime event",
+        "stage": "runtime",
+        "severity": "info",
+        "recoverable": false,
+        "details": {
+          "eventType": "scene.changed",
+          "requestId": "evt-runtime-scene-6",
+          "traceId": "trace-runtime-scene-6"
+        },
+        "timestamp": "2026-08-16T09:40:22.541Z",
+        "source": "runtime"
+      },
+      {
+        "code": "RUNTIME_EVENT_RECEIVED",
+        "message": "Received unsolicited Runtime event",
+        "stage": "runtime",
+        "severity": "info",
+        "recoverable": false,
+        "details": {
+          "eventType": "scene.changed",
+          "requestId": "evt-runtime-scene-5",
+          "traceId": "trace-runtime-scene-5"
+        },
+        "timestamp": "2026-08-16T09:40:22.446Z",
+        "source": "runtime"
+      },
+      {
+        "code": "RUNTIME_EVENT_RECEIVED",
+        "message": "Received unsolicited Runtime event",
+        "stage": "runtime",
+        "severity": "info",
+        "recoverable": false,
+        "details": {
+          "eventType": "scene.changed",
+          "requestId": "evt-runtime-scene-4",
+          "traceId": "trace-runtime-scene-4"
+        },
+        "timestamp": "2026-08-16T09:40:22.041Z",
+        "source": "runtime"
+      },
+      {
+        "code": "TRANSPORT_ACK_TIMEOUT",
+        "message": "ACK timed out for req-node-1143",
+        "stage": "runtime",
+        "severity": "info",
+        "recoverable": false,
+        "details": {
+          "requestId": "req-node-1143",
+          "traceId": "trace-node-1143",
+          "type": "health"
+        },
+        "timestamp": "2026-08-16T09:40:21.747Z",
+        "source": "runtime"
+      },
+      {
+        "code": "TRANSPORT_RECONNECT_RETRY",
+        "message": "Retrying health after transport failure",
+        "stage": "runtime",
+        "severity": "info",
+        "recoverable": false,
+        "details": {
+          "attempt": 1,
+          "maxAttempts": 2,
+          "requestId": "req-node-1143",
+          "cause": "TRANSPORT_ACK_TIMEOUT"
+        },
+        "timestamp": "2026-08-16T09:40:21.747Z",
+        "source": "runtime"
+      },
+      {
+        "code": "RUNTIME_EVENT_RECEIVED",
+        "message": "Received unsolicited Runtime event",
+        "stage": "runtime",
+        "severity": "info",
+        "recoverable": false,
+        "details": {
+          "eventType": "scene.changed",
+          "requestId": "evt-runtime-scene-3",
+          "traceId": "trace-runtime-scene-3"
+        },
+        "timestamp": "2026-08-16T09:40:08.105Z",
+        "source": "runtime"
+      },
+      {
+        "code": "RUNTIME_EVENT_RECEIVED",
+        "message": "Received unsolicited Runtime event",
+        "stage": "runtime",
+        "severity": "info",
+        "recoverable": false,
+        "details": {
+          "eventType": "scene.changed",
+          "requestId": "evt-runtime-scene-2",
+          "traceId": "trace-runtime-scene-2"
+        },
+        "timestamp": "2026-08-16T09:39:56.694Z",
+        "source": "runtime"
+      },
+      {
+        "code": "RUNTIME_EVENT_RECEIVED",
+        "message": "Received unsolicited Runtime event",
+        "stage": "runtime",
+        "severity": "info",
+        "recoverable": false,
+        "details": {
+          "eventType": "scene.changed",
+          "requestId": "evt-runtime-scene-1",
+          "traceId": "trace-runtime-scene-1"
+        },
+        "timestamp": "2026-08-16T09:39:49.359Z",
+        "source": "runtime"
+      },
+      {
+        "code": "TRANSPORT_ACK_TIMEOUT",
+        "message": "ACK timed out for req-node-326",
+        "stage": "runtime",
+        "severity": "info",
+        "recoverable": false,
+        "details": {
+          "requestId": "req-node-326",
+          "traceId": "trace-node-326",
+          "type": "health"
+        },
+        "timestamp": "2026-08-16T09:33:14.235Z",
+        "source": "runtime"
+      },
+      {
+        "code": "TRANSPORT_RECONNECT_RETRY",
+        "message": "Retrying health after transport failure",
+        "stage": "runtime",
+        "severity": "info",
+        "recoverable": false,
+        "details": {
+          "attempt": 1,
+          "maxAttempts": 2,
+          "requestId": "req-node-326",
+          "cause": "TRANSPORT_ACK_TIMEOUT"
+        },
+        "timestamp": "2026-08-16T09:33:14.235Z",
+        "source": "runtime"
+      },
+      {
+        "code": "TRANSPORT_ACK_TIMEOUT",
+        "message": "ACK timed out for req-node-325",
+        "stage": "runtime",
+        "severity": "info",
+        "recoverable": false,
+        "details": {
+          "requestId": "req-node-325",
+          "traceId": "trace-node-325",
+          "type": "health"
+        },
+        "timestamp": "2026-08-16T09:32:59.942Z",
+        "source": "runtime"
+      },
+      {
+        "code": "TRANSPORT_ACK_TIMEOUT",
+        "message": "ACK timed out for req-node-325",
+        "stage": "runtime",
+        "severity": "info",
+        "recoverable": false,
+        "details": {
+          "requestId": "req-node-325",
+          "traceId": "trace-node-325",
+          "type": "health",
+          "source": "health-sync"
+        },
+        "timestamp": "2026-08-16T09:32:59.942Z",
+        "source": "runtime"
+      },
+      {
+        "code": "TRANSPORT_ACK_TIMEOUT",
+        "message": "ACK timed out for req-node-325",
+        "stage": "runtime",
+        "severity": "info",
+        "recoverable": false,
+        "details": {
+          "requestId": "req-node-325",
+          "traceId": "trace-node-325",
+          "type": "health"
+        },
+        "timestamp": "2026-08-16T09:32:22.295Z",
+        "source": "runtime"
+      },
+      {
+        "code": "TRANSPORT_RECONNECT_RETRY",
+        "message": "Retrying health after transport failure",
+        "stage": "runtime",
+        "severity": "info",
+        "recoverable": false,
+        "details": {
+          "attempt": 1,
+          "maxAttempts": 2,
+          "requestId": "req-node-325",
+          "cause": "TRANSPORT_ACK_TIMEOUT"
+        },
+        "timestamp": "2026-08-16T09:32:22.295Z",
+        "source": "runtime"
+      }
+    ]
+  }
+}

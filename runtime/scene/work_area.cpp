@@ -53,6 +53,9 @@ float dpi_scale_for_monitor(HMONITOR monitor) noexcept {
 
 WorkAreaSnapshot query_primary_work_area() noexcept {
 #ifdef _WIN32
+    // Work-area metrics must be queried after entering Per-Monitor V2; otherwise
+    // the first health request can return DPI-virtualized coordinates.
+    SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
     const auto monitor = MonitorFromPoint(POINT{0, 0}, MONITOR_DEFAULTTOPRIMARY);
     MONITORINFO monitor_info{};
     monitor_info.cbSize = sizeof(monitor_info);

@@ -161,4 +161,19 @@ test('recovery snapshot rejects unsupported commands and malformed files', async
     }),
     (error) => error.code === 'RUNTIME_RECOVERY_INVALID_PAYLOAD'
   );
+  const validSerialized = serializeRecoverySnapshot(createRecoverySnapshot({ entries: [{
+    key: 'valid',
+    type: 'config.update',
+    payload: { profile: 'default' }
+  }] }));
+  const blankKey = validSerialized.replace('"key":"valid"', '"key":"  "');
+  const duplicateKey = validSerialized.replace('"entries":[{', '"entries":[{"key":"valid","type":"config.update","payload":{"profile":"duplicate"}},{');
+  assert.throws(
+    () => parseRecoverySnapshot(blankKey),
+    (error) => error.code === 'RUNTIME_RECOVERY_INVALID_SNAPSHOT'
+  );
+  assert.throws(
+    () => parseRecoverySnapshot(duplicateKey),
+    (error) => error.code === 'RUNTIME_RECOVERY_INVALID_SNAPSHOT'
+  );
 });

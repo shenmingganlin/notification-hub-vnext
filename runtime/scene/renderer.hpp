@@ -4,6 +4,8 @@
 #include <memory>
 #include <string_view>
 
+#include "visual.hpp"
+
 namespace notification_hub::scene {
 
 struct Pixel {
@@ -23,7 +25,7 @@ public:
 
     bool initialize(void* native_window, int width, int height);
     bool resize(int width, int height);
-    bool draw(std::wstring_view title, std::wstring_view body, bool capture_output = false);
+    bool draw(std::wstring_view title, std::wstring_view body, const VisualStyle& visual = {}, bool capture_output = false);
     bool capture_pixels() const noexcept;
     bool sample_pixel(int x, int y, Pixel& pixel) const noexcept;
     void reset() noexcept;
@@ -31,7 +33,7 @@ public:
 
 private:
     struct Impl;
-    bool capture_offscreen(std::wstring_view title, std::wstring_view body);
+    bool capture_offscreen(std::wstring_view title, std::wstring_view body, const VisualStyle& visual);
     bool update_layered_window();
     std::unique_ptr<Impl> impl_;
 };

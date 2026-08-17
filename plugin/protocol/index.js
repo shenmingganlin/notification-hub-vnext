@@ -103,7 +103,7 @@ export function createHello(options = {}) {
   return createRequest({
     type: 'hello',
     payload: {
-      clientVersion: options.clientVersion ?? '0.1.0-alpha.1',
+      clientVersion: options.clientVersion ?? '0.1.0-alpha.2',
       supportedProtocolVersions: options.supportedProtocolVersions ?? [PROTOCOL_VERSION]
     },
     requestId: options.requestId,

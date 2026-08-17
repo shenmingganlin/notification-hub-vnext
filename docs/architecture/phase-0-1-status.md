@@ -1,6 +1,6 @@
-# Phase 0/1/2 状态
+# Phase 0/1/2/4/5 状态
 
-日期：2026-08-01
+日期：2026-08-03
 
 ## 已完成
 
@@ -61,10 +61,14 @@
 - 桌面 `WindowFromPoint` 命中 self-test 增加窗口显示后的短暂轮询，等待 HWND/Z-order 与 DComp surface 命中状态稳定，消除启动时序导致的偶发卡片区域未命中。
 - Node.js 测试通过：包含入口生命周期、运行时隔离配置和 Host Adapter 恢复覆盖；需要 Runtime 参数的测试由 CTest 执行。
 - CTest 通过：当前 25/25，覆盖 Runtime → Host 场景变更同步相关的 Controller/Named Pipe/ProcessManager 回归。
+- 发布前验证通过：`npm run check` 通过；Node 测试 89 项，78 通过、11 跳过、0 失败；C++ CTest 25/25 通过；`git diff --check` 通过。
+- 生成 Release ZIP：`dist/notification-hub-vnext-0.1.0-alpha.1.zip`，大小 154241 字节，SHA-256 为 `43D38E8C58ED638C97898D91F68AB9C8964937A578E8A0B7AF307AFA9814483E`。
+- ZIP 静态检查通过：根目录包含 `manifest.json`，插件 ID 为 `notification-hub-vnext`，Runtime 位于 `runtime/notification-hub-runtime.exe`，不含旧版资源、测试源码或嵌套插件根目录。
+- 通过 Hana 真实界面手动拖拽最新 ZIP 完成安装、启用和使用验收；用户确认安装、运行和交互过程没有瑕疵。旧版 `notification-hub` 保持隔离并正常运行。
 
 ## 当前阶段
 
-Phase 2 已完成基础闭环，Phase 4 正在推进，Phase 5 已开始。Node.js 与 C++ Runtime 已具备协议、诊断、framing、最小 Named Pipe 通信、有限自动重连、Runtime 进程托管、幂等请求、版本化恢复快照、fixed 布局多卡片创建/更新/关闭恢复、stack/shelf 共享布局数学与运行时接入、Work Area Provider 默认工作区与显式覆盖、活动布局状态回显、按 recovery 顺序的 stack/shelf 模式恢复、布局前后卡片创建的重新布局、Runtime Scene Controller 到 Native HWND 的实际应用、Runtime 重启后的窗口与卡片状态恢复、最小 Win32 窗口生命周期、D2D/DirectWrite 离屏卡片绘制与分层窗口提交、离屏结构性像素回归、控制器级桌面像素回归、卡片命中、关闭、基础拖动交互、桌面透明命中、DPI 基础契约和受控 `WM_DPICHANGED` 几何同步；shelf/cascade/focus/freeform、真实跨显示器 DPI 和完整 Scene 状态重建尚未完全收口。
+Phase 2 基础闭环、Phase 4 Hana 插件交付和 Phase 5 最小 Native Scene Window 闭环已完成当前验收。Node.js 与 C++ Runtime 已具备协议、诊断、framing、Named Pipe 通信、有限自动重连、Runtime 进程托管、幂等请求、版本化恢复快照、fixed 布局多卡片创建/更新/关闭恢复、stack/shelf 共享布局数学与运行时接入、Work Area Provider 默认工作区与显式覆盖、活动布局状态回显、按 recovery 顺序的 stack/shelf 模式恢复、布局前后卡片创建的重新布局、Runtime Scene Controller 到 Native HWND 的实际应用、Runtime 重启后的窗口与卡片状态恢复、最小 Win32 窗口生命周期、D2D/DirectWrite 离屏卡片绘制与分层窗口提交、离屏结构性像素回归、控制器级桌面像素回归、卡片命中、关闭、基础拖动交互、桌面透明命中、DPI 基础契约和受控 `WM_DPICHANGED` 几何同步；shelf 的更完整视觉/交互边界、cascade/focus/freeform、真实跨显示器 DPI、显示器热插拔和完整 Scene 状态重建仍属于后续范围。
 
 ## 标准验证命令
 
@@ -78,13 +82,14 @@ npm test
 C++ Runtime：
 
 ```powershell
-cmake --preset debug-vs2026
-cmake --build --preset debug-vs2026
-ctest --preset debug-vs2026
+$cmake = 'C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe'
+$ctest = 'C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\ctest.exe'
+& $cmake --build build/vs2022-debug --config Release
+& $ctest --test-dir build/vs2022-debug -C Release --output-on-failure
 ```
 
-原生构建命令需要在 Visual Studio 2026 Developer PowerShell 或 x64 Native Tools Command Prompt 中执行。
+原生构建使用已验证的 Visual Studio 2022 BuildTools x64 工具链；`build/debug-vs2026` 仍保留为历史构建目录，不作为本轮发布包输入。
 
 ## 下一步
 
-继续收口 shelf 的视觉与交互边界，并定义宿主配置热更新、Runtime 路径、Named Pipe 名称和关闭错误上报策略。真实多显示器拓扑、显示器热插拔刷新和多显示器 DPI 拖动验证仍待完成。
+进入总计划的后续产品化阶段，优先评估 shelf 的视觉与交互收口、宿主配置热更新和关闭错误上报；之后再推进通知中心、Profile/工作模式以及多显示器与混合 DPI 能力。当前已完成的发布包和 Native Runtime 不再扩展未经验证的能力。

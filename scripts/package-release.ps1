@@ -13,7 +13,7 @@ $version = [string]$packageJson.version
 if ([string]::IsNullOrWhiteSpace($version)) { throw 'package.json version is empty' }
 
 if ([string]::IsNullOrWhiteSpace($RuntimePath)) {
-  $RuntimePath = Join-Path $repoRoot ("build\debug-vs2026\runtime\$Configuration\notification-hub-runtime.exe")
+  $RuntimePath = Join-Path $repoRoot ("build\vs2022-debug\runtime\$Configuration\notification-hub-runtime.exe")
 }
 $RuntimePath = (Resolve-Path $RuntimePath -ErrorAction Stop).Path
 
@@ -41,6 +41,18 @@ if (-not (Test-Path (Join-Path $pluginSource 'manifest.json'))) { throw 'plugin/
 Copy-Item (Join-Path $pluginSource '*') $stageDir -Recurse -Force
 Copy-Item $RuntimePath (Join-Path $stageDir 'runtime\notification-hub-runtime.exe') -Force
 
+# The release package is an installable artifact, not a source checkout.
+# Do not publish repository-only test scripts that point at absent source paths.
+$stagedPackageJsonPath = Join-Path $stageDir 'package.json'
+$stagedPackage = Get-Content $stagedPackageJsonPath -Raw -Encoding UTF8 | ConvertFrom-Json
+$stagedPackage.PSObject.Properties.Remove('scripts')
+$utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+[System.IO.File]::WriteAllText(
+  $stagedPackageJsonPath,
+  ($stagedPackage | ConvertTo-Json -Depth 20),
+  $utf8NoBom
+)
+
 $manifestPath = Join-Path $stageDir 'manifest.json'
 $manifest = Get-Content $manifestPath -Raw -Encoding UTF8 | ConvertFrom-Json
 if ([string]$manifest.id -ne 'notification-hub-vnext') { throw 'Package manifest id is not notification-hub-vnext' }
@@ -54,9 +66,10 @@ Compress-Archive -Path (Join-Path $stageDir '*') -DestinationPath $zipPath -Forc
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 $zip = [System.IO.Compression.ZipFile]::OpenRead($zipPath)
 try {
-  $rootManifest = $zip.Entries | Where-Object { $_.FullName -eq 'manifest.json' }
-  $nestedManifest = $zip.Entries | Where-Object { $_.FullName -match '(^|/)notification-hub-vnext/manifest\.json$' -or $_.FullName -match '(^|/)plugin/manifest\.json$' }
-  $runtimeEntry = $zip.Entries | Where-Object { $_.FullName -eq 'runtime/notification-hub-runtime.exe' }
+  $entryNames = $zip.Entries | ForEach-Object { $_.FullName.Replace('\', '/') }
+  $rootManifest = $entryNames | Where-Object { $_ -eq 'manifest.json' }
+  $nestedManifest = $entryNames | Where-Object { $_ -match '(^|/)notification-hub-vnext/manifest\.json$' -or $_ -match '(^|/)plugin/manifest\.json$' }
+  $runtimeEntry = $entryNames | Where-Object { $_ -eq 'runtime/notification-hub-runtime.exe' }
   if (-not $rootManifest) { throw 'Zip root does not contain manifest.json' }
   if ($nestedManifest) { throw 'Zip contains a nested plugin root' }
   if (-not $runtimeEntry) { throw 'Zip does not contain runtime/notification-hub-runtime.exe' }
@@ -64,6 +77,9 @@ try {
 finally {
   $zip.Dispose()
 }
+
+# Keep only the installable artifact after validation; the staging tree is disposable.
+Remove-Item $stageDir -Recurse -Force
 
 $hash = Get-FileHash $zipPath -Algorithm SHA256
 Write-Host "Release ZIP: $zipPath"

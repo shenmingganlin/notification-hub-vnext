@@ -1,3 +1,4 @@
+#include "../config/config.hpp"
 #include "../diagnostics/event.hpp"
 #include "../protocol/message.hpp"
 #include "../transport/frame.hpp"
@@ -26,6 +27,7 @@ using notification_hub::protocol::Message;
 using notification_hub::protocol::parse_message;
 using notification_hub::protocol::serialize_ack;
 using notification_hub::protocol::serialize_event;
+using notification_hub::protocol::escape_json_string;
 using notification_hub::transport::FrameDecoder;
 using notification_hub::transport::FrameStatus;
 using notification_hub::transport::encode_frame;
@@ -260,12 +262,12 @@ bool layout_self_test() {
         {}, StackLayoutOptions{StackDirection::Down, StackAnchor::TopLeft, 0, 500, 300, 0.0f});
     if (invalid_dpi.ok || invalid_dpi.code != "LAYOUT_DPI_INVALID") return false;
 
-    const auto scaled = layout_stack(
-        {{"scaled", 100, 40}},
+    const auto physical_geometry = layout_stack(
+        {{"physical", 100, 40}},
         StackLayoutOptions{StackDirection::Down, StackAnchor::TopRight, 8, 500, 300, 1.25f});
-    if (!scaled.ok || scaled.placements.size() != 1
-        || scaled.placements[0].x != 375 || scaled.placements[0].y != 0
-        || scaled.placements[0].width != 125 || scaled.placements[0].height != 50) return false;
+    if (!physical_geometry.ok || physical_geometry.placements.size() != 1
+        || physical_geometry.placements[0].x != 400 || physical_geometry.placements[0].y != 0
+        || physical_geometry.placements[0].width != 100 || physical_geometry.placements[0].height != 40) return false;
 
     const auto empty = layout_stack(
         {}, StackLayoutOptions{StackDirection::Down, StackAnchor::TopLeft, 0, 500, 300, 1.0f});
@@ -335,6 +337,23 @@ bool scene_controller_self_test() {
         return false;
     }
 
+    const StackLayoutOptions restored_layout{
+        StackDirection::Down,
+        StackAnchor::TopLeft,
+        20,
+        1200,
+        800,
+        1.0f,
+        0,
+        0,
+        false,
+        "self-test",
+        notification_hub::scene::LayoutMode::Stack};
+    if (!controller.apply_stack_layout(restored_layout, error_code, error_message)) {
+        std::cerr << "scene controller restored layout setup failed: " << error_code << " " << error_message << "\n";
+        return false;
+    }
+
     const SceneCardState card{
         "controller-card",
         "Controller Card",
@@ -346,9 +365,96 @@ bool scene_controller_self_test() {
         std::cerr << "scene controller card create failed: " << error_code << " " << error_message << "\n";
         return false;
     }
+
+    const auto created_card_hwnd = FindWindowW(
+        L"NotificationHubVNextSceneWindow",
+        L"Controller Card");
+    RECT created_card_rect{};
+    const bool created_card_visible_at_target = created_card_hwnd != nullptr
+        && IsWindowVisible(created_card_hwnd) != FALSE
+        && GetWindowRect(created_card_hwnd, &created_card_rect) != FALSE
+        && created_card_rect.left == 0
+        && created_card_rect.top == 0
+        && created_card_rect.right - created_card_rect.left == card.window.width
+        && created_card_rect.bottom - created_card_rect.top == card.window.height;
+    if (!created_card_visible_at_target) {
+        std::cerr << "scene controller card was not first shown at its requested position: "
+                  << created_card_rect.left << "," << created_card_rect.top << " "
+                  << (created_card_rect.right - created_card_rect.left) << "x"
+                  << (created_card_rect.bottom - created_card_rect.top) << "\n";
+        return false;
+    }
+
+    const SceneCardState second_card{
+        "controller-card-2",
+        "Second Controller Card",
+        "Reflow after dismiss",
+        SceneWindowState{700, 330, 320, 160},
+        320,
+        160};
+    if (!controller.create_card(second_card, error_code, error_message)) {
+        std::cerr << "scene controller second card create failed: " << error_code << " " << error_message << "\n";
+        return false;
+    }
+    const auto second_card_hwnd = FindWindowW(
+        L"NotificationHubVNextSceneWindow",
+        L"Second Controller Card");
+    RECT second_card_rect{};
+    const bool second_card_visible_at_target = second_card_hwnd != nullptr
+        && IsWindowVisible(second_card_hwnd) != FALSE
+        && GetWindowRect(second_card_hwnd, &second_card_rect) != FALSE
+        && second_card_rect.left == 0
+        && second_card_rect.top == 180
+        && second_card_rect.right - second_card_rect.left == second_card.window.width
+        && second_card_rect.bottom - second_card_rect.top == second_card.window.height;
+    if (!second_card_visible_at_target) {
+        std::cerr << "scene controller second card was not first shown at its final layout position: "
+                  << second_card_rect.left << "," << second_card_rect.top << " "
+                  << (second_card_rect.right - second_card_rect.left) << "x"
+                  << (second_card_rect.bottom - second_card_rect.top) << "\n";
+        return false;
+    }
+    const auto stacked_before_dismiss = controller.cards_json();
+    if (stacked_before_dismiss.find("controller-card-2") == std::string::npos) {
+        std::cerr << "scene controller second card was not stored before dismiss\n";
+        return false;
+    }
+    const StackLayoutOptions reflow_layout{
+        StackDirection::Down,
+        StackAnchor::TopLeft,
+        20,
+        1200,
+        800,
+        1.0f,
+        0,
+        0,
+        false,
+        "self-test",
+        notification_hub::scene::LayoutMode::Stack};
+    if (!controller.apply_stack_layout(reflow_layout, error_code, error_message)) {
+        std::cerr << "scene controller stack layout failed: " << error_code << " " << error_message << "\n";
+        return false;
+    }
+
+    const auto card_point = POINT{160, 80};
+    const auto immediate_card_hwnd = WindowFromPoint(card_point);
+    RECT immediate_card_rect{};
+    const bool immediate_card_positioned = immediate_card_hwnd != nullptr
+        && GetWindowRect(immediate_card_hwnd, &immediate_card_rect) != FALSE
+        && immediate_card_rect.left == 0
+        && immediate_card_rect.top == 0
+        && immediate_card_rect.right - immediate_card_rect.left == card.window.width
+        && immediate_card_rect.bottom - immediate_card_rect.top == card.window.height;
+    wchar_t immediate_class_name[128]{};
+    const bool immediate_card_hit = immediate_card_hwnd != nullptr
+        && GetClassNameW(immediate_card_hwnd, immediate_class_name, static_cast<int>(sizeof(immediate_class_name) / sizeof(immediate_class_name[0]))) > 0
+        && std::wstring(immediate_class_name) == L"NotificationHubVNextSceneWindow";
+    if (!immediate_card_hit || !immediate_card_positioned) {
+        std::cerr << "scene controller card was not visible at its target position immediately after creation\n";
+        return false;
+    }
     controller.pump_messages();
 
-    const auto card_point = POINT{860, 230};
     const auto card_hwnd = WindowFromPoint(card_point);
     wchar_t class_name[128]{};
     const bool card_hit = card_hwnd != nullptr
@@ -364,8 +470,8 @@ bool scene_controller_self_test() {
     SendMessageW(card_hwnd, WM_LBUTTONUP, 0, MAKELPARAM(140, 110));
     const bool drag_changed = controller.pump_messages();
     const auto dragged_cards = controller.cards_json();
-    const bool drag_synced = dragged_cards.find("\"x\":760") != std::string::npos
-        && dragged_cards.find("\"y\":180") != std::string::npos
+    const bool drag_synced = dragged_cards.find("\"x\":60") != std::string::npos
+        && dragged_cards.find("\"y\":30") != std::string::npos
         && drag_changed;
     if (!drag_synced) {
         std::cerr << "scene controller card drag was not synchronized: " << dragged_cards << "\n";
@@ -373,11 +479,46 @@ bool scene_controller_self_test() {
     }
 
     SendMessageW(card_hwnd, WM_LBUTTONDOWN, MK_LBUTTON, MAKELPARAM(284, 36));
-    const bool close_changed = controller.pump_messages();
-    if (!close_changed || controller.cards_json() != "[]") {
-        std::cerr << "scene controller card close was not synchronized: " << controller.cards_json() << "\n";
+    const bool down_changed = controller.pump_messages();
+    const auto cards_after_down = controller.cards_json();
+    if (down_changed || cards_after_down.find("\"id\":\"controller-card\"") == std::string::npos) {
+        std::cerr << "scene controller card closed during mouse-down instead of waiting for release: "
+                  << cards_after_down << "\n";
         return false;
     }
+
+    // Reproduce the real mouse sequence. The card must stay in place during
+    // button-down, then close exactly once when the matching button-up arrives.
+    SendMessageW(card_hwnd, WM_LBUTTONUP, 0, MAKELPARAM(284, 36));
+    const bool close_changed = controller.pump_messages();
+    const auto reflowed_cards = controller.cards_json();
+    const auto remaining_card_hwnd = FindWindowW(
+        L"NotificationHubVNextSceneWindow",
+        L"Second Controller Card");
+    RECT remaining_card_rect{};
+    const bool remaining_card_reflowed = remaining_card_hwnd != nullptr
+        && GetWindowRect(remaining_card_hwnd, &remaining_card_rect) != FALSE
+        && remaining_card_rect.left == 0
+        && remaining_card_rect.top == 0;
+    if (!close_changed
+        || reflowed_cards.find("\"id\":\"controller-card\"") != std::string::npos
+        || reflowed_cards.find("\"id\":\"controller-card-2\"") == std::string::npos
+        || reflowed_cards.find("\"x\":0") == std::string::npos
+        || reflowed_cards.find("\"y\":0") == std::string::npos
+        || !remaining_card_reflowed) {
+        std::cerr << "scene controller card close/reflow was not synchronized: " << reflowed_cards
+                  << " remainingCardHwnd=" << remaining_card_hwnd
+                  << " remainingCardRect=" << remaining_card_rect.left << "," << remaining_card_rect.top << "\n";
+        return false;
+    }
+
+    // A card close must not terminate the shared thread message pump. Verify
+    // the surviving card is still a real native window after the first close.
+    if (remaining_card_hwnd == nullptr || !IsWindow(remaining_card_hwnd)) {
+        std::cerr << "scene controller remaining card was destroyed with the dismissed card\n";
+        return false;
+    }
+    static_cast<void>(controller.consume_change_metadata_json());
 
     const auto scene_hwnd = FindWindowW(
         L"NotificationHubVNextSceneWindow",
@@ -387,6 +528,11 @@ bool scene_controller_self_test() {
         return false;
     }
     SendMessageW(scene_hwnd, WM_LBUTTONDOWN, MK_LBUTTON, MAKELPARAM(462, 36));
+    if (controller.pump_messages()) {
+        std::cerr << "scene controller main window changed during mouse-down\n";
+        return false;
+    }
+    SendMessageW(scene_hwnd, WM_LBUTTONUP, 0, MAKELPARAM(462, 36));
     const bool scene_close_changed = controller.pump_messages();
     const auto closed_scene_snapshot = controller.scene_state_snapshot_json();
     if (!scene_close_changed
@@ -969,6 +1115,17 @@ bool window_self_test() {
         std::cerr << serialize_jsonl(event);
         return false;
     }
+    const auto hwnd = static_cast<HWND>(window.native_handle());
+    const auto extended_style = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
+    if ((extended_style & WS_EX_TOPMOST) == 0) {
+        window.request_close();
+        window.run_message_pump(false);
+        const auto event = create_event(
+            "window-self-test", "shown", "RENDERER_WINDOW_TOPMOST_FAILED", "error", false,
+            "Native scene window did not retain the topmost extended style", std::string(kTimestamp));
+        std::cerr << serialize_jsonl(event);
+        return false;
+    }
     if (!window.paint() || !window.is_frame_rendered()) {
         window.request_close();
         window.run_message_pump(false);
@@ -997,6 +1154,13 @@ bool protocol_self_test() {
         R"({"protocolVersion":1,"requestId":"req-health","traceId":"trace-health","type":"health","timestamp":"2026-08-01T00:00:00.000Z","payload":{}})";
 
     if (!expect_valid(hello, "hello") || !expect_valid(health, "health")) return false;
+    constexpr std::string_view escaped_scene =
+        R"({"protocolVersion":1,"requestId":"req-escaped","traceId":"trace-escaped","type":"scene.create","timestamp":"2026-08-01T00:00:00.000Z","payload":{"id":"card-\u4e2d\ud83d\ude80","title":"\u6d4b\u8bd5","body":"escaped unicode"}})";
+    const auto escaped_result = parse_message(escaped_scene);
+    if (!escaped_result.ok || escaped_result.message.payload_json.find("\\u4e2d") == std::string::npos) {
+        std::cerr << "escaped unicode protocol message failed\n";
+        return false;
+    }
     if (!expect_rejected(R"({})", "PROTOCOL_MISSING_FIELD")) return false;
     if (!expect_rejected(
             R"({"protocolVersion":1,"requestId":"req","traceId":"trace","type":"health","timestamp":"2026-08-01T00:00:00.000Z","payload":{},"future":true})",
@@ -1019,6 +1183,15 @@ bool protocol_self_test() {
     if (ack.find("\"type\":\"ack\"") == std::string::npos ||
         ack.find("\"requestId\":\"req-test\"") == std::string::npos) {
         std::cerr << "ack correlation failed\n";
+        return false;
+    }
+    const auto escaped_control_text = escape_json_string(std::string("before") + std::string(1, '\b') + "after");
+    const auto control_character_event = serialize_event(
+        "scene.changed", "evt-control", "trace-control", kTimestamp,
+        std::string(R"({"sceneStateSnapshot":{"body":")") + escaped_control_text + R"("}})");
+    if (!expect_valid(control_character_event, "event")
+        || control_character_event.find("\\b") == std::string::npos) {
+        std::cerr << "control character JSON escaping failed\n";
         return false;
     }
     const auto scene_event = serialize_event(
@@ -1048,6 +1221,11 @@ int main(int argc, char** argv) {
     if (argc > 1 && std::string_view(argv[1]) == "--self-test") {
         std::cout << "notification-hub-runtime self-test: ok\n";
         return 0;
+    }
+    if (argc > 1 && std::string_view(argv[1]) == "--config-self-test") {
+        const bool passed = notification_hub::config::config_self_test();
+        std::cout << "notification-hub-runtime config self-test: " << (passed ? "ok" : "failed") << "\n";
+        return passed ? 0 : 1;
     }
     if (argc > 1 && std::string_view(argv[1]) == "--protocol-self-test") {
         const bool passed = protocol_self_test();

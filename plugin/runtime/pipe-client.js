@@ -43,7 +43,8 @@ export class PipeClient extends EventEmitter {
     connectTimeoutMs = 2000,
     requestTimeoutMs = 2000,
     maxReconnectAttempts = 2,
-    reconnectDelayMs = 25
+    reconnectDelayMs = 25,
+    socketFactory = (name) => net.createConnection(name)
   } = {}) {
     super();
     if (typeof pipeName !== 'string' || pipeName.length === 0) {
@@ -54,12 +55,17 @@ export class PipeClient extends EventEmitter {
     this.requestTimeoutMs = requestTimeoutMs;
     this.maxReconnectAttempts = maxReconnectAttempts;
     this.reconnectDelayMs = reconnectDelayMs;
+    this.socketFactory = socketFactory;
     this.socket = null;
     this.buffer = Buffer.alloc(0);
     this.pending = new Map();
+    this.requestQueue = [];
+    this.requestDrainPromise = null;
     this.nextRequestNumber = 1;
     this.state = 'disconnected';
     this.connectPromise = null;
+    this.connectingSocket = null;
+    this.connectGeneration = 0;
     this.intentionalClose = false;
     this.hasConnected = false;
   }
@@ -77,8 +83,10 @@ export class PipeClient extends EventEmitter {
 
     this.intentionalClose = false;
     this.setState(this.hasConnected ? 'reconnecting' : 'connecting', 'connect-requested');
+    const generation = this.connectGeneration;
     this.connectPromise = new Promise((resolve, reject) => {
-      const socket = net.createConnection(this.pipeName);
+      const socket = this.socketFactory(this.pipeName);
+      this.connectingSocket = socket;
       let settled = false;
       const settle = (action, value) => {
         if (settled) return;
@@ -92,6 +100,12 @@ export class PipeClient extends EventEmitter {
 
       socket.on('connect', () => {
         clearTimeout(timer);
+        if (generation !== this.connectGeneration || this.state === 'closed') {
+          socket.destroy();
+          settle(reject, transportError('TRANSPORT_CLIENT_CLOSED', 'Named Pipe client closed'));
+          return;
+        }
+        if (this.connectingSocket === socket) this.connectingSocket = null;
         this.socket = socket;
         this.hasConnected = true;
         this.buffer = Buffer.alloc(0);
@@ -101,30 +115,43 @@ export class PipeClient extends EventEmitter {
       });
       socket.on('error', (error) => {
         clearTimeout(timer);
+        if (this.connectingSocket === socket) this.connectingSocket = null;
         const wrapped = transportError(
-          settled ? 'TRANSPORT_PIPE_READ_FAILED' : 'TRANSPORT_PIPE_CONNECT_FAILED',
-          error.message,
+          generation !== this.connectGeneration || this.state === 'closed'
+            ? 'TRANSPORT_CLIENT_CLOSED'
+            : settled ? 'TRANSPORT_PIPE_READ_FAILED' : 'TRANSPORT_PIPE_CONNECT_FAILED',
+          generation !== this.connectGeneration || this.state === 'closed'
+            ? 'Named Pipe client closed'
+            : error.message,
           { cause: error.code }
         );
         settle(reject, wrapped);
-        this.emitDiagnostic(wrapped.code, wrapped.message, { cause: error.code });
+        if (wrapped.code !== 'TRANSPORT_CLIENT_CLOSED') {
+          this.emitDiagnostic(wrapped.code, wrapped.message, { cause: error.code });
+        }
         if (this.socket === socket) this.handleDisconnect(socket, wrapped);
       });
       socket.on('close', () => {
         clearTimeout(timer);
-        if (!settled) settle(reject, transportError('TRANSPORT_DISCONNECTED', 'Named Pipe disconnected'));
-        if (this.socket === socket || !this.socket) {
+        if (this.connectingSocket === socket) this.connectingSocket = null;
+        if (!settled) {
+          settle(reject, generation !== this.connectGeneration || this.state === 'closed'
+            ? transportError('TRANSPORT_CLIENT_CLOSED', 'Named Pipe client closed')
+            : transportError('TRANSPORT_DISCONNECTED', 'Named Pipe disconnected'));
+        }
+        if (this.socket === socket || (!this.socket && generation === this.connectGeneration)) {
           this.handleDisconnect(socket, transportError('TRANSPORT_DISCONNECTED', 'Named Pipe disconnected'));
         }
       });
     }).finally(() => {
       this.connectPromise = null;
+      if (this.connectingSocket === undefined) this.connectingSocket = null;
     });
 
     return this.connectPromise;
   }
 
-  async request(type, payload = {}, options = {}) {
+  request(type, payload = {}, options = {}) {
     const sequence = this.nextRequestNumber++;
     const request = createRequest({
       type,
@@ -134,30 +161,53 @@ export class PipeClient extends EventEmitter {
       timestamp: options.timestamp,
       idempotencyKey: options.idempotencyKey
     });
-    const retryable = options.retryable ?? RETRYABLE_TYPES.has(type);
-    const maxAttempts = retryable
-      ? Math.max(1, options.maxAttempts ?? this.maxReconnectAttempts)
-      : 1;
-    let attempt = 0;
+    return new Promise((resolve, reject) => {
+      this.requestQueue.push({ type, request, options, resolve, reject });
+      void this.drainRequestQueue();
+    });
+  }
 
-    while (attempt < maxAttempts) {
-      attempt += 1;
-      try {
-        await this.connect();
-        return await this.sendRequest(request, options.timeoutMs ?? this.requestTimeoutMs);
-      } catch (error) {
-        if (!retryable || attempt >= maxAttempts || !RETRYABLE_CODES.has(error.code)) throw error;
-        this.emitDiagnostic('TRANSPORT_RECONNECT_RETRY', `Retrying ${type} after transport failure`, {
-          attempt,
-          maxAttempts,
-          requestId: request.requestId,
-          cause: error.code
-        });
-        await this.delay(this.reconnectDelayMs * attempt);
+  async drainRequestQueue() {
+    if (this.requestDrainPromise) return this.requestDrainPromise;
+    this.requestDrainPromise = (async () => {
+      while (this.requestQueue.length > 0) {
+        const entry = this.requestQueue.shift();
+        if (!entry) continue;
+        try {
+          const retryable = entry.options.retryable ?? RETRYABLE_TYPES.has(entry.type);
+          const maxAttempts = retryable
+            ? Math.max(1, entry.options.maxAttempts ?? this.maxReconnectAttempts)
+            : 1;
+          let attempt = 0;
+          while (attempt < maxAttempts) {
+            attempt += 1;
+            try {
+              await this.connect();
+              entry.resolve(await this.sendRequest(entry.request, entry.options.timeoutMs ?? this.requestTimeoutMs));
+              break;
+            } catch (error) {
+              if (!retryable || attempt >= maxAttempts || !RETRYABLE_CODES.has(error.code)) {
+                entry.reject(error);
+                break;
+              }
+              this.emitDiagnostic('TRANSPORT_RECONNECT_RETRY', `Retrying ${entry.type} after transport failure`, {
+                attempt,
+                maxAttempts,
+                requestId: entry.request.requestId,
+                cause: error.code
+              });
+              await this.delay(this.reconnectDelayMs * attempt);
+            }
+          }
+        } catch (error) {
+          entry.reject(error);
+        }
       }
-    }
-
-    throw transportError('TRANSPORT_RECONNECT_EXHAUSTED', `Reconnect attempts exhausted for ${request.requestId}`);
+    })().finally(() => {
+      this.requestDrainPromise = null;
+      if (this.requestQueue.length > 0 && this.state !== 'closed') void this.drainRequestQueue();
+    });
+    return this.requestDrainPromise;
   }
 
   async sendRequest(request, timeoutMs) {
@@ -168,18 +218,24 @@ export class PipeClient extends EventEmitter {
     }
 
     return await new Promise((resolve, reject) => {
+      const socket = this.socket;
       const timer = setTimeout(() => {
-        this.pending.delete(request.requestId);
-        const error = transportError('TRANSPORT_ACK_TIMEOUT', `ACK timed out for ${request.requestId}`, {
+        const timeoutError = transportError('TRANSPORT_ACK_TIMEOUT', `ACK timed out for ${request.requestId}`, {
           requestId: request.requestId,
           traceId: request.traceId,
           type: request.type
         });
-        this.emitDiagnostic(error.code, error.message, error.details);
-        reject(error);
+        if (this.socket === socket) {
+          this.handleDisconnect(socket, timeoutError);
+          socket.destroy();
+          return;
+        }
+        this.pending.delete(request.requestId);
+        this.emitDiagnostic(timeoutError.code, timeoutError.message, timeoutError.details);
+        reject(timeoutError);
       }, timeoutMs);
       this.pending.set(request.requestId, { resolve, reject, timer });
-      this.socket.write(frame, (error) => {
+      socket.write(frame, (error) => {
         if (!error) return;
         clearTimeout(timer);
         this.pending.delete(request.requestId);
@@ -189,21 +245,34 @@ export class PipeClient extends EventEmitter {
   }
 
   async close() {
+    this.connectGeneration += 1;
     this.intentionalClose = true;
     this.setState('closed', 'client-close');
-    this.rejectPending(transportError('TRANSPORT_CLIENT_CLOSED', 'Named Pipe client closed'));
-    const socket = this.socket;
+    const closedError = transportError('TRANSPORT_CLIENT_CLOSED', 'Named Pipe client closed');
+    this.rejectPending(closedError);
+    while (this.requestQueue.length > 0) this.requestQueue.shift()?.reject(closedError);
+    const socket = this.socket ?? this.connectingSocket;
+    const pendingConnect = this.connectPromise;
     this.socket = null;
-    if (!socket) return;
-    await new Promise((resolve) => {
-      const finish = () => resolve();
-      socket.once('error', finish);
-      socket.end(finish);
-      setTimeout(() => {
-        socket.destroy();
-        resolve();
-      }, 500).unref();
-    });
+    this.connectingSocket = null;
+    if (socket) {
+      await new Promise((resolve) => {
+        let settled = false;
+        const finish = () => {
+          if (settled) return;
+          settled = true;
+          resolve();
+        };
+        socket.once('error', finish);
+        socket.once('close', finish);
+        socket.end(finish);
+        setTimeout(() => {
+          socket.destroy();
+          finish();
+        }, 500).unref();
+      });
+    }
+    if (pendingConnect) await Promise.allSettled([pendingConnect]);
   }
 
   installSocketHandlers(socket) {
@@ -222,7 +291,7 @@ export class PipeClient extends EventEmitter {
   }
 
   handleDisconnect(socket, error) {
-    if (this.socket !== socket && this.socket !== null) return;
+    if (this.socket !== socket) return;
     this.socket = null;
     this.buffer = Buffer.alloc(0);
     this.rejectPending(error);

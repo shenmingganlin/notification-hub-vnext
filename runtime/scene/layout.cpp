@@ -15,10 +15,6 @@ StackLayoutResult failure(
     return StackLayoutResult{false, std::move(code), std::move(message), std::move(card_id), {}};
 }
 
-int scale_logical(int value, float dpi_scale) {
-    return static_cast<int>(std::lround(static_cast<float>(value) * dpi_scale));
-}
-
 bool anchor_is_right(StackAnchor anchor) {
     return anchor == StackAnchor::TopRight || anchor == StackAnchor::BottomRight;
 }
@@ -70,16 +66,14 @@ StackLayoutResult layout_linear(
                 : "Stack layout spacing cannot be negative");
     }
 
-    const auto spacing = scale_logical(options.spacing, options.dpi_scale);
+    // Work-area and card geometry are already physical pixels under the
+    // Runtime's Per-Monitor V2 contract. DPI remains metadata for the
+    // provider snapshot and must not scale geometry a second time.
+    const auto spacing = options.spacing;
     StackLayoutResult result{true, {}, {}, {}, {}};
     result.placements.reserve(cards.size());
 
-    struct ScaledCard {
-        const StackCardInput* input;
-        int width;
-        int height;
-    };
-    std::vector<ScaledCard> scaled_cards;
+    std::vector<const StackCardInput*> scaled_cards;
     scaled_cards.reserve(cards.size());
     const auto horizontal = shelf || options.direction == StackDirection::Right
         || options.direction == StackDirection::Left;
@@ -91,23 +85,13 @@ StackLayoutResult layout_linear(
                 shelf ? "Shelf card dimensions must be positive" : "Stack card dimensions must be positive",
                 card.id);
         }
-        const auto width = scale_logical(card.width, options.dpi_scale);
-        const auto height = scale_logical(card.height, options.dpi_scale);
-        if (width <= 0 || height <= 0) {
-            return failure(
-                "LAYOUT_CARD_INVALID",
-                shelf
-                    ? "Shelf card dimensions must remain positive after DPI scaling"
-                    : "Stack card dimensions must remain positive after DPI scaling",
-                card.id);
-        }
-        scaled_cards.push_back(ScaledCard{&card, width, height});
-        total_extent += horizontal ? width : height;
+        scaled_cards.push_back(&card);
+        total_extent += horizontal ? card.width : card.height;
         if (scaled_cards.size() > 1) total_extent += spacing;
     }
     const auto work_extent = horizontal ? options.work_area_width : options.work_area_height;
     if (total_extent > work_extent) {
-        const auto& failing_card = scaled_cards.empty() ? StackCardInput{} : *scaled_cards.back().input;
+        const auto& failing_card = scaled_cards.empty() ? StackCardInput{} : *scaled_cards.back();
         return failure(
             shelf ? "LAYOUT_SHELF_OUT_OF_BOUNDS" : "LAYOUT_CARD_OUT_OF_BOUNDS",
             shelf ? "Shelf cards exceed the work area width" : "Stack cards exceed the work area extent",
@@ -115,10 +99,10 @@ StackLayoutResult layout_linear(
     }
 
     int cursor = 0;
-    for (const auto& scaled : scaled_cards) {
-        const auto& card = *scaled.input;
-        const auto width = scaled.width;
-        const auto height = scaled.height;
+    for (const auto* card_input : scaled_cards) {
+        const auto& card = *card_input;
+        const auto width = card.width;
+        const auto height = card.height;
         StackCardPlacement placement{card.id, 0, 0, width, height};
         if (horizontal) {
             if (options.direction == StackDirection::Right) {

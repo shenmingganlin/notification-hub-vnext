@@ -1,6 +1,7 @@
 add_executable(notification-hub-runtime
   app/main.cpp
   diagnostics/event.cpp
+  config/config.cpp
   protocol/message.cpp
   transport/frame.cpp
   transport/named_pipe.cpp
@@ -18,7 +19,7 @@ target_include_directories(notification-hub-runtime PRIVATE
 target_compile_features(notification-hub-runtime PRIVATE cxx_std_20)
 
 target_compile_definitions(notification-hub-runtime PRIVATE
-  NOTIFICATION_HUB_VERSION="0.1.0-alpha.1"
+  NOTIFICATION_HUB_VERSION="0.1.0-alpha.16"
 )
 
 if (WIN32)
@@ -27,6 +28,7 @@ endif()
 
 add_test(NAME runtime_smoke COMMAND notification-hub-runtime --self-test)
 add_test(NAME runtime_protocol_self_test COMMAND notification-hub-runtime --protocol-self-test)
+add_test(NAME runtime_config_self_test COMMAND notification-hub-runtime --config-self-test)
 add_test(NAME runtime_transport_self_test COMMAND notification-hub-runtime --transport-self-test)
 add_test(NAME runtime_window_self_test COMMAND notification-hub-runtime --window-self-test)
 add_test(NAME runtime_render_self_test COMMAND notification-hub-runtime --render-self-test)
@@ -51,12 +53,20 @@ if (NODE_EXECUTABLE)
     COMMAND "${NODE_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/node/named-pipe-smoke.test.mjs" "$<TARGET_FILE:notification-hub-runtime>"
   )
   add_test(
+    NAME runtime_named_pipe_config_update_smoke
+    COMMAND "${NODE_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/node/named-pipe-config-update.test.mjs" "$<TARGET_FILE:notification-hub-runtime>"
+  )
+  add_test(
     NAME runtime_named_pipe_multi_client_smoke
     COMMAND "${NODE_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/node/named-pipe-multi-client.test.mjs" "$<TARGET_FILE:notification-hub-runtime>"
   )
   add_test(
     NAME runtime_named_pipe_scene_event_smoke
     COMMAND "${NODE_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/node/named-pipe-scene-event.test.mjs" "$<TARGET_FILE:notification-hub-runtime>"
+  )
+  add_test(
+    NAME runtime_named_pipe_behavior_channel_smoke
+    COMMAND "${NODE_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/node/named-pipe-behavior-channel.test.mjs" "$<TARGET_FILE:notification-hub-runtime>"
   )
   add_test(
     NAME runtime_process_manager_smoke
@@ -74,7 +84,7 @@ if (NODE_EXECUTABLE)
     NAME runtime_host_adapter_restart_smoke
     COMMAND "${NODE_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/node/host-adapter-restart-runtime-smoke.test.mjs" "$<TARGET_FILE:notification-hub-runtime>"
   )
-  set_tests_properties(runtime_named_pipe_smoke runtime_named_pipe_multi_client_smoke runtime_named_pipe_scene_event_smoke runtime_process_manager_smoke runtime_scene_state_persistence_smoke runtime_host_adapter_smoke runtime_host_adapter_restart_smoke PROPERTIES
+  set_tests_properties(runtime_named_pipe_smoke runtime_named_pipe_config_update_smoke runtime_named_pipe_multi_client_smoke runtime_named_pipe_scene_event_smoke runtime_named_pipe_behavior_channel_smoke runtime_process_manager_smoke runtime_scene_state_persistence_smoke runtime_host_adapter_smoke runtime_host_adapter_restart_smoke PROPERTIES
     WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
   )
 endif()

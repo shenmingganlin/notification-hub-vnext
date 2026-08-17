@@ -16,7 +16,10 @@ function cardPayload(card) {
     x: card.x,
     y: card.y,
     width: card.width,
-    height: card.height
+    height: card.height,
+    ...(card.visual ? { visual: cloneJson(card.visual) } : {}),
+    ...(card.presentation ? { presentation: cloneJson(card.presentation) } : {}),
+    ...(card.behavior ? { behavior: cloneJson(card.behavior) } : {})
   };
 }
 

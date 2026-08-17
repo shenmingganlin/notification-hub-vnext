@@ -42,6 +42,45 @@ test('SceneState preserves explicit card order and round-trips', () => {
   assert.deepEqual(parseSceneState(serializeSceneState(state)), state);
 });
 
+test('SceneState preserves controlled presentation and behavior metadata', () => {
+  const state = createSceneState({
+    sceneWindow: { x: 0, y: 0, width: 420, height: 180 },
+    cardOrder: ['card-a'],
+    cards: [{
+      id: 'card-a', title: 'Card A', body: '', x: 0, y: 0, width: 320, height: 160,
+      presentation: { eventId: 'tool.execution.failed', categoryId: 'tool', eventTypeId: 'execution.failed', visualProfileId: 'visual.error' },
+      behavior: { behaviorProfileId: 'stack', behaviorChannelId: 'stack.main' }
+    }],
+    layout: null
+  });
+  assert.equal(parseSceneState(serializeSceneState(state)).cards[0].behavior.behaviorChannelId, 'stack.main');
+  assert.equal(state.cards[0].presentation.eventId, 'tool.execution.failed');
+});
+
+test('SceneState preserves behavior channel lifecycle metadata', () => {
+  const state = createSceneState({
+    sceneWindow: { x: 0, y: 0, width: 420, height: 180 },
+    cardOrder: ['card-a', 'card-b'],
+    cards: [
+      { id: 'card-a', title: 'A', body: '', x: 0, y: 0, width: 320, height: 160, behavior: { behaviorProfileId: 'stack', behaviorChannelId: 'stack.main' } },
+      { id: 'card-b', title: 'B', body: '', x: 600, y: 0, width: 320, height: 160, behavior: { behaviorProfileId: 'ticker', behaviorChannelId: 'ticker.main' } }
+    ],
+    behaviorChannels: [
+      { channelId: 'stack.main', profileId: 'stack', cardOrder: ['card-a'] },
+      { channelId: 'ticker.main', profileId: 'ticker', cardOrder: ['card-b'] }
+    ],
+    layout: null
+  });
+  assert.deepEqual(parseSceneState(serializeSceneState(state)).behaviorChannels, state.behaviorChannels);
+  assert.throws(
+    () => validateSceneState({ ...state, behaviorChannels: [
+      { channelId: 'stack.main', profileId: 'stack', cardOrder: ['card-a', 'card-b'] },
+      { channelId: 'ticker.main', profileId: 'ticker', cardOrder: ['card-b'] }
+    ] }),
+    (error) => error.code === 'RUNTIME_SCENE_STATE_BEHAVIOR_INVALID'
+  );
+});
+
 test('SceneState accepts an empty scene without an active layout', () => {
   const state = createSceneState({
     sceneWindow: { x: 0, y: 0, width: 420, height: 180 },

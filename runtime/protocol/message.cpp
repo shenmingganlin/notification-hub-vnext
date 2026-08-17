@@ -1,6 +1,7 @@
 #include "message.hpp"
 
 #include <cctype>
+#include <cstdint>
 #include <charconv>
 #include <sstream>
 #include <unordered_set>
@@ -8,6 +9,31 @@
 
 namespace notification_hub::protocol {
 namespace {
+
+int hex_digit(char value) {
+    if (value >= '0' && value <= '9') return value - '0';
+    if (value >= 'a' && value <= 'f') return value - 'a' + 10;
+    if (value >= 'A' && value <= 'F') return value - 'A' + 10;
+    return -1;
+}
+
+void append_utf8(std::string& output, std::uint32_t code_point) {
+    if (code_point <= 0x7f) {
+        output.push_back(static_cast<char>(code_point));
+    } else if (code_point <= 0x7ff) {
+        output.push_back(static_cast<char>(0xc0 | (code_point >> 6)));
+        output.push_back(static_cast<char>(0x80 | (code_point & 0x3f)));
+    } else if (code_point <= 0xffff) {
+        output.push_back(static_cast<char>(0xe0 | (code_point >> 12)));
+        output.push_back(static_cast<char>(0x80 | ((code_point >> 6) & 0x3f)));
+        output.push_back(static_cast<char>(0x80 | (code_point & 0x3f)));
+    } else {
+        output.push_back(static_cast<char>(0xf0 | (code_point >> 18)));
+        output.push_back(static_cast<char>(0x80 | ((code_point >> 12) & 0x3f)));
+        output.push_back(static_cast<char>(0x80 | ((code_point >> 6) & 0x3f)));
+        output.push_back(static_cast<char>(0x80 | (code_point & 0x3f)));
+    }
+}
 
 constexpr std::string_view kCommands[] = {
     "hello", "health", "capabilities", "scene.create", "scene.update",
@@ -148,6 +174,32 @@ private:
                 case 'n': value.push_back('\n'); break;
                 case 'r': value.push_back('\r'); break;
                 case 't': value.push_back('\t'); break;
+                case 'u': {
+                    if (position_ + 4 > input_.size()) return false;
+                    std::uint32_t code_point = 0;
+                    for (size_t index = 0; index < 4; ++index) {
+                        const int digit = hex_digit(input_[position_ + index]);
+                        if (digit < 0) return false;
+                        code_point = (code_point << 4) | static_cast<std::uint32_t>(digit);
+                    }
+                    position_ += 4;
+                    if (code_point >= 0xd800 && code_point <= 0xdbff) {
+                        if (position_ + 6 > input_.size() || input_[position_] != '\\' || input_[position_ + 1] != 'u') return false;
+                        std::uint32_t low = 0;
+                        for (size_t index = 0; index < 4; ++index) {
+                            const int digit = hex_digit(input_[position_ + 2 + index]);
+                            if (digit < 0) return false;
+                            low = (low << 4) | static_cast<std::uint32_t>(digit);
+                        }
+                        if (low < 0xdc00 || low > 0xdfff) return false;
+                        position_ += 6;
+                        code_point = 0x10000 + ((code_point - 0xd800) << 10) + (low - 0xdc00);
+                    } else if (code_point >= 0xdc00 && code_point <= 0xdfff) {
+                        return false;
+                    }
+                    append_utf8(value, code_point);
+                    break;
+                }
                 default: return false;
                 }
             } else {
@@ -264,10 +316,21 @@ std::string escape_json_string(std::string_view value) {
         switch (ch) {
         case '"': result += "\\\""; break;
         case '\\': result += "\\\\"; break;
+        case '\b': result += "\\b"; break;
+        case '\f': result += "\\f"; break;
         case '\n': result += "\\n"; break;
         case '\r': result += "\\r"; break;
         case '\t': result += "\\t"; break;
-        default: result.push_back(ch); break;
+        default:
+            if (static_cast<unsigned char>(ch) < 0x20) {
+                constexpr char hex[] = "0123456789abcdef";
+                result += "\\u00";
+                result.push_back(hex[(static_cast<unsigned char>(ch) >> 4) & 0x0f]);
+                result.push_back(hex[static_cast<unsigned char>(ch) & 0x0f]);
+            } else {
+                result.push_back(ch);
+            }
+            break;
         }
     }
     return result;

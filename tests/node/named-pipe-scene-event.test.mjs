@@ -153,6 +153,7 @@ test('Named Pipe delivers native drag and close scene.changed events', async (t)
 
   await sendNativeCardAction(title, `
 [void][NotificationHubSceneEventTest]::SendMessage($hwnd, 0x0201, [IntPtr]1, [NotificationHubSceneEventTest]::LParam(190, 24))
+[void][NotificationHubSceneEventTest]::SendMessage($hwnd, 0x0202, [IntPtr]::Zero, [NotificationHubSceneEventTest]::LParam(190, 24))
 `);
   const closedSnapshot = await waitForSceneSnapshot(
     client,
@@ -161,6 +162,52 @@ test('Named Pipe delivers native drag and close scene.changed events', async (t)
   );
   assert.deepEqual(closedSnapshot.cardOrder, []);
   assert.deepEqual(closedSnapshot.cards, []);
+  const closeEvent = eventHistory.find((message) => {
+    const snapshot = message?.payload?.result?.sceneStateSnapshot;
+    return message?.payload?.eventType === 'scene.changed'
+      && snapshot?.cardOrder?.length === 0
+      && snapshot?.cards?.length === 0;
+  });
+  assert.deepEqual(closeEvent?.payload?.result?.change, {
+    status: 'changed',
+    reason: 'user-close',
+    target: 'card',
+    targetId: 'scene-event-card',
+    recoverable: false,
+    notifyUser: false,
+    error: null
+  });
+
+  const abnormalTitle = `🌸 pipe-scene-event-abnormal-${process.pid}`;
+  await client.request('scene.create', {
+    id: 'scene-event-abnormal-card',
+    title: abnormalTitle,
+    body: 'Native abnormal destroy smoke',
+    x: 160,
+    y: 120,
+    width: 320,
+    height: 160
+  }, { retryable: false });
+  await sendNativeCardAction(abnormalTitle, '[void][NotificationHubSceneEventTest]::SendMessage($hwnd, 0x8001, [IntPtr]::Zero, [IntPtr]::Zero)');
+  const destroyedSnapshot = await waitForSceneSnapshot(
+    client,
+    eventHistory,
+    (snapshot) => snapshot.cardOrder.length === 0 && snapshot.cards.length === 0
+      && eventHistory.some((message) => message?.payload?.result?.change?.reason === 'window-destroyed')
+  );
+  assert.deepEqual(destroyedSnapshot.cardOrder, []);
+  const destroyedEvent = eventHistory.find((message) =>
+    message?.payload?.result?.change?.reason === 'window-destroyed'
+  );
+  assert.deepEqual(destroyedEvent?.payload?.result?.change, {
+    status: 'changed',
+    reason: 'window-destroyed',
+    target: 'card',
+    targetId: 'scene-event-abnormal-card',
+    recoverable: true,
+    notifyUser: true,
+    error: null
+  });
 
   const shutdown = await client.request('shutdown');
   assert.equal(shutdown.type, 'ack');

@@ -127,6 +127,198 @@ test('RuntimeHostAdapter allows a fresh install with no persisted recovery sourc
   await adapter.stop();
 });
 
+test('RuntimeHostAdapter cancels an in-flight start when stop begins', async () => {
+  const events = [];
+  let releasePlan;
+  const planReady = new Promise((resolve) => { releasePlan = resolve; });
+  const adapter = new RuntimeHostAdapter({
+    context: { dataDir: 'C:\\Hana\\data', config: { sceneStatePersistenceEnabled: false } },
+    runtimePath: 'runtime.exe',
+    pipeName: '\\\\.\\pipe\\host-adapter-cancel',
+    loadPlan: async () => planReady,
+    managerFactory: () => {
+      events.push('manager:create');
+      return new FakeManager({}, events);
+    },
+    clientFactory: () => {
+      events.push('client:create');
+      return new FakeClient({}, events);
+    }
+  });
+
+  const startPromise = adapter.start();
+  const stopPromise = adapter.stop();
+  releasePlan({ source: 'empty', snapshot: createRecoverySnapshot(), diagnostics: [] });
+
+  await assert.rejects(startPromise, (error) => error.code === 'RUNTIME_HOST_START_CANCELLED');
+  await stopPromise;
+  assert.equal(adapter.state, 'stopped');
+  assert.equal(adapter.manager, null);
+  assert.equal(adapter.client, null);
+  assert.deepEqual(events, []);
+});
+
+test('RuntimeHostAdapter exposes abnormal exit, reconnecting, and normal stop lifecycle states', async () => {
+  const events = [];
+  let manager;
+  let client;
+  const adapter = new RuntimeHostAdapter({
+    context: { dataDir: 'C:\\Hana\\data', config: { sceneStatePersistenceEnabled: false } },
+    runtimePath: 'runtime.exe',
+    pipeName: '\\\\.\\pipe\\host-adapter-lifecycle',
+    loadPlan: async () => ({ source: 'empty', snapshot: createRecoverySnapshot(), diagnostics: [] }),
+    managerFactory: (options) => {
+      manager = new FakeManager(options, events);
+      return manager;
+    },
+    clientFactory: (options) => {
+      client = new FakeClient(options, events);
+      return client;
+    }
+  });
+
+  await adapter.start();
+  assert.equal(adapter.getRuntimeStatus().state, 'running');
+
+  manager.emit('exit', { code: 17, signal: null, intentional: false });
+  let status = adapter.getRuntimeStatus();
+  assert.equal(status.state, 'crashed');
+  assert.equal(status.message, 'Runtime 异常退出');
+  assert.equal(status.lastError.code, 'RUNTIME_EXITED');
+  assert.equal(status.lastError.stage, 'runtime-process');
+  assert.equal(status.lastError.category, 'runtime-crash');
+  assert.equal(status.lastError.reason, 'runtime-exited');
+  assert.equal(status.lastError.recoverable, true);
+  assert.equal(status.lastError.userAction, 'retry');
+  assert.equal(status.lastError.notifyUser, true);
+  assert.deepEqual(status.lastError.details, { exitCode: 17, signal: null, intentional: false });
+
+  manager.emit('diagnostic', { code: 'RUNTIME_RESTART_SCHEDULED', message: 'restart', details: {} });
+  assert.equal(adapter.getRuntimeStatus().state, 'reconnecting');
+  client = adapter.client;
+  client.emit('state', { state: 'connected' });
+  assert.equal(adapter.getRuntimeStatus().state, 'reconnecting');
+
+  manager.emit('restarted', { attempt: 1 });
+  status = adapter.getRuntimeStatus();
+  assert.equal(status.state, 'running');
+  assert.equal(status.lastError.code, 'RUNTIME_EXITED');
+
+  await adapter.stop();
+  status = adapter.getRuntimeStatus();
+  assert.equal(status.state, 'stopped');
+  assert.equal(status.message, 'Runtime 已停止');
+  assert.equal(status.lastError.code, 'RUNTIME_EXITED');
+});
+
+test('RuntimeHostAdapter returns to running when the current PipeClient reconnects', async () => {
+  const events = [];
+  let client;
+  const adapter = new RuntimeHostAdapter({
+    context: { dataDir: 'C:\\Hana\\data', config: { sceneStatePersistenceEnabled: false } },
+    runtimePath: 'runtime.exe',
+    pipeName: '\\\\.\\pipe\\host-adapter-reconnect',
+    loadPlan: async () => ({ source: 'empty', snapshot: createRecoverySnapshot(), diagnostics: [] }),
+    managerFactory: (options) => new FakeManager(options, events),
+    clientFactory: (options) => {
+      client = new FakeClient(options, events);
+      return client;
+    }
+  });
+
+  await adapter.start();
+  client.emit('diagnostic', { code: 'TRANSPORT_DISCONNECTED', message: 'Named Pipe disconnected' });
+  assert.equal(adapter.getRuntimeStatus().state, 'reconnecting');
+  client.emit('state', { state: 'connected' });
+  assert.equal(adapter.getRuntimeStatus().state, 'running');
+  assert.equal(adapter.getRuntimeStatus().connected, false);
+  await adapter.stop();
+});
+
+test('RuntimeHostAdapter clean stop does not create a stop error', async () => {
+  const events = [];
+  const adapter = new RuntimeHostAdapter({
+    context: { dataDir: 'C:\\Hana\\data', config: { sceneStatePersistenceEnabled: false } },
+    runtimePath: 'runtime.exe',
+    pipeName: '\\\\.\\pipe\\host-adapter-clean-stop',
+    loadPlan: async () => ({ source: 'empty', snapshot: createRecoverySnapshot(), diagnostics: [] }),
+    managerFactory: (options) => new FakeManager(options, events),
+    clientFactory: (options) => new FakeClient(options, events)
+  });
+
+  await adapter.start();
+  await adapter.stop();
+  const status = adapter.getRuntimeStatus();
+  assert.equal(status.state, 'stopped');
+  assert.equal(status.lastError, null);
+});
+
+test('RuntimeHostAdapter classifies transport disconnects as recoverable retry diagnostics', async () => {
+  const events = [];
+  let manager;
+  const adapter = new RuntimeHostAdapter({
+    context: { dataDir: 'C:\\Hana\\data', config: { sceneStatePersistenceEnabled: false } },
+    runtimePath: 'runtime.exe',
+    pipeName: '\\\\.\\pipe\\host-adapter-transport',
+    loadPlan: async () => ({ source: 'empty', snapshot: createRecoverySnapshot(), diagnostics: [] }),
+    managerFactory: (options) => {
+      manager = new FakeManager(options, events);
+      return manager;
+    },
+    clientFactory: (options) => new FakeClient(options, events)
+  });
+
+  await adapter.start();
+  manager.emit('diagnostic', {
+    code: 'TRANSPORT_DISCONNECTED',
+    message: 'Named Pipe disconnected',
+    details: { source: 'client' },
+    timestamp: '2026-08-10T10:00:00.000Z'
+  });
+
+  const status = adapter.getRuntimeStatus();
+  assert.equal(status.state, 'reconnecting');
+  assert.equal(status.lastError.category, 'transport');
+  assert.equal(status.lastError.reason, 'transport-disconnected');
+  assert.equal(status.lastError.recoverable, true);
+  assert.equal(status.lastError.userAction, 'retry');
+  assert.equal(status.lastError.notifyUser, true);
+  assert.deepEqual(status.lastError.details, { source: 'client' });
+  await adapter.stop();
+});
+
+test('RuntimeHostAdapter reports stop-failed without masking the stop error', async () => {
+  const events = [];
+  let manager;
+  const adapter = new RuntimeHostAdapter({
+    context: { dataDir: 'C:\\Hana\\data', config: { sceneStatePersistenceEnabled: false } },
+    runtimePath: 'runtime.exe',
+    pipeName: '\\\\.\\pipe\\host-adapter-stop-failed',
+    loadPlan: async () => ({ source: 'empty', snapshot: createRecoverySnapshot(), diagnostics: [] }),
+    managerFactory: (options) => {
+      manager = new FakeManager(options, events);
+      manager.stop = async () => {
+        events.push('manager:stop-failed');
+        throw Object.assign(new Error('stop refused'), { code: 'RUNTIME_STOP_FAILED' });
+      };
+      return manager;
+    },
+    clientFactory: (options) => new FakeClient(options, events)
+  });
+
+  await adapter.start();
+  await assert.rejects(adapter.stop(), (error) => error.code === 'RUNTIME_STOP_FAILED');
+  const status = adapter.getRuntimeStatus();
+  assert.equal(status.state, 'stop-failed');
+  assert.equal(status.message, 'Runtime 停止失败');
+  assert.equal(status.lastError.code, 'RUNTIME_STOP_FAILED');
+  assert.equal(status.lastError.stage, 'host-stop');
+  assert.equal(status.lastError.category, 'runtime');
+  assert.equal(status.lastError.recoverable, true);
+  assert.equal(status.lastError.userAction, 'inspect');
+  assert.equal(status.lastError.notifyUser, true);
+});
+
 test('RuntimeHostAdapter cleans up client and manager when startup fails', async () => {
   const events = [];
   let manager;

@@ -52,7 +52,9 @@ test('Node client completes hello, health, and shutdown over Named Pipe', async 
     reconnectDelayMs: 10
   });
   const states = [];
+  const eventHistory = [];
   client.on('state', (change) => states.push(change));
+  client.on('event', (message) => eventHistory.push(message));
   t.after(() => client.close());
 
   const hello = await client.request('hello', { clientVersion: 'node-smoke' });
@@ -65,6 +67,10 @@ test('Node client completes hello, health, and shutdown over Named Pipe', async 
   assert.equal(health.type, 'ack');
   assert.equal(health.payload.requestType, 'health');
   assert.equal(health.payload.result.deduplicated, false);
+  const initialWorkArea = health.payload.result.workArea;
+  assert.ok(initialWorkArea?.width > 0);
+  assert.ok(initialWorkArea?.height > 0);
+  assert.ok(initialWorkArea?.dpiScale > 0);
 
   await new Promise((resolve, reject) => {
     const timer = setTimeout(() => reject(new Error(`Runtime did not report disconnect; states=${JSON.stringify(states)}`)), 1500);
@@ -121,10 +127,42 @@ test('Node client completes hello, health, and shutdown over Named Pipe', async 
     x: 140,
     y: 90,
     width: 320,
-    height: 160
+    height: 160,
+    visual: { enabled: true, preset: 'warning', intensity: 'expressive', category: 'error' }
   }, { retryable: false, idempotencyKey: 'card-a-create' });
   assert.equal(firstCard.type, 'ack');
   assert.equal(firstCard.payload.result.sceneCards.length, 1);
+  assert.deepEqual(firstCard.payload.result.sceneCards[0].visual, {
+    enabled: true,
+    preset: 'warning',
+    intensity: 'expressive',
+    category: 'error'
+  });
+  assert.deepEqual(firstCard.payload.result.workArea, initialWorkArea);
+
+  const unicodeCard = await client.request('scene.create', {
+    id: 'card-unicode-中文-🚀',
+    title: '中文标题 · 🚀',
+    body: '换行\n第二行\t制表符',
+    x: 850,
+    y: 90,
+    width: 320,
+    height: 160
+  }, { retryable: false, idempotencyKey: 'card-unicode-create' });
+  assert.equal(unicodeCard.type, 'ack');
+  assert.ok(unicodeCard.payload.result.sceneCards.some((card) => card.id === 'card-unicode-中文-🚀'));
+
+  const controlCharacterCard = await client.request('scene.create', {
+    id: 'card-control-character',
+    title: 'Control character body',
+    body: `before\b\f\u000b\u000c\u000e\u001fafter`,
+    x: 850,
+    y: 280,
+    width: 320,
+    height: 160
+  }, { retryable: false, idempotencyKey: 'card-control-character-create' });
+  assert.equal(controlCharacterCard.type, 'ack');
+  assert.ok(controlCharacterCard.payload.result.sceneCards.some((card) => card.id === 'card-control-character'));
 
   const secondCard = await client.request('scene.create', {
     id: 'card-b',
@@ -135,7 +173,7 @@ test('Node client completes hello, health, and shutdown over Named Pipe', async 
     width: 320,
     height: 160
   }, { retryable: false, idempotencyKey: 'card-b-create' });
-  assert.equal(secondCard.payload.result.sceneCards.length, 2);
+  assert.equal(secondCard.payload.result.sceneCards.length, 4);
 
   const updatedCard = await client.request('scene.update', {
     id: 'card-a',
@@ -146,13 +184,23 @@ test('Node client completes hello, health, and shutdown over Named Pipe', async 
     width: 340,
     height: 170
   }, { retryable: false, idempotencyKey: 'card-a-update' });
-  assert.equal(updatedCard.payload.result.sceneCards.length, 2);
+  assert.equal(updatedCard.payload.result.sceneCards.length, 4);
   assert.ok(updatedCard.payload.result.sceneCards.some((card) => card.id === 'card-a' && card.x === 160));
 
   const dismissedCard = await client.request('scene.dismiss', {
     id: 'card-b'
   }, { retryable: false, idempotencyKey: 'card-b-dismiss' });
-  assert.deepEqual(dismissedCard.payload.result.sceneCards.map((card) => card.id), ['card-a']);
+  assert.deepEqual(dismissedCard.payload.result.sceneCards.map((card) => card.id), ['card-a', 'card-unicode-中文-🚀', 'card-control-character']);
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  const dismissedEvent = eventHistory.find((message) => {
+    const change = message?.payload?.result?.change;
+    return message?.payload?.eventType === 'scene.changed'
+      && change?.target === 'card'
+      && change?.targetId === 'card-b';
+  });
+  assert.equal(dismissedEvent?.payload?.result?.change?.reason, 'scene.dismiss');
+  assert.equal(dismissedEvent?.payload?.result?.change?.recoverable, false);
+  assert.equal(dismissedEvent?.payload?.result?.change?.notifyUser, false);
 
   const providerStackedCard = await client.request('scene.set-mode', {
     layout: 'stack',
@@ -178,6 +226,8 @@ test('Node client completes hello, health, and shutdown over Named Pipe', async 
   assert.equal(shelfCard.type, 'ack');
   assert.equal(shelfCard.payload.result.sceneCards[0].x, 0);
   assert.ok(shelfCard.payload.result.sceneCards[0].y >= 0);
+  assert.equal(shelfCard.payload.result.sceneCards[0].width, 320);
+  assert.equal(shelfCard.payload.result.sceneCards[0].height, 160);
   assert.ok(shelfCard.payload.result.workArea.width > 0);
   assert.equal(shelfCard.payload.result.layout.layout, 'shelf');
   assert.equal(shelfCard.payload.result.layout.direction, 'right');
@@ -205,7 +255,11 @@ test('Node client completes hello, health, and shutdown over Named Pipe', async 
     id: card.id,
     x: card.x,
     y: card.y
-  })), [{ id: 'card-a', x: 480, y: 0 }]);
+  })), [
+    { id: 'card-a', x: 480, y: 0 },
+    { id: 'card-unicode-中文-🚀', x: 480, y: 172 },
+    { id: 'card-control-character', x: 480, y: 344 }
+  ]);
   assert.deepEqual(stackedCard.payload.result.workArea, {
     left: 0,
     top: 0,
@@ -216,8 +270,8 @@ test('Node client completes hello, health, and shutdown over Named Pipe', async 
     source: 'explicit-override'
   });
   const stackedSnapshot = validateSceneState(stackedCard.payload.result.sceneStateSnapshot);
-  assert.deepEqual(stackedSnapshot.cardOrder, ['card-a']);
-  assert.deepEqual(stackedSnapshot.cards.map((card) => card.id), ['card-a']);
+  assert.deepEqual(stackedSnapshot.cardOrder, ['card-a', 'card-unicode-中文-🚀', 'card-control-character']);
+  assert.deepEqual(stackedSnapshot.cards.map((card) => card.id), ['card-a', 'card-unicode-中文-🚀', 'card-control-character']);
   assert.equal(stackedSnapshot.layout.mode, 'stack');
   assert.equal(stackedSnapshot.layout.workArea.resolution, 'explicit');
   assert.equal(stackedSnapshot.layout.workArea.source, 'explicit-override');

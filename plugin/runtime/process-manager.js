@@ -75,16 +75,20 @@ export class RuntimeProcessManager extends EventEmitter {
     this.sceneStatePersistence = null;
     this.persistenceResponseHandler = null;
     this.persistenceEventHandler = null;
+    this.persistenceDiagnosticHandler = null;
+    this.persistenceDiagnosticSource = null;
     this.spawnOptions = { windowsHide: true, ...spawnOptions };
     if (sceneStatePersistence !== undefined) this.setSceneStatePersistence(sceneStatePersistence);
     if (recoveryClient !== undefined) this.setRecoveryClient(recoveryClient);
     this.child = null;
     this.startPromise = null;
+    this.startGeneration = 0;
     this.restartTimer = null;
     this.sceneStateSyncTimer = null;
     this.sceneStateSyncInFlight = false;
     this.sceneStateSyncGeneration = 0;
     this.lastSceneStateFingerprint = null;
+    this.recoveryInProgress = false;
     this.intentionalStop = false;
     this.restartAttempts = 0;
     this.state = 'stopped';
@@ -102,6 +106,9 @@ export class RuntimeProcessManager extends EventEmitter {
     if (this.running) return;
 
     this.intentionalStop = false;
+    this.startGeneration += 1;
+    const generation = this.startGeneration;
+    const isCurrentStart = () => generation === this.startGeneration && !this.intentionalStop;
     this.setState('starting', 'start-requested');
     this.startPromise = new Promise((resolve, reject) => {
       let child;
@@ -129,11 +136,15 @@ export class RuntimeProcessManager extends EventEmitter {
         action(value);
       };
       const timer = setTimeout(() => {
-        const error = processError('RUNTIME_READY_TIMEOUT', 'Runtime did not announce Named Pipe readiness', {
-          stdout: this.stdout,
-          stderr: this.stderr
-        });
-        this.emitDiagnostic(error.code, error.message, error.details);
+        const error = isCurrentStart()
+          ? processError('RUNTIME_READY_TIMEOUT', 'Runtime did not announce Named Pipe readiness', {
+            stdout: this.stdout,
+            stderr: this.stderr
+          })
+          : processError('RUNTIME_START_CANCELLED', 'Runtime start was cancelled');
+        if (error.code !== 'RUNTIME_START_CANCELLED') {
+          this.emitDiagnostic(error.code, error.message, error.details);
+        }
         child.kill();
         finish(reject, error);
       }, this.readyTimeoutMs);
@@ -145,6 +156,11 @@ export class RuntimeProcessManager extends EventEmitter {
         this.emit('stdout', chunk);
         if (!this.stdout.includes('named pipe ready:')) return;
         clearTimeout(timer);
+        if (!isCurrentStart()) {
+          child.kill();
+          finish(reject, processError('RUNTIME_START_CANCELLED', 'Runtime start was cancelled'));
+          return;
+        }
         this.restartAttempts = 0;
         this.setState('running', 'ready');
         finish(resolve);
@@ -155,13 +171,21 @@ export class RuntimeProcessManager extends EventEmitter {
       });
       child.once('error', (error) => {
         clearTimeout(timer);
-        const wrapped = processError('RUNTIME_START_FAILED', error.message, { cause: error.code });
-        this.emitDiagnostic(wrapped.code, wrapped.message, wrapped.details);
+        const wrapped = isCurrentStart()
+          ? processError('RUNTIME_START_FAILED', error.message, { cause: error.code })
+          : processError('RUNTIME_START_CANCELLED', 'Runtime start was cancelled', { cause: error.code });
+        if (wrapped.code !== 'RUNTIME_START_CANCELLED') {
+          this.emitDiagnostic(wrapped.code, wrapped.message, wrapped.details);
+        }
         finish(reject, wrapped);
       });
       child.once('exit', (code, signal) => {
         clearTimeout(timer);
         if (this.child === child) this.child = null;
+        if (!isCurrentStart()) {
+          if (!settled) finish(reject, processError('RUNTIME_START_CANCELLED', 'Runtime start was cancelled', { code, signal }));
+          return;
+        }
         this.setState(this.intentionalStop ? 'stopped' : 'crashed', 'process-exit');
         this.emit('exit', { code, signal, intentional: this.intentionalStop });
         if (!settled) {
@@ -276,17 +300,23 @@ export class RuntimeProcessManager extends EventEmitter {
         'SceneState persistence must expose observe() and flush()'
       );
     }
-    this.sceneStatePersistence = persistence;
-    if (this.recoveryClient) this.setRecoveryClient(this.recoveryClient);
-    if (persistence?.on) {
-      persistence.on('diagnostic', (diagnostic) => {
-        this.emit('diagnostic', diagnostic);
-      });
+    if (this.persistenceDiagnosticSource && this.persistenceDiagnosticHandler) {
+      this.persistenceDiagnosticSource.off?.('diagnostic', this.persistenceDiagnosticHandler);
     }
+    this.sceneStatePersistence = persistence;
+    this.persistenceDiagnosticSource = persistence?.on ? persistence : null;
+    this.persistenceDiagnosticHandler = this.persistenceDiagnosticSource
+      ? (diagnostic) => this.emit('diagnostic', diagnostic)
+      : null;
+    if (this.persistenceDiagnosticSource && this.persistenceDiagnosticHandler) {
+      this.persistenceDiagnosticSource.on('diagnostic', this.persistenceDiagnosticHandler);
+    }
+    if (this.recoveryClient) this.setRecoveryClient(this.recoveryClient);
     return persistence;
   }
 
   observeSceneStateResponse(message) {
+    if (this.recoveryInProgress) return null;
     if (this.sceneStateSyncInFlight && message?.payload?.requestType === 'health') return null;
     const snapshot = message?.payload?.result?.sceneStateSnapshot;
     if (!snapshot) {
@@ -303,6 +333,7 @@ export class RuntimeProcessManager extends EventEmitter {
   }
 
   observeSceneStateEvent(message) {
+    if (this.recoveryInProgress) return null;
     if (message?.type !== 'event') return null;
     if (message?.payload?.eventType !== 'scene.changed') {
       this.emitDiagnostic(
@@ -327,7 +358,8 @@ export class RuntimeProcessManager extends EventEmitter {
         source: 'event',
         requestId: message.requestId,
         traceId: message.traceId,
-        snapshot: observed
+        snapshot: observed,
+        change: message.payload.result.change ?? null
       });
       this.emitDiagnostic(
         'RUNTIME_SCENE_EVENT_ACCEPTED',
@@ -418,6 +450,7 @@ export class RuntimeProcessManager extends EventEmitter {
   }
 
   observeSceneStateSnapshot(snapshot, { updateRecovery = false } = {}) {
+    if (this.intentionalStop) return null;
     const fingerprint = sceneStateFingerprint(snapshot);
     if (fingerprint !== null && fingerprint === this.lastSceneStateFingerprint) return null;
     if (updateRecovery) {
@@ -475,26 +508,51 @@ export class RuntimeProcessManager extends EventEmitter {
       throw processError('RUNTIME_RECOVERY_CLIENT_MISSING', 'Recovery requires a PipeClient-compatible client');
     }
 
+    const previousRecoveryState = this.recoveryInProgress;
+    this.recoveryInProgress = true;
     const results = [];
-    for (const entry of this.recoverySnapshot.entries) {
-      try {
-        const response = await client.request(entry.type, entry.payload, {
-          retryable: true,
-          maxAttempts: 2
-        });
-        results.push({ key: entry.key, type: entry.type, response });
-        this.emit('recovery-applied', { key: entry.key, type: entry.type });
-      } catch (error) {
-        const wrapped = processError(
-          'RUNTIME_RECOVERY_FAILED',
-          `Recovery entry failed: ${entry.key}`,
-          { key: entry.key, type: entry.type, cause: error.code, message: error.message }
-        );
-        this.emitDiagnostic(wrapped.code, wrapped.message, wrapped.details);
-        throw wrapped;
+    try {
+      for (const entry of [...this.recoverySnapshot.entries]) {
+        try {
+          const response = await client.request(entry.type, entry.payload, {
+            retryable: true,
+            maxAttempts: 2,
+            idempotencyKey: `recovery:${this.recoverySnapshot.updatedAt}:${entry.key}`
+          });
+          results.push({ key: entry.key, type: entry.type, response });
+          this.emit('recovery-applied', { key: entry.key, type: entry.type });
+        } catch (error) {
+          const wrapped = processError(
+            'RUNTIME_RECOVERY_ENTRY_SKIPPED',
+            `Recovery entry skipped: ${entry.key}`,
+            {
+              key: entry.key,
+              type: entry.type,
+              cause: error.code,
+              message: error.message
+            }
+          );
+          this.recoveryDiagnostics.push({
+            code: wrapped.code,
+            message: wrapped.message,
+            ...wrapped.details
+          });
+          const failedIndex = this.recoverySnapshot.entries.findIndex((candidate) => candidate.key === entry.key);
+          if (failedIndex >= 0) this.recoverySnapshot.entries.splice(failedIndex, 1);
+          this.emitDiagnostic(wrapped.code, wrapped.message, wrapped.details);
+          this.emit('recovery-skipped', wrapped.details);
+          results.push({
+            key: entry.key,
+            type: entry.type,
+            skipped: true,
+            error: wrapped
+          });
+        }
       }
+      return results;
+    } finally {
+      this.recoveryInProgress = previousRecoveryState;
     }
-    return results;
   }
 
   async restart() {
@@ -508,6 +566,7 @@ export class RuntimeProcessManager extends EventEmitter {
 
   async stop() {
     this.intentionalStop = true;
+    this.startGeneration += 1;
     this.stopSceneStateSync();
     let persistenceError = null;
     try {
@@ -519,9 +578,11 @@ export class RuntimeProcessManager extends EventEmitter {
       clearTimeout(this.restartTimer);
       this.restartTimer = null;
     }
+    const pendingStart = this.startPromise;
     const child = this.child;
     this.child = null;
     if (!child || child.exitCode !== null) {
+      if (pendingStart) await Promise.allSettled([pendingStart]);
       this.setState('stopped', 'stop-requested');
       if (persistenceError) throw persistenceError;
       return;

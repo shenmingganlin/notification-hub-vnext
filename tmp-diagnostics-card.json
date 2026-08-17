@@ -1,0 +1,287 @@
+{
+  "format": "notification-hub-diagnostics",
+  "version": 1,
+  "exportedAt": "2026-08-17T06:28:42.902Z",
+  "status": {
+    "pluginName": "notification-hub-vnext",
+    "pluginVersion": "0.1.0-alpha.16",
+    "generatedAt": "2026-08-17T06:28:42.902Z",
+    "runtime": {
+      "state": "running",
+      "message": "Runtime 正常运行",
+      "connected": true,
+      "clientState": "connected",
+      "pipeName": "\\\\.\\pipe\\notification-hub-vnext-20848-a859dc90dd3e",
+      "currentError": null,
+      "health": {
+        "cardCount": 0,
+        "layout": {
+          "layout": "shelf",
+          "direction": "right",
+          "anchor": "top-left",
+          "spacing": 10,
+          "workAreaWidth": 2560,
+          "workAreaHeight": 1528,
+          "dpiScale": 1.5,
+          "workAreaLeft": 0,
+          "workAreaTop": 0,
+          "workAreaIsFallback": false,
+          "workAreaSource": "primary-monitor-work-area"
+        },
+        "workArea": {
+          "left": 0,
+          "top": 0,
+          "width": 2560,
+          "height": 1528,
+          "dpiScale": 1.5,
+          "isFallback": false,
+          "source": "primary-monitor-work-area"
+        },
+        "sceneStateSnapshot": {
+          "sceneStateVersion": 1,
+          "protocolVersion": 1,
+          "updatedAt": "2026-08-17T06:28:42.894Z",
+          "sceneWindow": null,
+          "cardOrder": [],
+          "layout": {
+            "mode": "shelf",
+            "direction": "right",
+            "anchor": "top-left",
+            "spacing": 10,
+            "workArea": {
+              "resolution": "provider",
+              "left": 0,
+              "top": 0,
+              "width": 2560,
+              "height": 1528,
+              "dpiScale": 1.5,
+              "isFallback": false,
+              "source": "primary-monitor-work-area"
+            }
+          }
+        },
+        "sceneBehavior": {
+          "version": "v1",
+          "cardCount": 0,
+          "channelCount": 0,
+          "truncated": false,
+          "cards": [],
+          "channels": []
+        }
+      },
+      "sceneStatePersistence": {
+        "enabled": true,
+        "pending": false
+      }
+    },
+    "summary": {
+      "total": 20,
+      "errors": 20,
+      "warnings": 0,
+      "recoverable": 0,
+      "currentFailure": false
+    },
+    "diagnostics": [
+      {
+        "code": "RUNTIME_SCENE_CARD_INVALID",
+        "message": "scene card payload is invalid",
+        "stage": "scene-create",
+        "severity": "error",
+        "recoverable": false,
+        "details": {},
+        "timestamp": "2026-08-17T06:28:23.496Z",
+        "source": "scene-create"
+      },
+      {
+        "code": "RUNTIME_SCENE_CARD_INVALID",
+        "message": "scene card payload is invalid",
+        "stage": "scene-create",
+        "severity": "error",
+        "recoverable": false,
+        "details": {},
+        "timestamp": "2026-08-17T06:28:23.450Z",
+        "source": "scene-create"
+      },
+      {
+        "code": "RUNTIME_SCENE_CARD_INVALID",
+        "message": "scene card payload is invalid",
+        "stage": "scene-create",
+        "severity": "error",
+        "recoverable": false,
+        "details": {},
+        "timestamp": "2026-08-17T06:28:23.433Z",
+        "source": "scene-create"
+      },
+      {
+        "code": "RUNTIME_SCENE_CARD_INVALID",
+        "message": "scene card payload is invalid",
+        "stage": "scene-create",
+        "severity": "error",
+        "recoverable": false,
+        "details": {},
+        "timestamp": "2026-08-17T06:28:23.214Z",
+        "source": "scene-create"
+      },
+      {
+        "code": "RUNTIME_SCENE_CARD_INVALID",
+        "message": "scene card payload is invalid",
+        "stage": "scene-create",
+        "severity": "error",
+        "recoverable": false,
+        "details": {},
+        "timestamp": "2026-08-17T06:28:11.821Z",
+        "source": "scene-create"
+      },
+      {
+        "code": "RUNTIME_SCENE_CARD_INVALID",
+        "message": "scene card payload is invalid",
+        "stage": "scene-create",
+        "severity": "error",
+        "recoverable": false,
+        "details": {},
+        "timestamp": "2026-08-17T06:28:04.781Z",
+        "source": "scene-create"
+      },
+      {
+        "code": "RUNTIME_SCENE_CARD_INVALID",
+        "message": "scene card payload is invalid",
+        "stage": "scene-create",
+        "severity": "error",
+        "recoverable": false,
+        "details": {},
+        "timestamp": "2026-08-17T06:27:56.711Z",
+        "source": "scene-create"
+      },
+      {
+        "code": "RUNTIME_SCENE_CARD_INVALID",
+        "message": "scene card payload is invalid",
+        "stage": "scene-create",
+        "severity": "error",
+        "recoverable": false,
+        "details": {},
+        "timestamp": "2026-08-17T06:27:40.079Z",
+        "source": "scene-create"
+      },
+      {
+        "code": "RUNTIME_SCENE_CARD_INVALID",
+        "message": "scene card payload is invalid",
+        "stage": "scene-create",
+        "severity": "error",
+        "recoverable": false,
+        "details": {},
+        "timestamp": "2026-08-17T06:27:31.802Z",
+        "source": "scene-create"
+      },
+      {
+        "code": "RUNTIME_SCENE_CARD_INVALID",
+        "message": "scene card payload is invalid",
+        "stage": "scene-create",
+        "severity": "error",
+        "recoverable": false,
+        "details": {},
+        "timestamp": "2026-08-17T06:27:15.218Z",
+        "source": "scene-create"
+      },
+      {
+        "code": "RUNTIME_SCENE_CARD_INVALID",
+        "message": "scene card payload is invalid",
+        "stage": "scene-create",
+        "severity": "error",
+        "recoverable": false,
+        "details": {},
+        "timestamp": "2026-08-17T06:27:06.717Z",
+        "source": "scene-create"
+      },
+      {
+        "code": "RUNTIME_SCENE_CARD_INVALID",
+        "message": "scene card payload is invalid",
+        "stage": "scene-create",
+        "severity": "error",
+        "recoverable": false,
+        "details": {},
+        "timestamp": "2026-08-17T06:27:01.749Z",
+        "source": "scene-create"
+      },
+      {
+        "code": "RUNTIME_SCENE_CARD_INVALID",
+        "message": "scene card payload is invalid",
+        "stage": "scene-create",
+        "severity": "error",
+        "recoverable": false,
+        "details": {},
+        "timestamp": "2026-08-17T06:26:54.337Z",
+        "source": "scene-create"
+      },
+      {
+        "code": "RUNTIME_SCENE_CARD_INVALID",
+        "message": "scene card payload is invalid",
+        "stage": "scene-create",
+        "severity": "error",
+        "recoverable": false,
+        "details": {},
+        "timestamp": "2026-08-17T06:26:49.001Z",
+        "source": "scene-create"
+      },
+      {
+        "code": "RUNTIME_SCENE_CARD_INVALID",
+        "message": "scene card payload is invalid",
+        "stage": "scene-create",
+        "severity": "error",
+        "recoverable": false,
+        "details": {},
+        "timestamp": "2026-08-17T06:26:43.590Z",
+        "source": "scene-create"
+      },
+      {
+        "code": "RUNTIME_SCENE_CARD_INVALID",
+        "message": "scene card payload is invalid",
+        "stage": "scene-create",
+        "severity": "error",
+        "recoverable": false,
+        "details": {},
+        "timestamp": "2026-08-17T06:26:35.974Z",
+        "source": "scene-create"
+      },
+      {
+        "code": "RUNTIME_SCENE_CARD_INVALID",
+        "message": "scene card payload is invalid",
+        "stage": "scene-create",
+        "severity": "error",
+        "recoverable": false,
+        "details": {},
+        "timestamp": "2026-08-17T06:26:35.958Z",
+        "source": "scene-create"
+      },
+      {
+        "code": "RUNTIME_SCENE_CARD_INVALID",
+        "message": "scene card payload is invalid",
+        "stage": "scene-create",
+        "severity": "error",
+        "recoverable": false,
+        "details": {},
+        "timestamp": "2026-08-17T06:26:35.902Z",
+        "source": "scene-create"
+      },
+      {
+        "code": "RUNTIME_SCENE_CARD_INVALID",
+        "message": "scene card payload is invalid",
+        "stage": "scene-create",
+        "severity": "error",
+        "recoverable": false,
+        "details": {},
+        "timestamp": "2026-08-17T06:26:35.842Z",
+        "source": "scene-create"
+      },
+      {
+        "code": "RUNTIME_SCENE_CARD_INVALID",
+        "message": "scene card payload is invalid",
+        "stage": "scene-create",
+        "severity": "error",
+        "recoverable": false,
+        "details": {},
+        "timestamp": "2026-08-17T06:26:35.591Z",
+        "source": "scene-create"
+      }
+    ]
+  }
+}

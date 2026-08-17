@@ -2,8 +2,10 @@
 
 #include "geometry.hpp"
 #include "renderer.hpp"
+#include "visual.hpp"
 
 #include <string>
+#include <string_view>
 
 namespace notification_hub::scene {
 
@@ -13,6 +15,10 @@ struct WindowConfig {
     int width{420};
     int height{180};
     bool tool_window{true};
+    int x{};
+    int y{};
+    bool has_initial_position{};
+    VisualStyle visual{};
 };
 
 class SceneWindow {
@@ -25,7 +31,8 @@ public:
 
     bool create();
     bool show();
-    void request_close();
+    void request_close(std::string_view reason = "programmatic-close");
+    void mark_close_requested(std::string_view reason);
     int run_message_pump(bool close_after_first_paint = false);
     void destroy();
 
@@ -38,10 +45,14 @@ public:
     unsigned int dpi() const noexcept;
     bool apply_dpi_change(unsigned int dpi, const void* suggested_rect) noexcept;
     bool get_window_position(int& x, int& y) const noexcept;
+    bool begin_close_button_press(float x, float y) noexcept;
+    bool release_close_button_press(float x, float y) noexcept;
+    void cancel_pointer_press() noexcept;
     bool begin_drag_client_point(float x, float y) noexcept;
     bool update_drag_screen_point(int x, int y) noexcept;
     void end_drag() noexcept;
     void update_content(std::wstring title, std::wstring body);
+    void update_visual(VisualStyle visual);
     bool capture_pixels() const noexcept;
     bool sample_pixel(int x, int y, Pixel& pixel) const noexcept;
     bool hit_test_client_point(float x, float y) const noexcept;
@@ -51,6 +62,7 @@ public:
     bool resize_render_target(int width, int height);
     void mark_first_paint() noexcept;
     void mark_native_destroyed() noexcept;
+    const std::string& close_reason() const noexcept;
 
 private:
     WindowConfig config_;
@@ -60,7 +72,9 @@ private:
     bool first_paint_seen_{};
     bool frame_rendered_{};
     bool close_requested_{};
+    std::string close_reason_;
     unsigned int dpi_{96};
+    bool close_button_pressed_{};
     bool drag_active_{};
     int drag_start_screen_x_{};
     int drag_start_screen_y_{};

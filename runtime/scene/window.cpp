@@ -40,7 +40,7 @@ LRESULT CALLBACK window_proc(HWND hwnd, UINT message, WPARAM wparam, LPARAM lpar
         if (window != nullptr) {
             const auto client_x = static_cast<float>(GET_X_LPARAM(lparam));
             const auto client_y = static_cast<float>(GET_Y_LPARAM(lparam));
-            if (window->click_client_point(client_x, client_y)
+            if (window->begin_close_button_press(client_x, client_y)
                 || window->begin_drag_client_point(client_x, client_y)) {
                 SetCapture(hwnd);
             }
@@ -55,17 +55,24 @@ LRESULT CALLBACK window_proc(HWND hwnd, UINT message, WPARAM wparam, LPARAM lpar
         return 0;
     case WM_LBUTTONUP:
         if (window != nullptr) {
+            const auto client_x = static_cast<float>(GET_X_LPARAM(lparam));
+            const auto client_y = static_cast<float>(GET_Y_LPARAM(lparam));
             if (window->is_dragging()) {
                 window->end_drag();
+            } else if (window->release_close_button_press(client_x, client_y)) {
+                // A close is committed only after the same card receives the
+                // matching release. The down event never reflows the scene.
+                window->request_close("user-close");
             } else {
-                window->click_client_point(
-                    static_cast<float>(GET_X_LPARAM(lparam)),
-                    static_cast<float>(GET_Y_LPARAM(lparam)));
+                window->cancel_pointer_press();
             }
         }
         return 0;
     case WM_CAPTURECHANGED:
-        if (window != nullptr) window->end_drag();
+        if (window != nullptr) {
+            window->end_drag();
+            window->cancel_pointer_press();
+        }
         return 0;
     case WM_PAINT: {
         PAINTSTRUCT paint{};
@@ -92,7 +99,14 @@ LRESULT CALLBACK window_proc(HWND hwnd, UINT message, WPARAM wparam, LPARAM lpar
         return 0;
     case WM_ERASEBKGND:
         return 1;
+    case WM_APP + 1:
+        // Owner-thread probe used by the isolated Native Runtime lifecycle smoke test.
+        DestroyWindow(hwnd);
+        return 0;
     case WM_CLOSE:
+        if (window != nullptr && window->close_reason().empty()) {
+            window->mark_close_requested("user-close");
+        }
         DestroyWindow(hwnd);
         return 0;
     case WM_NCDESTROY:
@@ -100,7 +114,9 @@ LRESULT CALLBACK window_proc(HWND hwnd, UINT message, WPARAM wparam, LPARAM lpar
         if (window != nullptr) window->mark_native_destroyed();
         return DefWindowProcW(hwnd, message, wparam, lparam);
     case WM_DESTROY:
-        PostQuitMessage(0);
+        // These scene windows share the Runtime thread. Destroying one card must
+        // not post WM_QUIT, which would terminate the shared message pump and
+        // make the remaining cards disappear with it.
         return 0;
     default:
         return DefWindowProcW(hwnd, message, wparam, lparam);
@@ -136,18 +152,20 @@ bool SceneWindow::create() {
     }
 
     DWORD style = WS_POPUP;
-    DWORD extended_style = WS_EX_NOACTIVATE | WS_EX_LAYERED;
+    DWORD extended_style = WS_EX_NOACTIVATE | WS_EX_LAYERED | WS_EX_TOPMOST;
     if (config_.tool_window) extended_style |= WS_EX_TOOLWINDOW;
 
     RECT bounds{0, 0, config_.width, config_.height};
     AdjustWindowRectEx(&bounds, style, FALSE, extended_style);
+    const auto initial_x = config_.has_initial_position ? config_.x : CW_USEDEFAULT;
+    const auto initial_y = config_.has_initial_position ? config_.y : CW_USEDEFAULT;
     const auto hwnd = CreateWindowExW(
         extended_style,
         class_name_.c_str(),
         config_.title.c_str(),
         style,
-        CW_USEDEFAULT,
-        CW_USEDEFAULT,
+        initial_x,
+        initial_y,
         bounds.right - bounds.left,
         bounds.bottom - bounds.top,
         nullptr,
@@ -191,10 +209,16 @@ bool SceneWindow::show() {
 #endif
 }
 
-void SceneWindow::request_close() {
+void SceneWindow::request_close(std::string_view reason) {
+    mark_close_requested(reason);
 #ifdef _WIN32
     if (hwnd_ != nullptr) PostMessageW(static_cast<HWND>(hwnd_), WM_CLOSE, 0, 0);
 #endif
+}
+
+void SceneWindow::mark_close_requested(std::string_view reason) {
+    if (!reason.empty() && close_reason_.empty()) close_reason_ = std::string(reason);
+    close_requested_ = true;
 }
 
 int SceneWindow::run_message_pump(bool close_after_first_paint) {
@@ -211,7 +235,7 @@ int SceneWindow::run_message_pump(bool close_after_first_paint) {
         if (hwnd_ == nullptr) return 0;
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
     }
-    request_close();
+    request_close("pump-timeout");
     while (PeekMessageW(&message, nullptr, 0, 0, PM_REMOVE)) {
         if (message.message == WM_QUIT) return static_cast<int>(message.wParam);
         TranslateMessage(&message);
@@ -228,6 +252,7 @@ void SceneWindow::destroy() {
 #ifdef _WIN32
     renderer_.reset();
     if (hwnd_ != nullptr) {
+        if (close_reason_.empty()) close_reason_ = "programmatic-destroy";
         DestroyWindow(static_cast<HWND>(hwnd_));
         hwnd_ = nullptr;
     }
@@ -301,6 +326,41 @@ bool SceneWindow::get_window_position(int& x, int& y) const noexcept {
     static_cast<void>(y);
     return false;
 #endif
+}
+
+bool SceneWindow::begin_close_button_press(float x, float y) noexcept {
+#ifdef _WIN32
+    if (hwnd_ == nullptr || close_requested_ || !point_inside_close_button(x, y, static_cast<float>(config_.width), static_cast<float>(config_.height))) {
+        return false;
+    }
+    close_button_pressed_ = true;
+    return true;
+#else
+    static_cast<void>(x);
+    static_cast<void>(y);
+    return false;
+#endif
+}
+
+bool SceneWindow::release_close_button_press(float x, float y) noexcept {
+#ifdef _WIN32
+    if (!close_button_pressed_) return false;
+    const bool released_inside = point_inside_close_button(
+        x,
+        y,
+        static_cast<float>(config_.width),
+        static_cast<float>(config_.height));
+    close_button_pressed_ = false;
+    return released_inside && !close_requested_;
+#else
+    static_cast<void>(x);
+    static_cast<void>(y);
+    return false;
+#endif
+}
+
+void SceneWindow::cancel_pointer_press() noexcept {
+    close_button_pressed_ = false;
 }
 
 bool SceneWindow::begin_drag_client_point(float x, float y) noexcept {
@@ -384,8 +444,7 @@ bool SceneWindow::click_client_point(float x, float y) noexcept {
     if (!point_inside_close_button(x, y, static_cast<float>(config_.width), static_cast<float>(config_.height))) {
         return false;
     }
-    close_requested_ = true;
-    request_close();
+    request_close("user-close");
     return true;
 }
 
@@ -393,10 +452,17 @@ void* SceneWindow::native_handle() const noexcept {
     return hwnd_;
 }
 
+void SceneWindow::update_visual(VisualStyle visual) {
+    if (valid_visual_style(visual)) config_.visual = std::move(visual);
+#ifdef _WIN32
+    if (hwnd_ != nullptr) InvalidateRect(static_cast<HWND>(hwnd_), nullptr, FALSE);
+#endif
+}
+
 bool SceneWindow::paint(bool capture_output) {
 #ifdef _WIN32
     if (hwnd_ == nullptr || !renderer_.is_ready()) return false;
-    const bool rendered = renderer_.draw(config_.title, config_.body, capture_output);
+    const bool rendered = renderer_.draw(config_.title, config_.body, config_.visual, capture_output);
     frame_rendered_ = frame_rendered_ || rendered;
     return rendered;
 #else
@@ -419,9 +485,14 @@ void SceneWindow::mark_first_paint() noexcept {
 
 void SceneWindow::mark_native_destroyed() noexcept {
     drag_active_ = false;
+    if (close_reason_.empty()) close_reason_ = "window-destroyed";
     hwnd_ = nullptr;
     visible_ = false;
     renderer_.reset();
+}
+
+const std::string& SceneWindow::close_reason() const noexcept {
+    return close_reason_;
 }
 
 }  // namespace notification_hub::scene

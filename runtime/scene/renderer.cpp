@@ -15,6 +15,7 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <cstdlib>
 #include <vector>
 
 namespace notification_hub::scene {
@@ -26,6 +27,17 @@ using Microsoft::WRL::ComPtr;
 
 D2D1_COLOR_F color(float red, float green, float blue, float alpha = 1.0f) {
     return D2D1::ColorF(red, green, blue, alpha);
+}
+
+D2D1_COLOR_F hex_color(std::string_view value, float alpha) {
+    if (value.size() != 7 || value.front() != '#') return color(0.08f, 0.10f, 0.12f, alpha);
+    const std::string token(value.substr(1));
+    char* end = nullptr;
+    const auto rgb = std::strtoul(token.c_str(), &end, 16);
+    if (end == nullptr || *end != '\0') return color(0.08f, 0.10f, 0.12f, alpha);
+    return color(static_cast<float>((rgb >> 16) & 0xff) / 255.0f,
+        static_cast<float>((rgb >> 8) & 0xff) / 255.0f,
+        static_cast<float>(rgb & 0xff) / 255.0f, alpha);
 }
 
 HRESULT create_d3d_device(ComPtr<ID3D11Device>& device, ComPtr<ID3D11DeviceContext>& context) {
@@ -184,14 +196,15 @@ bool CardRenderer::resize(int width, int height) {
 #endif
 }
 
-bool CardRenderer::draw(std::wstring_view title, std::wstring_view body, bool capture_output) {
+bool CardRenderer::draw(std::wstring_view title, std::wstring_view body, const VisualStyle& visual, bool capture_output) {
 #ifdef _WIN32
     static_cast<void>(capture_output);
-    if (!impl_->ready || !capture_offscreen(title, body)) return false;
+    if (!impl_->ready || !capture_offscreen(title, body, visual)) return false;
     return update_layered_window();
 #else
     static_cast<void>(title);
     static_cast<void>(body);
+    static_cast<void>(visual);
     static_cast<void>(capture_output);
     return false;
 #endif
@@ -286,7 +299,7 @@ bool CardRenderer::update_layered_window() {
 #endif
 }
 
-bool CardRenderer::capture_offscreen(std::wstring_view title, std::wstring_view body) {
+bool CardRenderer::capture_offscreen(std::wstring_view title, std::wstring_view body, const VisualStyle& visual) {
 #ifdef _WIN32
     if (!impl_->ready || impl_->d2d_context == nullptr) return false;
 
@@ -309,16 +322,42 @@ bool CardRenderer::capture_offscreen(std::wstring_view title, std::wstring_view 
 
     const auto width = static_cast<float>(impl_->width);
     const auto height = static_cast<float>(impl_->height);
-    const auto bounds = card_bounds(width, height);
+    auto bounds = card_bounds(width, height);
+    if (visual.specified) bounds.radius = static_cast<float>(visual.border_radius);
+    auto* surface_brush = impl_->surface_brush.Get();
+    auto* accent_brush = impl_->accent_brush.Get();
+    ComPtr<ID2D1SolidColorBrush> visual_surface_brush;
+    ComPtr<ID2D1SolidColorBrush> visual_accent_brush;
+    if (visual.specified) {
+        const auto surface = visual.enabled
+            ? hex_color(visual.background_color, visual.opacity)
+            /* : (visual.preset == "critical" ? color(0.16f, 0.08f, 0.10f, 0.97f)
+                : visual.preset == "warning" ? color(0.15f, 0.12f, 0.06f, 0.97f)
+                : visual.preset == "accent" ? color(0.06f, 0.13f, 0.12f, 0.97f)
+                : visual.preset == "soft" ? color(0.08f, 0.12f, 0.12f, 0.97f)
+                : color(0.08f, 0.10f, 0.12f, 0.96f)) */
+            : color(0.08f, 0.10f, 0.12f, 0.82f);
+        const auto accent = visual.enabled
+            ? (visual.preset == "critical" ? color(0.96f, 0.36f, 0.40f, 1.0f)
+                : visual.preset == "warning" ? color(0.95f, 0.72f, 0.24f, 1.0f)
+                : visual.preset == "accent" ? color(0.30f, 0.85f, 0.70f, 1.0f)
+                : visual.preset == "soft" ? color(0.42f, 0.76f, 0.72f, 1.0f)
+                : color(0.48f, 0.62f, 0.60f, 1.0f))
+            : color(0.30f, 0.42f, 0.40f, 1.0f);
+        if (FAILED(impl_->d2d_context->CreateSolidColorBrush(surface, &visual_surface_brush))
+            || FAILED(impl_->d2d_context->CreateSolidColorBrush(accent, &visual_accent_brush))) return false;
+        surface_brush = visual_surface_brush.Get();
+        accent_brush = visual_accent_brush.Get();
+    }
     impl_->d2d_context->FillRoundedRectangle(
         D2D1::RoundedRect(
             D2D1::RectF(bounds.left, bounds.top, (std::max)(20.0f, bounds.right), (std::max)(20.0f, bounds.bottom)),
             bounds.radius,
             bounds.radius),
-        impl_->surface_brush.Get());
+        surface_brush);
     impl_->d2d_context->FillRectangle(
         D2D1::RectF(bounds.left, bounds.top, bounds.left + 4.0f, (std::max)(20.0f, bounds.bottom)),
-        impl_->accent_brush.Get());
+        accent_brush);
 
     const auto close_button = close_button_bounds(width, height);
     const auto close_center_x = (close_button.left + close_button.right) * 0.5f;

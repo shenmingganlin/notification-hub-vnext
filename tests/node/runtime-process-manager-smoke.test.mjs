@@ -267,7 +267,7 @@ test('RuntimeProcessManager restarts Runtime after a controlled exit', async (t)
   addRecoveryEntry(recoverySnapshot, {
     key: 'runtime-config',
     type: 'config.update',
-    payload: { profile: 'default', displayDurationMs: 4500 }
+    payload: { revision: 1, audio: { enabled: true, volume: 0.8 } }
   });
   addRecoveryEntry(recoverySnapshot, {
     key: 'scene-window',

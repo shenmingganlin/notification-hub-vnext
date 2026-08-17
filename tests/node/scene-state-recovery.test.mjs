@@ -64,6 +64,23 @@ test('SceneState projection emits deterministic window, layout, and card replay 
   assert.doesNotThrow(() => createRecoverySnapshot({ entries }));
 });
 
+test('SceneState projection preserves presentation and behavior metadata', () => {
+  const entries = sceneStateToRecoveryEntries(createState({
+    cardOrder: ['card-a'],
+    cards: [{
+      id: 'card-a', title: 'Card A', body: 'A', x: 10, y: 20, width: 320, height: 160,
+      presentation: { eventId: 'tool.execution.failed', categoryId: 'tool', eventTypeId: 'execution.failed', visualProfileId: 'visual.error' },
+      behavior: { behaviorProfileId: 'stack', behaviorChannelId: 'stack.main' }
+    }]
+  }));
+  assert.deepEqual(entries.at(-1).payload.presentation, {
+    eventId: 'tool.execution.failed', categoryId: 'tool', eventTypeId: 'execution.failed', visualProfileId: 'visual.error'
+  });
+  assert.deepEqual(entries.at(-1).payload.behavior, {
+    behaviorProfileId: 'stack', behaviorChannelId: 'stack.main'
+  });
+});
+
 test('SceneState projection lets Runtime re-query provider work areas', () => {
   const entries = sceneStateToRecoveryEntries(createState({
     cardOrder: [],

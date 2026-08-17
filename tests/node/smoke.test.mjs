@@ -5,5 +5,5 @@ import { pluginName, pluginVersion } from '../../plugin/index.js';
 
 test('package identity is available', () => {
   assert.equal(pluginName, 'notification-hub-vnext');
-  assert.equal(pluginVersion, '0.1.0-alpha.1');
+  assert.equal(pluginVersion, '0.1.0-alpha.16');
 });

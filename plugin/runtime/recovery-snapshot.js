@@ -32,6 +32,17 @@ function cloneJson(value) {
   }
 }
 
+function validateVisualPayload(visual) {
+  if (!isRecord(visual)
+    || typeof visual.enabled !== 'boolean'
+    || !['minimal', 'soft', 'accent', 'warning', 'critical'].includes(visual.preset)
+    || !['reduced', 'balanced', 'expressive'].includes(visual.intensity)
+    || (visual.category !== null && !['chat', 'channel', 'tool', 'error', 'plugin', 'model_service'].includes(visual.category))
+    || Object.keys(visual).some((field) => !['enabled', 'preset', 'intensity', 'category'].includes(field))) {
+    throw recoveryError('RUNTIME_RECOVERY_INVALID_PAYLOAD', 'scene card visual payload is invalid');
+  }
+}
+
 function validateWindowGeometry(payload, type = 'scene.update') {
   const fields = ['x', 'y', 'width', 'height'];
   if (!fields.every((field) => Number.isInteger(payload[field]))) {
@@ -48,6 +59,7 @@ function validateSceneCardPayload(payload, type) {
     throw recoveryError('RUNTIME_RECOVERY_INVALID_PAYLOAD', `${type} requires non-empty id and title`);
   }
   validateWindowGeometry(payload, type);
+  if ('visual' in payload) validateVisualPayload(payload.visual);
   return payload;
 }
 
@@ -134,10 +146,16 @@ export function validateRecoverySnapshot(snapshot) {
   if (!Array.isArray(snapshot.entries)) {
     throw recoveryError('RUNTIME_RECOVERY_INVALID_SNAPSHOT', 'Recovery snapshot entries must be an array');
   }
+  const keys = new Set();
   for (const entry of snapshot.entries) {
-    if (!isRecord(entry) || typeof entry.key !== 'string' || !RECOVERABLE_COMMAND_SET.has(entry.type) || !isRecord(entry.payload)) {
+    if (!isRecord(entry) || typeof entry.key !== 'string' || entry.key.trim().length === 0
+      || !RECOVERABLE_COMMAND_SET.has(entry.type) || !isRecord(entry.payload)) {
       throw recoveryError('RUNTIME_RECOVERY_INVALID_SNAPSHOT', 'Recovery snapshot contains an invalid entry');
     }
+    if (keys.has(entry.key)) {
+      throw recoveryError('RUNTIME_RECOVERY_INVALID_SNAPSHOT', `Recovery snapshot contains duplicate entry key: ${entry.key}`);
+    }
+    keys.add(entry.key);
     if (entry.type === 'scene.create') validateSceneCardPayload(entry.payload, entry.type);
     if (entry.type === 'scene.update') validateSceneUpdatePayload(entry.payload);
     if (entry.type === 'scene.dismiss') validateSceneDismissPayload(entry.payload);
