@@ -1,4 +1,5 @@
 import { createBehaviorCard, createBehaviorProfile } from './notification-behavior.js';
+import { createCardChannelPolicy } from './card-runtime-policy.js';
 
 function managerError(code, message, field) {
   const error = new Error(message);
@@ -21,18 +22,34 @@ function freezeDeep(value) {
   return value;
 }
 
-export function createBehaviorManager({ channelId, profile, adapter = null } = {}) {
+export function createBehaviorManager({ channelId, profile, policy = {}, adapter = null } = {}) {
   const normalizedProfile = createBehaviorProfile({ ...profile, channelId: channelId ?? profile?.channelId });
+  const normalizedPolicy = createCardChannelPolicy({ ...policy, policyId: policy.policyId ?? channelId ?? normalizedProfile.channelId });
   const cards = new Map();
+  let suppressedCount = 0;
+  let queuedCount = 0;
   return {
     channelId: normalizedProfile.channelId,
     profile: normalizedProfile,
+    policy: normalizedPolicy,
     adapter,
     cards,
     enqueue(cardInput) {
       const card = createBehaviorCard({ ...cardInput, channelId: normalizedProfile.channelId });
+      if (normalizedPolicy.suppression === 'aggressive' && cards.has(card.cardId)) {
+        suppressedCount += 1;
+        return null;
+      }
+      if (normalizedPolicy.suppression !== 'off' && cards.size >= normalizedPolicy.maxVisible) {
+        if (normalizedPolicy.overflow === 'drop-oldest') {
+          const oldest = cards.keys().next().value;
+          if (oldest) { cards.delete(oldest); suppressedCount += 1; }
+        } else if (normalizedPolicy.overflow === 'aggregate' || normalizedPolicy.overflow === 'queue') {
+          queuedCount += 1;
+        }
+      }
       cards.set(card.cardId, card);
-      adapter?.enqueue?.(card, normalizedProfile);
+      adapter?.enqueue?.(card, normalizedProfile, normalizedPolicy);
       return card;
     },
     remove(cardId) {
@@ -49,7 +66,9 @@ export function createBehaviorManager({ channelId, profile, adapter = null } = {
         version: 'v1',
         channelId: normalizedProfile.channelId,
         profile: clone(normalizedProfile),
-        cards: [...cards.values()].map(clone)
+        policy: clone(normalizedPolicy),
+        cards: [...cards.values()].map(clone),
+        metrics: { channelCount: 1, activeCardCount: cards.size, visibleCardCount: cards.size, queuedCardCount: queuedCount, suppressedCardCount: suppressedCount }
       });
     }
   };

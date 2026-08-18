@@ -27,6 +27,16 @@ test('behavior managers isolate channels while sharing cards within one channel'
   assert.deepEqual(snapshotBehaviorManager(stackMain).cards.map((card) => card.cardId), ['c']);
 });
 
+test('behavior manager exposes independent storm policy metrics without discarding cards', () => {
+  const manager = createBehaviorManager({ channelId: 'stack.tool', profile: { mode: 'stack' }, policy: { policyId: 'storm', suppression: 'off', maxVisible: 1000, overflow: 'allow' } });
+  manager.enqueue({ cardId: 'storm-1', notificationId: 'storm-1', eventId: 'tool.execution.started' });
+  manager.enqueue({ cardId: 'storm-2', notificationId: 'storm-2', eventId: 'tool.execution.started' });
+  const snapshot = manager.snapshot();
+  assert.equal(snapshot.policy.suppression, 'off');
+  assert.equal(snapshot.metrics.activeCardCount, 2);
+  assert.equal(snapshot.metrics.suppressedCardCount, 0);
+});
+
 test('behavior manager snapshots restore only into the same channel', () => {
   const source = createBehaviorManager({ channelId: 'popup.alert', profile: { mode: 'popup' } });
   enqueueBehaviorCard(source, { cardId: 'p1', notificationId: 'n-p1', eventId: 'tool.execution.failed' });

@@ -1,6 +1,7 @@
 import { getEventDefinition } from './notification-event-catalog.js';
 import { createCanonicalEvent, canonicalEventFromLegacy } from './notification-semantics.js';
 import { resolvePresentationBinding } from './notification-presentation-profile.js';
+import { resolveCardChannelPolicy } from './card-runtime-policy.js';
 
 function selectorError(code, message, field, details = {}) {
   const error = new Error(message);
@@ -41,6 +42,7 @@ export function createPresentationSelector({ record = {}, canonicalEvent = null,
   const importance = record?.importance === 'high' || record?.importance === 'critical' || record?.importance === 'important'
     ? 'important'
     : (record?.importance === true ? 'important' : 'normal');
+  const channelPolicy = resolveCardChannelPolicy({ eventId: normalizedEvent.eventId, categoryId: normalizedEvent.categoryId, binding, profile: profile ?? {} });
   return freezeDeep({
     version: 'v1',
     notificationId: record?.notificationId ?? null,
@@ -68,7 +70,8 @@ export function createPresentationSelector({ record = {}, canonicalEvent = null,
       eventTypeId: normalizedEvent.eventTypeId,
       behaviorProfileId: binding.behaviorProfileId,
       channelId: binding.behaviorChannelId,
-      channelPolicyId: binding.channelPolicyId ?? 'default'
+      channelPolicyId: channelPolicy.policyId,
+      channelPolicy
     },
     binding: clone(binding)
   });

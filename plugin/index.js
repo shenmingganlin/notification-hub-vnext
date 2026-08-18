@@ -1931,7 +1931,8 @@ export default class NotificationHubVNextPlugin {
     if (!manager) {
       manager = createBehaviorManager({
         channelId: behaviorChannelId,
-        profile: createBehaviorProfile({ mode: behaviorProfileId, profileId: behaviorProfileId, channelId: behaviorChannelId })
+        profile: createBehaviorProfile({ mode: behaviorProfileId, profileId: behaviorProfileId, channelId: behaviorChannelId }),
+        policy: selector.behavior.channelPolicy ?? { policyId: selector.behavior.channelPolicyId }
       });
       this.notificationBehaviorManagers.set(behaviorChannelId, manager);
     }
