@@ -13,6 +13,15 @@ if (WIN32)
 endif()
 add_test(NAME runtime_audio_service_self_test COMMAND notification-hub-audio-service --self-test)
 
+add_executable(notification-hub-audio-engine-asset-cache-test
+  ../tests/native/audio-engine-asset-cache.test.cpp
+  audio-engine/asset-cache.cpp
+  audio-service/wav_pcm.cpp
+)
+target_include_directories(notification-hub-audio-engine-asset-cache-test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_SOURCE_DIR})
+target_compile_features(notification-hub-audio-engine-asset-cache-test PRIVATE cxx_std_20)
+add_test(NAME audio_engine_asset_cache COMMAND notification-hub-audio-engine-asset-cache-test)
+
 add_executable(notification-hub-runtime
   app/main.cpp
   diagnostics/event.cpp

@@ -1,0 +1,85 @@
+#include "asset-cache.hpp"
+
+#include "../audio-service/wav_pcm.hpp"
+
+#include <fstream>
+#include <iterator>
+#include <limits>
+#include <utility>
+
+namespace notification_hub::audio_engine {
+namespace {
+CacheResult fail(std::string code, std::string message) { return {false, std::move(code), std::move(message), nullptr}; }
+
+std::uint64_t fingerprint(const std::vector<std::uint8_t>& bytes) {
+    // FNV-1a is used only to detect a changed cache source, not for security.
+    std::uint64_t hash = 1469598103934665603ull;
+    for (const auto byte : bytes) {
+        hash ^= byte;
+        hash *= 1099511628211ull;
+    }
+    return hash;
+}
+
+std::vector<float> to_float(const notification_hub::audio::PcmAsset& source) {
+    const auto count = source.samples.size() / sizeof(std::int16_t);
+    std::vector<float> samples(count);
+    for (std::size_t index = 0; index < count; ++index) {
+        const auto low = source.samples[index * 2];
+        const auto high = source.samples[index * 2 + 1];
+        const auto value = static_cast<std::int16_t>(static_cast<std::uint16_t>(low) |
+            (static_cast<std::uint16_t>(high) << 8));
+        samples[index] = static_cast<float>(value) / 32768.0f;
+    }
+    return samples;
+}
+}
+
+AssetCache::AssetCache(std::size_t max_cached_bytes, std::size_t max_asset_bytes)
+    : max_cached_bytes_(max_cached_bytes), max_asset_bytes_(max_asset_bytes) {}
+
+CacheResult AssetCache::load(const std::string& sound_id, const std::filesystem::path& path) {
+    if (sound_id.empty()) return fail("AUDIO_SOUND_ID_INVALID", "sound_id must not be empty");
+    std::ifstream input(path, std::ios::binary);
+    if (!input) return fail("AUDIO_ASSET_OPEN_FAILED", "audio asset could not be opened");
+    std::vector<std::uint8_t> bytes((std::istreambuf_iterator<char>(input)), std::istreambuf_iterator<char>());
+    if (bytes.empty()) return fail("AUDIO_ASSET_EMPTY", "audio asset is empty");
+    const auto parsed = notification_hub::audio::parse_wav_pcm(bytes);
+    if (!parsed.ok) return fail(parsed.code, parsed.message);
+    const auto float_bytes = parsed.asset.samples.size() / sizeof(std::int16_t) * sizeof(float);
+    if (float_bytes > max_asset_bytes_) return fail("AUDIO_ASSET_LIMIT_REACHED", "audio asset exceeds the per-asset cache limit");
+    const auto existing = assets_.find(sound_id);
+    const auto source_fingerprint = fingerprint(bytes);
+    if (existing != assets_.end() && existing->second->fingerprint == source_fingerprint) return {true, {}, {}, existing->second};
+    const auto existing_bytes = existing == assets_.end() ? 0u : existing->second->byte_size();
+    if (cached_bytes_ - existing_bytes + float_bytes > max_cached_bytes_) return fail("AUDIO_CACHE_LIMIT_REACHED", "audio cache limit reached");
+    auto asset = std::make_shared<PcmAsset>();
+    asset->sound_id = sound_id;
+    asset->sample_rate = parsed.asset.format.sample_rate;
+    asset->channels = parsed.asset.format.channels;
+    asset->samples = to_float(parsed.asset);
+    asset->fingerprint = source_fingerprint;
+    cached_bytes_ = cached_bytes_ - existing_bytes + asset->byte_size();
+    assets_[sound_id] = asset;
+    return {true, {}, {}, std::move(asset)};
+}
+
+std::shared_ptr<const PcmAsset> AssetCache::find(const std::string& sound_id) const {
+    const auto it = assets_.find(sound_id);
+    return it == assets_.end() ? nullptr : it->second;
+}
+
+bool AssetCache::unload(const std::string& sound_id) {
+    const auto it = assets_.find(sound_id);
+    if (it == assets_.end()) return false;
+    cached_bytes_ -= it->second->byte_size();
+    assets_.erase(it);
+    return true;
+}
+
+void AssetCache::clear() {
+    assets_.clear();
+    cached_bytes_ = 0;
+}
+
+}  // namespace notification_hub::audio_engine
