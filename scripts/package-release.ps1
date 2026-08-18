@@ -2,7 +2,6 @@ param(
   [ValidateSet('Debug', 'Release')]
   [string]$Configuration = 'Release',
   [string]$RuntimePath = '',
-  [string]$AudioPath = '',
   [string]$AudioEnginePath = ''
 )
 
@@ -18,10 +17,6 @@ if ([string]::IsNullOrWhiteSpace($RuntimePath)) {
   $RuntimePath = Join-Path $repoRoot ("build\vs2022-debug\runtime\$Configuration\notification-hub-runtime.exe")
 }
 $RuntimePath = (Resolve-Path $RuntimePath -ErrorAction Stop).Path
-if ([string]::IsNullOrWhiteSpace($AudioPath)) {
-  $AudioPath = Join-Path $repoRoot ("build\native-audio\runtime\$Configuration\notification-hub-audio-service.exe")
-}
-$AudioPath = (Resolve-Path $AudioPath -ErrorAction Stop).Path
 if ([string]::IsNullOrWhiteSpace($AudioEnginePath)) {
   $AudioEnginePath = Join-Path $repoRoot ("build\native-audio\runtime\$Configuration\notification-hub-audio-engine.exe")
 }
@@ -49,12 +44,12 @@ foreach ($relativePath in $include) {
 $pluginSource = Join-Path $repoRoot 'plugin'
 if (-not (Test-Path (Join-Path $pluginSource 'manifest.json'))) { throw 'plugin/manifest.json is missing' }
 Copy-Item (Join-Path $pluginSource '*') $stageDir -Recurse -Force
+# commands/ is a repository-only test command surface; manifest registers tools/ instead.
+Remove-Item (Join-Path $stageDir 'commands') -Recurse -Force -ErrorAction SilentlyContinue
 Copy-Item $RuntimePath (Join-Path $stageDir 'runtime\notification-hub-runtime.exe') -Force
-Copy-Item $AudioPath (Join-Path $stageDir 'runtime\notification-hub-audio-service.exe') -Force
 Copy-Item $AudioEnginePath (Join-Path $stageDir 'runtime\notification-hub-audio-engine.exe') -Force
 
 # The release package is an installable artifact, not a source checkout.
-# Do not publish repository-only test scripts that point at absent source paths.
 $stagedPackageJsonPath = Join-Path $stageDir 'package.json'
 $stagedPackage = Get-Content $stagedPackageJsonPath -Raw -Encoding UTF8 | ConvertFrom-Json
 $stagedPackage.PSObject.Properties.Remove('scripts')
@@ -82,19 +77,20 @@ try {
   $rootManifest = $entryNames | Where-Object { $_ -eq 'manifest.json' }
   $nestedManifest = $entryNames | Where-Object { $_ -match '(^|/)notification-hub-vnext/manifest\.json$' -or $_ -match '(^|/)plugin/manifest\.json$' }
   $runtimeEntry = $entryNames | Where-Object { $_ -eq 'runtime/notification-hub-runtime.exe' }
-  $audioEntry = $entryNames | Where-Object { $_ -eq 'runtime/notification-hub-audio-service.exe' }
   $audioEngineEntry = $entryNames | Where-Object { $_ -eq 'runtime/notification-hub-audio-engine.exe' }
+  $legacyAudioEntry = $entryNames | Where-Object { $_ -eq 'runtime/notification-hub-audio-service.exe' }
+  $commandEntries = $entryNames | Where-Object { $_ -match '^commands/' }
   if (-not $rootManifest) { throw 'Zip root does not contain manifest.json' }
   if ($nestedManifest) { throw 'Zip contains a nested plugin root' }
   if (-not $runtimeEntry) { throw 'Zip does not contain runtime/notification-hub-runtime.exe' }
-  if (-not $audioEntry) { throw 'Zip does not contain runtime/notification-hub-audio-service.exe' }
   if (-not $audioEngineEntry) { throw 'Zip does not contain runtime/notification-hub-audio-engine.exe' }
+  if ($legacyAudioEntry) { throw 'Zip must not contain the retired audio-service executable' }
+  if ($commandEntries) { throw 'Zip must not contain repository-only command modules' }
 }
 finally {
   $zip.Dispose()
 }
 
-# Keep only the installable artifact after validation; the staging tree is disposable.
 Remove-Item $stageDir -Recurse -Force
 
 $hash = Get-FileHash $zipPath -Algorithm SHA256
