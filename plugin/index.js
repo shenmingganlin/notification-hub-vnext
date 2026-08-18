@@ -16,8 +16,7 @@ import { createSoundScheduler } from './domain/sound-scheduler.js';
 import path from 'node:path';
 import { existsSync } from 'node:fs';
 import { mkdir, rename, rm, writeFile } from 'node:fs/promises';
-import { playNotificationSound, resolveSoundPlaybackKey } from './domain/audio-adapter.js';
-import { createNativeAudioBackend } from './domain/native-audio-backend.js';
+import { createWindowsAudioBackend, playNotificationSound, resolveSoundPlaybackKey } from './domain/audio-adapter.js';
 import { createAudioEngineHost } from './domain/audio-engine-host.js';
 import { createAudioEngineBackend } from './domain/audio-engine-backend.js';
 import { createSoundAssetRegistry } from './domain/sound-asset-registry.js';
@@ -330,7 +329,7 @@ export default class NotificationHubVNextPlugin {
     notificationPersistenceFactory = createNotificationPersistenceFromHostContext,
     settingsPersistenceFactory = createSettingsPersistenceFromHostContext,
     soundSettingsPersistenceFactory = createSoundSettingsPersistenceFromHostContext,
-    soundBackendFactory = (options) => createNativeAudioBackend(options),
+    soundBackendFactory = (options) => createWindowsAudioBackend(options),
     soundPreviewBackendFactory = soundBackendFactory,
     soundFilePickerFactory = createWindowsSaveFilePicker,
     soundSchedulerFactory = createSoundScheduler,
@@ -341,7 +340,7 @@ export default class NotificationHubVNextPlugin {
     eventPresentationSettingsPersistenceFactory = createEventPresentationSettingsPersistenceFromHostContext,
     audioEngineHostFactory = (options) => createAudioEngineHost(options),
     audioEngineBackendFactory = (options) => createAudioEngineBackend(options),
-    useAudioEngineBackend = false
+    useAudioEngineBackend = true
   } = {}) {
     this.ctx = ctx;
     this.adapterFactory = adapterFactory;
@@ -572,8 +571,8 @@ export default class NotificationHubVNextPlugin {
     await this.restoreSoundSettings();
     await this.restoreVisualSettings();
     await this.restoreEventPresentationSettings();
-    // Start the native audio service before the first notification. This is
-    // deliberately best-effort: a missing audio device must not block cards.
+    // Start the resident Audio Engine before the first notification. This is
+    // deliberately best-effort: an unavailable audio device must not block cards.
     void Promise.resolve(this.soundBackend?.warmup?.()).catch((error) => {
       this.recordSoundDiagnostic(error, 'native-service-start');
     });

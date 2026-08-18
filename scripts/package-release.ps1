@@ -2,7 +2,8 @@ param(
   [ValidateSet('Debug', 'Release')]
   [string]$Configuration = 'Release',
   [string]$RuntimePath = '',
-  [string]$AudioPath = ''
+  [string]$AudioPath = '',
+  [string]$AudioEnginePath = ''
 )
 
 $ErrorActionPreference = 'Stop'
@@ -21,6 +22,10 @@ if ([string]::IsNullOrWhiteSpace($AudioPath)) {
   $AudioPath = Join-Path $repoRoot ("build\native-audio\runtime\$Configuration\notification-hub-audio-service.exe")
 }
 $AudioPath = (Resolve-Path $AudioPath -ErrorAction Stop).Path
+if ([string]::IsNullOrWhiteSpace($AudioEnginePath)) {
+  $AudioEnginePath = Join-Path $repoRoot ("build\native-audio\runtime\$Configuration\notification-hub-audio-engine.exe")
+}
+$AudioEnginePath = (Resolve-Path $AudioEnginePath -ErrorAction Stop).Path
 
 $distDir = Join-Path $repoRoot 'dist'
 $stageDir = Join-Path $distDir 'notification-hub-vnext'
@@ -46,6 +51,7 @@ if (-not (Test-Path (Join-Path $pluginSource 'manifest.json'))) { throw 'plugin/
 Copy-Item (Join-Path $pluginSource '*') $stageDir -Recurse -Force
 Copy-Item $RuntimePath (Join-Path $stageDir 'runtime\notification-hub-runtime.exe') -Force
 Copy-Item $AudioPath (Join-Path $stageDir 'runtime\notification-hub-audio-service.exe') -Force
+Copy-Item $AudioEnginePath (Join-Path $stageDir 'runtime\notification-hub-audio-engine.exe') -Force
 
 # The release package is an installable artifact, not a source checkout.
 # Do not publish repository-only test scripts that point at absent source paths.
@@ -77,10 +83,12 @@ try {
   $nestedManifest = $entryNames | Where-Object { $_ -match '(^|/)notification-hub-vnext/manifest\.json$' -or $_ -match '(^|/)plugin/manifest\.json$' }
   $runtimeEntry = $entryNames | Where-Object { $_ -eq 'runtime/notification-hub-runtime.exe' }
   $audioEntry = $entryNames | Where-Object { $_ -eq 'runtime/notification-hub-audio-service.exe' }
+  $audioEngineEntry = $entryNames | Where-Object { $_ -eq 'runtime/notification-hub-audio-engine.exe' }
   if (-not $rootManifest) { throw 'Zip root does not contain manifest.json' }
   if ($nestedManifest) { throw 'Zip contains a nested plugin root' }
   if (-not $runtimeEntry) { throw 'Zip does not contain runtime/notification-hub-runtime.exe' }
   if (-not $audioEntry) { throw 'Zip does not contain runtime/notification-hub-audio-service.exe' }
+  if (-not $audioEngineEntry) { throw 'Zip does not contain runtime/notification-hub-audio-engine.exe' }
 }
 finally {
   $zip.Dispose()
