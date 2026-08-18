@@ -7,9 +7,29 @@
 #include <limits>
 #include <utility>
 
+#ifdef _WIN32
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#endif
+
 namespace notification_hub::audio_engine {
 namespace {
 CacheResult fail(std::string code, std::string message) { return {false, std::move(code), std::move(message), nullptr}; }
+
+std::filesystem::path utf8_path(const std::string& value) {
+#ifdef _WIN32
+    if (value.empty()) return {};
+    const int length = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, value.data(), static_cast<int>(value.size()), nullptr, 0);
+    if (length <= 0) return std::filesystem::path(value);
+    std::wstring wide(static_cast<std::size_t>(length), L'\\0');
+    if (MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, value.data(), static_cast<int>(value.size()), wide.data(), length) <= 0) return std::filesystem::path(value);
+    return std::filesystem::path(std::move(wide));
+#else
+    return std::filesystem::path(value);
+#endif
+}
 
 std::uint64_t fingerprint(const std::vector<std::uint8_t>& bytes) {
     // FNV-1a is used only to detect a changed cache source, not for security.
@@ -40,8 +60,10 @@ AssetCache::AssetCache(std::size_t max_cached_bytes, std::size_t max_asset_bytes
 
 CacheResult AssetCache::load(const std::string& sound_id, const std::filesystem::path& path) {
     if (sound_id.empty()) return fail("AUDIO_SOUND_ID_INVALID", "sound_id must not be empty");
-    std::ifstream input(path, std::ios::binary);
-    if (!input) return fail("AUDIO_ASSET_OPEN_FAILED", "audio asset could not be opened");
+    const auto path_text = path.string();
+    const auto resolved_path = utf8_path(path_text);
+    std::ifstream input(resolved_path, std::ios::binary);
+    if (!input) return fail("AUDIO_ASSET_OPEN_FAILED", "audio asset could not be opened: " + path_text);
     std::vector<std::uint8_t> bytes((std::istreambuf_iterator<char>(input)), std::istreambuf_iterator<char>());
     if (bytes.empty()) return fail("AUDIO_ASSET_EMPTY", "audio asset is empty");
     const auto parsed = notification_hub::audio::parse_wav_pcm(bytes);
