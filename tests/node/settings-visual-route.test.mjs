@@ -33,6 +33,10 @@ test('visual settings page renders independent presets and current iframe fetch'
   assert.match(html, /visual-settings-status/);
   assert.match(html, /visual-settings-update/);
   assert.match(html, /visual-settings-preview/);
+  assert.match(html, /事件路由/);
+  assert.match(html, /卡片外观/);
+  assert.match(html, /行为与抑制/);
+  assert.match(html, /\?view=events/);
   assert.match(html, /后端策略已确认/);
   const fragment = renderVisualSettingsFragment('/settings-content?view=visual', {
     profile: { global: { enabled: true, preset: 'soft' }, categories: {} },
