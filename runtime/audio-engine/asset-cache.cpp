@@ -1,6 +1,6 @@
 #include "asset-cache.hpp"
 
-#include "../audio-service/wav_pcm.hpp"
+#include "wav-pcm.hpp"
 
 #include <fstream>
 #include <iterator>
