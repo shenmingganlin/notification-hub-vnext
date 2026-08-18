@@ -19,6 +19,7 @@ import { mkdir, rename, rm, writeFile } from 'node:fs/promises';
 import { playNotificationSound, resolveSoundPlaybackKey } from './domain/audio-adapter.js';
 import { createNativeAudioBackend } from './domain/native-audio-backend.js';
 import { createAudioEngineHost } from './domain/audio-engine-host.js';
+import { createAudioEngineBackend } from './domain/audio-engine-backend.js';
 import { createSoundAssetRegistry } from './domain/sound-asset-registry.js';
 import { createSoundDiagnostic } from './domain/sound-diagnostic.js';
 import { createSoundRuleExplanation } from './domain/sound-rule-explanation.js';
@@ -338,7 +339,9 @@ export default class NotificationHubVNextPlugin {
     sidebarDisplaySettingsPersistenceFactory = createSidebarDisplaySettingsPersistence,
     visualSettingsPersistenceFactory = createVisualSettingsPersistenceFromHostContext,
     eventPresentationSettingsPersistenceFactory = createEventPresentationSettingsPersistenceFromHostContext,
-    audioEngineHostFactory = (options) => createAudioEngineHost(options)
+    audioEngineHostFactory = (options) => createAudioEngineHost(options),
+    audioEngineBackendFactory = (options) => createAudioEngineBackend(options),
+    useAudioEngineBackend = false
   } = {}) {
     this.ctx = ctx;
     this.adapterFactory = adapterFactory;
@@ -355,6 +358,8 @@ export default class NotificationHubVNextPlugin {
     this.visualSettingsPersistenceFactory = visualSettingsPersistenceFactory;
     this.eventPresentationSettingsPersistenceFactory = eventPresentationSettingsPersistenceFactory;
     this.audioEngineHostFactory = audioEngineHostFactory;
+    this.audioEngineBackendFactory = audioEngineBackendFactory;
+    this.useAudioEngineBackend = useAudioEngineBackend === true;
     this.audioEngineHost = null;
     this.audioEngineStatus = { state: 'disabled', reason: 'engine-binary-not-present' };
     this.runtimeHost = null;
@@ -534,6 +539,15 @@ export default class NotificationHubVNextPlugin {
     return this.audioEngineStatus;
   }
 
+  async activateAudioEngineBackend() {
+    if (!this.audioEngineHost) throw Object.assign(new Error('Audio Engine Host is unavailable'), { code: 'AUDIO_ENGINE_NOT_READY' });
+    const previous = this.soundBackend;
+    this.soundBackend = this.audioEngineBackendFactory({ host: this.audioEngineHost, client: this.audioEngineHost.client, platform: process.platform });
+    await this.soundBackend.warmup?.();
+    if (previous && previous !== this.soundBackend) await previous.dispose?.();
+    return this.soundBackend;
+  }
+
   async stopAudioEngineHost() {
     if (!this.audioEngineHost) return;
     await this.audioEngineHost.dispose().catch((error) => this.recordSoundDiagnostic(error, 'audio-engine-stop'));
@@ -551,6 +565,9 @@ export default class NotificationHubVNextPlugin {
     this.ctx._notificationHubVNextSettingsApi = this.runtimeTestApi;
     this.runtimeError = null;
     await this.startAudioEngineHost();
+    if (this.useAudioEngineBackend && this.audioEngineStatus.state === 'ready') {
+      await this.activateAudioEngineBackend();
+    }
     await this.restoreSoundAssets();
     await this.restoreSoundSettings();
     await this.restoreVisualSettings();
