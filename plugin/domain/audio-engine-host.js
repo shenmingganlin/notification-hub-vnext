@@ -64,6 +64,12 @@ export function createAudioEngineHost({
   manager.on?.('exit', onExit);
   audioClient.on?.('event', (message) => events.emit('event', message));
   audioClient.on?.('voice_finished', (message) => events.emit('voice_finished', message));
+  audioClient.on?.('diagnostic', (diagnostic) => {
+    if (!intentionalStop && ['TRANSPORT_DISCONNECTED', 'TRANSPORT_PIPE_READ_FAILED', 'TRANSPORT_PIPE_WRITE_FAILED'].includes(diagnostic?.code)) {
+      setState('failed', diagnostic.code);
+    }
+    events.emit('diagnostic', diagnostic);
+  });
 
   async function start() {
     if (state === 'ready' && audioClient.isConnected()) return healthSnapshot;

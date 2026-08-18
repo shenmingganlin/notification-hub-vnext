@@ -188,7 +188,7 @@ export function renderSoundSettingsPage(currentUrl = '', initialData = null) {
       if (!soundId) return;
       if (button.classList.contains('asset-test')) {
         event.preventDefault(); setStatus('asset-feedback', '正在试听…', '');
-        jsonRequest('sound-asset-test', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ soundId: soundId }) }).then(function (data) { var playback = data.playback || {}; var played = playback.status === 'played' && playback.playback && playback.playback.played !== false; setStatus('asset-feedback', played ? '已开始播放。' : '试听失败：' + String(playback.diagnostic || playback.status || '播放器失败'), played ? 'success' : 'error'); }).catch(function (error) { setStatus('asset-feedback', formatError(error, '试听失败'), 'error'); });
+        jsonRequest('sound-asset-test', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ soundId: soundId }) }).then(function (data) { var playback = data.playback || {}; var played = playback.status === 'played' && playback.playback && playback.playback.played !== false; setStatus('asset-feedback', played ? '已开始播放。' : '试听失败：' + String(playback.diagnostic || playback.error || playback.status || '播放器失败'), played ? 'success' : 'error'); }).catch(function (error) { setStatus('asset-feedback', formatError(error, '试听失败'), 'error'); });
       } else if (button.classList.contains('asset-delete')) {
         event.preventDefault(); var warning = document.querySelector('[data-delete-warning="' + CSS.escape(soundId) + '"]'); if (warning) { warning.hidden = false; button.hidden = true; }
       } else {

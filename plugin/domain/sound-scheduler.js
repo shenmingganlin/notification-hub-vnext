@@ -92,8 +92,9 @@ export function createSoundScheduler({
         const settled = result('failed', {
           soundKey: item.soundKey,
           suppressDuplicates: decision.suppressDuplicates !== false,
-          diagnostic: 'SOUND_PLAYBACK_FAILED',
-          error: error instanceof Error ? error.message : String(error)
+          diagnostic: error?.code ? `${error.code}: ${error.message ?? String(error)}` : 'SOUND_PLAYBACK_FAILED',
+          error: error instanceof Error ? error.message : String(error),
+          errorCode: error?.code ?? null
         });
         settle(settled);
         return settled;
