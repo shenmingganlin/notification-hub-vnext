@@ -1,3 +1,12 @@
+# Keep Release binaries small without changing runtime behavior. These flags apply only
+# to MSVC Release builds; tests and non-MSVC toolchains retain their normal settings.
+function(notification_hub_enable_size_optimization target)
+  if (MSVC)
+    target_compile_options(${target} PRIVATE $<$<CONFIG:Release>:/O1 /GL>)
+    target_link_options(${target} PRIVATE $<$<CONFIG:Release>:/LTCG /OPT:REF /OPT:ICF>)
+  endif()
+endfunction()
+
 add_executable(notification-hub-audio-service
   audio-service/main.cpp
   audio-service/service.cpp
@@ -11,6 +20,7 @@ target_compile_features(notification-hub-audio-service PRIVATE cxx_std_20)
 if (WIN32)
   target_link_libraries(notification-hub-audio-service PRIVATE ole32 mmdevapi avrt)
 endif()
+notification_hub_enable_size_optimization(notification-hub-audio-service)
 add_test(NAME runtime_audio_service_self_test COMMAND notification-hub-audio-service --self-test)
 
 add_executable(notification-hub-audio-engine-asset-cache-test
@@ -58,6 +68,7 @@ target_compile_features(notification-hub-audio-engine PRIVATE cxx_std_20)
 if (WIN32)
   target_link_libraries(notification-hub-audio-engine PRIVATE ole32 mmdevapi avrt mfplat mfreadwrite mfuuid)
 endif()
+notification_hub_enable_size_optimization(notification-hub-audio-engine)
 add_test(NAME audio_engine_self_test COMMAND notification-hub-audio-engine --self-test)
 
 add_executable(notification-hub-runtime
@@ -87,6 +98,7 @@ target_compile_definitions(notification-hub-runtime PRIVATE
 if (WIN32)
   target_link_libraries(notification-hub-runtime PRIVATE user32 gdi32 d2d1 dwrite d3d11 dxgi)
 endif()
+notification_hub_enable_size_optimization(notification-hub-runtime)
 
 add_test(NAME runtime_smoke COMMAND notification-hub-runtime --self-test)
 add_test(NAME runtime_protocol_self_test COMMAND notification-hub-runtime --protocol-self-test)
