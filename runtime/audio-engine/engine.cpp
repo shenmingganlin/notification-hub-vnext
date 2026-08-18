@@ -157,7 +157,7 @@ int run_audio_engine(std::string_view pipe_name) {
             } else if (request.type == "audio.load") {
                 const auto id = field(request.payload_json, "soundId");
                 const auto path = field(request.payload_json, "path");
-                const auto loaded = cache.load(id, path);
+                const auto loaded = cache.load(id, std::filesystem::u8path(path));
                 if (!loaded.ok) reply = error_response(request, loaded.code, loaded.message);
                 else { std::ostringstream result; result << "{\"loaded\":true,\"durationMs\":" << (loaded.asset->frame_count() * 1000 / loaded.asset->sample_rate) << "}"; reply = response(request, result.str()); }
             } else if (request.type == "audio.unload") {

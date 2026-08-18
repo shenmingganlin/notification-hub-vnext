@@ -125,6 +125,13 @@ bool DeviceOutput::start(Mixer& mixer, std::string& error) {
             }
             const bool is_float = bits == 32 && (state->mix_format->wFormatTag == WAVE_FORMAT_IEEE_FLOAT || is_extensible_float(state->mix_format));
             const auto frame_stride = static_cast<std::size_t>(state->mix_format->nBlockAlign);
+            if (frame_stride * frames_to_mix > expected_bytes) {
+                state->render->ReleaseBuffer(static_cast<UINT32>(frames_to_mix), AUDCLNT_BUFFERFLAGS_SILENT);
+                std::lock_guard lock(state->error_mutex);
+                state->error = "WASAPI frame stride exceeds buffer (frames=" + std::to_string(frames_to_mix) + ", stride=" + std::to_string(frame_stride) + ", bytes=" + std::to_string(expected_bytes) + ")";
+                state->available = false;
+                break;
+            }
             const auto sample_stride = bytes_per_sample;
             for (std::size_t frame = 0; frame < frames_to_mix; ++frame) {
                 for (std::uint32_t channel = 0; channel < channels; ++channel) {
@@ -140,7 +147,10 @@ bool DeviceOutput::start(Mixer& mixer, std::string& error) {
                         destination[offset + 1] = static_cast<BYTE>((value >> 8) & 0xff);
                         destination[offset + 2] = static_cast<BYTE>((value >> 16) & 0xff);
                     } else if (bits == 32) {
-                        reinterpret_cast<std::int32_t*>(destination + offset)[0] = static_cast<std::int32_t>(std::clamp(mix_buffer[index] * 2147483647.0f, -2147483648.0f, 2147483647.0f));
+                        const auto scaled = static_cast<double>(mix_buffer[index]) * 2147483647.0;
+                        const auto bounded = std::clamp(scaled, -2147483648.0, 2147483647.0);
+                        const auto value = static_cast<std::int64_t>(bounded);
+                        reinterpret_cast<std::int32_t*>(destination + offset)[0] = static_cast<std::int32_t>(value);
                     }
                 }
             }
