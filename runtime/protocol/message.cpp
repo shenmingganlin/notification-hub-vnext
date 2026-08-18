@@ -38,12 +38,12 @@ void append_utf8(std::string& output, std::uint32_t code_point) {
 constexpr std::string_view kCommands[] = {
     "hello", "health", "capabilities", "scene.create", "scene.update",
     "scene.dismiss", "scene.drag", "scene.set-mode", "config.update",
-    "diagnostic.subscribe", "shutdown", "audio.health", "audio.cue", "audio.load", "audio.play", "audio.stop", "audio.unload"
+    "diagnostic.subscribe", "shutdown", "audio.health", "audio.cue", "audio.load", "audio.play", "audio.stop", "audio.stop_all", "audio.unload", "audio.shutdown"
 };
 constexpr std::string_view kMessageTypes[] = {
     "hello", "health", "capabilities", "scene.create", "scene.update",
     "scene.dismiss", "scene.drag", "scene.set-mode", "config.update",
-    "diagnostic.subscribe", "shutdown", "audio.health", "audio.cue", "audio.load", "audio.play", "audio.stop", "audio.unload", "ack", "error", "event"
+    "diagnostic.subscribe", "shutdown", "audio.health", "audio.cue", "audio.load", "audio.play", "audio.stop", "audio.stop_all", "audio.unload", "audio.shutdown", "ack", "error", "event"
 };
 
 class Parser {

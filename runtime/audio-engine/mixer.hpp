@@ -5,6 +5,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <mutex>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -38,11 +39,13 @@ public:
 
     MixerResult play(std::shared_ptr<const PcmAsset> asset, std::string voice_id, float volume);
     MixerResult stop(const std::string& voice_id);
+    std::size_t stop_all();
     std::size_t mix(float* output, std::size_t frames, std::uint32_t output_channels);
     std::vector<VoiceFinished> collect_finished();
-    std::size_t active_voice_count() const noexcept { return voices_.size(); }
+    std::size_t active_voice_count() const noexcept;
 
 private:
+    mutable std::mutex mutex_;
     std::size_t max_active_voices_;
     std::unordered_map<std::string, Voice> voices_;
     std::vector<VoiceFinished> finished_;

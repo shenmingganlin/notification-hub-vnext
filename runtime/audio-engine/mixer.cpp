@@ -12,7 +12,13 @@ float clamp_volume(float value) { return std::max(0.0f, std::min(1.0f, value)); 
 
 Mixer::Mixer(std::size_t max_active_voices) : max_active_voices_(max_active_voices) {}
 
+std::size_t Mixer::active_voice_count() const noexcept {
+    std::lock_guard lock(mutex_);
+    return voices_.size();
+}
+
 MixerResult Mixer::play(std::shared_ptr<const PcmAsset> asset, std::string voice_id, float volume) {
+    std::lock_guard lock(mutex_);
     if (!asset || asset->channels == 0 || asset->samples.empty()) return fail("AUDIO_ASSET_NOT_LOADED", "PCM asset is not loaded");
     if (voice_id.empty()) return fail("AUDIO_VOICE_ID_INVALID", "voice_id must not be empty");
     if (!std::isfinite(volume) || volume < 0.0f || volume > 1.0f) return fail("AUDIO_VOLUME_INVALID", "volume must be between 0 and 1");
@@ -24,6 +30,7 @@ MixerResult Mixer::play(std::shared_ptr<const PcmAsset> asset, std::string voice
 }
 
 MixerResult Mixer::stop(const std::string& voice_id) {
+    std::lock_guard lock(mutex_);
     const auto it = voices_.find(voice_id);
     if (it == voices_.end()) return fail("AUDIO_VOICE_NOT_FOUND", "voice_id is not active");
     finished_.push_back({it->second.voice_id, it->second.sound_id, "stopped"});
@@ -31,7 +38,16 @@ MixerResult Mixer::stop(const std::string& voice_id) {
     return {true, {}, {}, voice_id};
 }
 
+std::size_t Mixer::stop_all() {
+    std::lock_guard lock(mutex_);
+    const auto count = voices_.size();
+    for (const auto& [voice_id, voice] : voices_) finished_.push_back({voice_id, voice.sound_id, "stopped"});
+    voices_.clear();
+    return count;
+}
+
 std::size_t Mixer::mix(float* output, std::size_t frames, std::uint32_t output_channels) {
+    std::lock_guard lock(mutex_);
     if (!output || output_channels == 0 || frames == 0) return 0;
     std::fill(output, output + frames * output_channels, 0.0f);
     std::vector<std::string> completed;
@@ -63,6 +79,7 @@ std::size_t Mixer::mix(float* output, std::size_t frames, std::uint32_t output_c
 }
 
 std::vector<VoiceFinished> Mixer::collect_finished() {
+    std::lock_guard lock(mutex_);
     auto result = std::move(finished_);
     finished_.clear();
     return result;
