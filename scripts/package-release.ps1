@@ -94,5 +94,9 @@ finally {
 Remove-Item $stageDir -Recurse -Force
 
 $hash = Get-FileHash $zipPath -Algorithm SHA256
+$zipSize = (Get-Item $zipPath).Length
+$runtimeSize = (Get-Item $RuntimePath).Length
+$audioEngineSize = (Get-Item $AudioEnginePath).Length
 Write-Host "Release ZIP: $zipPath"
 Write-Host "SHA256: $($hash.Hash)"
+Write-Host "Sizes: zip=$zipSize bytes, runtime=$runtimeSize bytes, audioEngine=$audioEngineSize bytes"
