@@ -26,6 +26,8 @@ export function createBehaviorManager({ channelId, profile, policy = {}, adapter
   const normalizedProfile = createBehaviorProfile({ ...profile, channelId: channelId ?? profile?.channelId });
   const normalizedPolicy = createCardChannelPolicy({ ...policy, policyId: policy.policyId ?? channelId ?? normalizedProfile.channelId });
   const cards = new Map();
+  const pending = new Map();
+  const aggregateKeys = new Set();
   let suppressedCount = 0;
   let queuedCount = 0;
   return {
@@ -36,16 +38,20 @@ export function createBehaviorManager({ channelId, profile, policy = {}, adapter
     cards,
     enqueue(cardInput) {
       const card = createBehaviorCard({ ...cardInput, channelId: normalizedProfile.channelId });
-      if (normalizedPolicy.suppression === 'aggressive' && cards.has(card.cardId)) {
+      const aggregateKey = `${card.eventId}:${card.payload?.deduplicationKey ?? ''}`;
+      if (normalizedPolicy.suppression === 'aggressive' && aggregateKeys.has(aggregateKey)) {
         suppressedCount += 1;
         return null;
       }
+      if (normalizedPolicy.suppression === 'aggressive') aggregateKeys.add(aggregateKey);
       if (normalizedPolicy.suppression !== 'off' && cards.size >= normalizedPolicy.maxVisible) {
         if (normalizedPolicy.overflow === 'drop-oldest') {
           const oldest = cards.keys().next().value;
           if (oldest) { cards.delete(oldest); suppressedCount += 1; }
         } else if (normalizedPolicy.overflow === 'aggregate' || normalizedPolicy.overflow === 'queue') {
-          queuedCount += 1;
+          pending.set(card.cardId, card);
+          queuedCount = pending.size;
+          return card;
         }
       }
       cards.set(card.cardId, card);
@@ -54,10 +60,21 @@ export function createBehaviorManager({ channelId, profile, policy = {}, adapter
     },
     remove(cardId) {
       if (typeof cardId !== 'string' || !cardId.trim()) throw managerError('NOTIFICATION_BEHAVIOR_CARD_ID_INVALID', 'cardId must be a non-empty string', 'cardId');
-      const card = cards.get(cardId) ?? null;
-      if (card) {
+      const card = cards.get(cardId) ?? pending.get(cardId) ?? null;
+      if (!card) return null;
+      if (cards.has(cardId)) {
         cards.delete(cardId);
         adapter?.remove?.(card, normalizedProfile);
+        const next = pending.values().next().value;
+        if (next) {
+          pending.delete(next.cardId);
+          cards.set(next.cardId, next);
+          queuedCount = pending.size;
+          adapter?.enqueue?.(next, normalizedProfile, normalizedPolicy);
+        }
+      } else {
+        pending.delete(cardId);
+        queuedCount = pending.size;
       }
       return card;
     },
@@ -68,7 +85,8 @@ export function createBehaviorManager({ channelId, profile, policy = {}, adapter
         profile: clone(normalizedProfile),
         policy: clone(normalizedPolicy),
         cards: [...cards.values()].map(clone),
-        metrics: { channelCount: 1, activeCardCount: cards.size, visibleCardCount: cards.size, queuedCardCount: queuedCount, suppressedCardCount: suppressedCount }
+        pending: [...pending.values()].map(clone),
+        metrics: { channelCount: 1, activeCardCount: cards.size + pending.size, visibleCardCount: cards.size, queuedCardCount: pending.size, suppressedCardCount: suppressedCount }
       });
     }
   };

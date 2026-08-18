@@ -1854,6 +1854,14 @@ export default class NotificationHubVNextPlugin {
     const presentationInput = createNotificationPresentationInput(record, projectNotificationCategories(record));
     const selector = presentationInput.selector ?? null;
     const behavior = selector ? this.resolveNotificationBehavior(selector, record) : null;
+    const behaviorCard = behavior?.manager?.enqueue({
+      cardId: record.notificationId,
+      notificationId: record.notificationId,
+      eventId: behavior.eventId,
+      visualProfileId: behavior.visualProfileId,
+      payload: { policyId: behavior.channelPolicyId }
+    });
+    if (behavior && !behaviorCard) return { card: null, response: null, suppressed: true };
     const visual = resolveVisualRuleSafe({
       visualInput: presentationInput.visualInput,
       profile: visualProfile,
@@ -1886,21 +1894,18 @@ export default class NotificationHubVNextPlugin {
         behaviorChannelId: behavior.behaviorChannelId
       } : null
     );
-    const response = await host.client.request('scene.create', card, {
-      retryable: false,
-      idempotencyKey: `notification-scene-${record.notificationId}`
-    });
-    this.notificationSceneVisibleIds.add(record.notificationId);
-    if (behavior?.behaviorChannelId) {
-      this.notificationSceneCardChannels.set(record.notificationId, behavior.behaviorChannelId);
-      this.notificationBehaviorManagers.get(behavior.behaviorChannelId)?.enqueue({
-        cardId: record.notificationId,
-        notificationId: record.notificationId,
-        eventId: behavior.eventId,
-        visualProfileId: behavior.visualProfileId,
-        payload: { sceneCardId: card.id }
+    let response;
+    try {
+      response = await host.client.request('scene.create', card, {
+        retryable: false,
+        idempotencyKey: `notification-scene-${record.notificationId}`
       });
+    } catch (error) {
+      behavior?.manager?.remove(record.notificationId);
+      throw error;
     }
+    this.notificationSceneVisibleIds.add(record.notificationId);
+    if (behavior?.behaviorChannelId) this.notificationSceneCardChannels.set(record.notificationId, behavior.behaviorChannelId);
     try {
       this.notificationStore.setStatus(record.notificationId, 'shown');
     } catch (error) {
@@ -1948,6 +1953,8 @@ export default class NotificationHubVNextPlugin {
       behaviorChannelId,
       eventId: selector.eventId,
       visualProfileId: selector.visual.visualProfileId,
+      channelPolicyId: selector.behavior.channelPolicyId,
+      manager,
       notificationId: record.notificationId
     });
   }

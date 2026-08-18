@@ -37,6 +37,26 @@ test('behavior manager exposes independent storm policy metrics without discardi
   assert.equal(snapshot.metrics.suppressedCardCount, 0);
 });
 
+test('soft policy queues cards and promotes them when a visible card is removed', () => {
+  const manager = createBehaviorManager({ channelId: 'stack.reply', profile: { mode: 'stack' }, policy: { policyId: 'soft', suppression: 'soft', maxVisible: 1, overflow: 'queue' } });
+  manager.enqueue({ cardId: 'visible', notificationId: 'visible', eventId: 'reply' });
+  manager.enqueue({ cardId: 'queued', notificationId: 'queued', eventId: 'reply' });
+  assert.deepEqual(manager.snapshot().cards.map((card) => card.cardId), ['visible']);
+  assert.deepEqual(manager.snapshot().pending.map((card) => card.cardId), ['queued']);
+  manager.remove('visible');
+  assert.deepEqual(manager.snapshot().cards.map((card) => card.cardId), ['queued']);
+  assert.equal(manager.snapshot().metrics.queuedCardCount, 0);
+});
+
+test('aggressive policy suppresses repeated event display work and exposes the count', () => {
+  const manager = createBehaviorManager({ channelId: 'stack.tool', profile: { mode: 'stack' }, policy: { policyId: 'aggressive', suppression: 'aggressive', maxVisible: 10, overflow: 'aggregate' } });
+  manager.enqueue({ cardId: 'one', notificationId: 'one', eventId: 'tool.execution.started' });
+  manager.enqueue({ cardId: 'two', notificationId: 'two', eventId: 'tool.execution.started' });
+  const snapshot = manager.snapshot();
+  assert.deepEqual(snapshot.cards.map((card) => card.cardId), ['one']);
+  assert.equal(snapshot.metrics.suppressedCardCount, 1);
+});
+
 test('behavior manager snapshots restore only into the same channel', () => {
   const source = createBehaviorManager({ channelId: 'popup.alert', profile: { mode: 'popup' } });
   enqueueBehaviorCard(source, { cardId: 'p1', notificationId: 'n-p1', eventId: 'tool.execution.failed' });
