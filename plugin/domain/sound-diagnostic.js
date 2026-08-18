@@ -111,7 +111,7 @@ function normalizePlayback(value) {
     cue: boundedString(value.cue, 96),
     volume: safeNullableNumber(Number(value.volume)),
     reason: boundedString(value.reason, 96),
-    diagnostic: boundedString(value.diagnostic, 120),
+    diagnostic: boundedString(value.diagnostic, 500),
     backend: boundedString(value.backend, 64)
   };
 }
