@@ -67,7 +67,8 @@ export function createPresentationSelector({ record = {}, canonicalEvent = null,
       categoryId: normalizedEvent.categoryId,
       eventTypeId: normalizedEvent.eventTypeId,
       behaviorProfileId: binding.behaviorProfileId,
-      channelId: binding.behaviorChannelId
+      channelId: binding.behaviorChannelId,
+      channelPolicyId: binding.channelPolicyId ?? 'default'
     },
     binding: clone(binding)
   });
@@ -119,6 +120,7 @@ export function projectBehaviorInput(selector) {
     eventId: selector.eventId,
     behaviorProfileId: selector.behavior.behaviorProfileId,
     behaviorChannelId: selector.behavior.channelId,
+    channelPolicyId: selector.behavior.channelPolicyId,
     importance: selector.importance
   });
 }

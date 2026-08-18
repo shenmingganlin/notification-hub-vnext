@@ -1,4 +1,5 @@
 import { createEffectRules, resolveEffectRule } from './effect-rules.js';
+import { createCardChannelPolicies } from './card-runtime-policy.js';
 
 export const BEHAVIOR_PROFILE_IDS = Object.freeze(['stack', 'ticker', 'popup']);
 
@@ -46,6 +47,7 @@ function normalizeBinding(input = {}, field = 'binding') {
     behaviorProfileId: requiredText(`${field}.behaviorProfileId`, input.behaviorProfileId),
     behaviorChannelId: validateBehaviorChannelId(input.behaviorChannelId ?? `${input.behaviorProfileId}.main`)
   };
+  if (input.channelPolicyId !== undefined) result.channelPolicyId = validateBehaviorChannelId(input.channelPolicyId);
   if (!BEHAVIOR_PROFILE_IDS.includes(result.behaviorProfileId) && input.allowCustomBehavior !== true) {
     throw presentationProfileError('NOTIFICATION_PRESENTATION_BEHAVIOR_UNKNOWN', `Unknown behavior profile: ${result.behaviorProfileId}`, `${field}.behaviorProfileId`);
   }
@@ -83,7 +85,8 @@ export function createPresentationProfile(input = {}) {
     events[requiredText('eventId', eventId)] = normalizeBinding(binding, `events.${eventId}`);
   }
   const visualRules = createEffectRules(input.visualRules ?? [], 'visual');
-  return freezeDeep({ version: 'v1', global, categories, events, visualRules });
+  const channelPolicies = createCardChannelPolicies(input.channelPolicies ?? {});
+  return freezeDeep({ version: 'v1', global, categories, events, visualRules, channelPolicies });
 }
 
 export function resolvePresentationBinding({ eventId, categoryId, profile, defaults } = {}) {
