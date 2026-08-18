@@ -41,6 +41,20 @@ test('audio engine backend preserves parallel requests without merging', async (
   assert.equal(client.requests.filter((entry) => entry.type === 'audio.play').length, 3);
 });
 
+test('audio engine backend resolves built-in cues to cached Windows media assets', async () => {
+  const client = fixtureClient();
+  const backend = createAudioEngineBackend({
+    client,
+    host: { getStatus: () => ({ state: 'ready' }) },
+    builtinPathResolver: (cue) => `C:/Windows/Media/${cue}.wav`
+  });
+  const result = await backend.playCue({ cue: 'default', volume: 1 });
+  assert.equal(result.played, true);
+  assert.equal(client.requests[0].type, 'audio.load');
+  assert.equal(client.requests[0].payload.soundId, 'builtin.default');
+  assert.equal(client.requests[1].type, 'audio.play');
+});
+
 test('audio engine backend rejects playback while host is not ready', async () => {
   const backend = createAudioEngineBackend({ client: fixtureClient(), host: { getStatus: () => ({ state: 'starting' }) } });
   await assert.rejects(() => backend.playFile({ path: 'a.wav', soundId: 'a', volume: 1 }), { code: 'AUDIO_ENGINE_NOT_READY' });

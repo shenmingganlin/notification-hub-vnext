@@ -2,6 +2,20 @@ function backendError(code, message, details = {}) {
   return Object.assign(new Error(message), { code, details });
 }
 
+const BUILTIN_CUE_FILES = Object.freeze({
+  default: 'ding.wav',
+  success: 'ding.wav',
+  error: 'Windows Exclamation.wav',
+  critical: 'Windows Critical Stop.wav',
+  'chat-incoming': 'chimes.wav',
+  'channel-incoming': 'notify.wav',
+  'tool-complete': 'ding.wav',
+  'tool-failed': 'Windows Exclamation.wav',
+  'plugin-notice': 'notify.wav',
+  warning: 'Windows Exclamation.wav',
+  'critical-error': 'Windows Critical Stop.wav'
+});
+
 function acceptedResult(result) {
   if (!result || result.accepted !== true || typeof result.voiceId !== 'string' || !result.voiceId) {
     throw backendError('AUDIO_ENGINE_PLAY_REJECTED', 'Audio Engine did not accept the voice', { result });
@@ -14,7 +28,11 @@ export function createAudioEngineBackend({
   client = host?.client,
   platform = process.platform,
   preload = [],
-  assetFingerprint = new Map()
+  assetFingerprint = new Map(),
+  builtinPathResolver = (cue) => {
+    const filename = BUILTIN_CUE_FILES[cue];
+    return filename && process.env.WINDIR ? `${process.env.WINDIR}\\Media\\${filename}` : '';
+  }
 } = {}) {
   if (platform !== 'win32') {
     return Object.freeze({
@@ -52,8 +70,10 @@ export function createAudioEngineBackend({
 
   return Object.freeze({
     async playCue({ cue, volume }) {
-      await ensureReady();
       const soundId = `builtin.${cue}`;
+      const builtinPath = builtinPathResolver(cue);
+      if (!builtinPath) throw backendError('AUDIO_BUILTIN_CUE_NOT_FOUND', `Built-in cue is unavailable: ${cue}`);
+      await load(soundId, builtinPath, builtinPath);
       try {
         return acceptedResult(await client.request('audio.play', { soundId, volume }, { retryable: false }));
       } catch (error) {
@@ -82,4 +102,4 @@ export function createAudioEngineBackend({
   });
 }
 
-export { backendError, acceptedResult };
+export { BUILTIN_CUE_FILES, backendError, acceptedResult };
