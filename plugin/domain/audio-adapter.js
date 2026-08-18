@@ -115,7 +115,7 @@ async function isPathInsideRealRoot(root, target) {
   }
 }
 
-function playbackResult({ played, source, cue, soundId, path: soundPath, volume, reason, diagnostic, muted = false }) {
+function playbackResult({ played, source, cue, soundId, path: soundPath, volume, reason, diagnostic, voiceId = null, muted = false }) {
   return freezeResult({
     attempted: true,
     played,
@@ -126,6 +126,7 @@ function playbackResult({ played, source, cue, soundId, path: soundPath, volume,
     volume,
     reason,
     diagnostic,
+    ...(voiceId ? { voiceId } : {}),
     ...(muted ? { muted: true } : {})
   });
 }
@@ -166,6 +167,7 @@ async function playCue(backend, cue, volume, reason = 'played', diagnostic = nul
       volume,
       reason: deviceUnavailable ? 'audio-device-unavailable' : played ? reason : 'playback-failed',
       diagnostic: deviceUnavailable ? 'AUDIO_DEVICE_UNAVAILABLE' : played ? diagnostic : (playback?.diagnostic ?? 'SOUND_PLAYBACK_FAILED'),
+      voiceId: playback?.voiceId ?? null,
       muted: playback?.muted === true
     });
   } catch (error) {
@@ -615,7 +617,8 @@ export async function playNotificationSound({ decision, backend, options = {} } 
           path: customPath,
           volume,
           reason: deviceUnavailable ? 'audio-device-unavailable' : played ? 'played' : 'playback-failed',
-          diagnostic: deviceUnavailable ? 'AUDIO_DEVICE_UNAVAILABLE' : played ? null : (playback?.diagnostic ?? 'SOUND_PLAYBACK_FAILED')
+          diagnostic: deviceUnavailable ? 'AUDIO_DEVICE_UNAVAILABLE' : played ? null : (playback?.diagnostic ?? 'SOUND_PLAYBACK_FAILED'),
+          voiceId: playback?.voiceId ?? null
         });
       } catch (error) {
         return playbackResult({
