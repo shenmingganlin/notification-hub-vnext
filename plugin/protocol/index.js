@@ -25,11 +25,13 @@ export const COMMAND_TYPES = Object.freeze([
   'audio.load',
   'audio.play',
   'audio.stop',
-  'audio.unload'
+  'audio.stop_all',
+  'audio.unload',
+  'audio.shutdown'
 ]);
 
 export const RESPONSE_TYPES = Object.freeze(['ack', 'error']);
-export const EVENT_TYPES = Object.freeze(['scene.changed']);
+export const EVENT_TYPES = Object.freeze(['scene.changed', 'audio.voice_finished']);
 export const MESSAGE_TYPES = Object.freeze([...COMMAND_TYPES, ...RESPONSE_TYPES, 'event']);
 
 export const PROTOCOL_ERROR_CODES = Object.freeze({
