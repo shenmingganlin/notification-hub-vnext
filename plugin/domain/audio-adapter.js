@@ -178,7 +178,7 @@ async function playCue(backend, cue, volume, reason = 'played', diagnostic = nul
       path: '',
       volume,
       reason: 'playback-failed',
-      diagnostic: error?.code ?? 'SOUND_PLAYBACK_FAILED',
+      diagnostic: error?.code ? `${error.code}: ${error.message ?? String(error)}` : 'SOUND_PLAYBACK_FAILED',
       error: error?.message ?? String(error)
     });
   }
@@ -629,7 +629,7 @@ export async function playNotificationSound({ decision, backend, options = {} } 
           path: customPath,
           volume,
           reason: 'playback-failed',
-          diagnostic: error?.code ?? 'SOUND_PLAYBACK_FAILED',
+          diagnostic: error?.code ? `${error.code}: ${error.message ?? String(error)}` : 'SOUND_PLAYBACK_FAILED',
           error: error?.message ?? String(error)
         });
       }
