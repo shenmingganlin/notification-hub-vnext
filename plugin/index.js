@@ -73,13 +73,14 @@ import { projectNotificationCategories } from './domain/notification-classificat
 import { createNotificationPresentationInput } from './domain/notification-presentation-plan.js';
 import { resolveVisualRuleSafe } from './domain/visual-rule-resolver.js';
 import { createVisualSettingsPersistenceFromHostContext, resolveVisualSettingsPersistenceConfig } from './domain/visual-settings-persistence-config.js';
-import { createNotificationTestNotifications, normalizeNotificationTestInput, NOTIFICATION_TEST_EVENTS } from './domain/notification-test-generator.js';
+import { createNotificationTestNotifications, createParallelCardSample, normalizeNotificationTestInput, NOTIFICATION_TEST_EVENTS } from './domain/notification-test-generator.js';
 import { EventPresentationSettingsStore } from './domain/event-presentation-settings-store.js';
 import {
   createEventPresentationSettingsPersistenceFromHostContext,
   resolveEventPresentationSettingsPersistenceConfig
 } from './domain/event-presentation-settings-persistence-config.js';
 import { createPresentationProfileFromSettings, listEventPresentationRows } from './domain/event-presentation-settings.js';
+import { createPresentationProfile } from './domain/notification-presentation-profile.js';
 import { listEffectRuleTargets } from './domain/effect-rules.js';
 import { createSceneBehaviorDiagnostics } from './domain/scene-behavior-diagnostics.js';
 
@@ -2393,7 +2394,7 @@ export default class NotificationHubVNextPlugin {
     try {
       this.notificationTestCapabilityCleanup = this.ctx.bus.handle(
         'notification-hub-vnext.run-test',
-        async (input = {}) => this.runNotificationTest(input)
+        async (input = {}) => input?.mode === 'parallel-card-sample' ? this.runParallelCardSample(input) : this.runNotificationTest(input)
       );
       return this.notificationTestCapabilityCleanup;
     } catch (error) {
@@ -2442,6 +2443,28 @@ export default class NotificationHubVNextPlugin {
       }],
       details
     };
+  }
+
+  async runParallelCardSample({ count = 4, createCards = true } = {}) {
+    if (!Number.isInteger(count) || count < 1 || count > 50) throw Object.assign(new Error('并行卡片样板数量必须是 1 到 50'), { code: 'PARALLEL_CARD_SAMPLE_COUNT_INVALID' });
+    const sample = createParallelCardSample({ count, idFactory: (index, kind) => `nh-card-sample-${kind}-${Date.now().toString(36)}-${index + 1}` });
+    const presentationProfile = createPresentationProfile({
+      global: { soundProfileId: 'sound.default', visualProfileId: 'visual.default', behaviorProfileId: 'stack', behaviorChannelId: 'stack.main' },
+      events: {
+        'chat.assistant_reply.completed': { soundProfileId: 'sound.default', visualProfileId: 'visual.minimal', behaviorProfileId: 'stack', behaviorChannelId: 'stack.reply' },
+        'tool.execution.succeeded': { soundProfileId: 'sound.default', visualProfileId: 'visual.minimal', behaviorProfileId: 'stack', behaviorChannelId: 'stack.tool' }
+      },
+      channelPolicies: { default: { suppression: 'off', maxVisible: 1000, overflow: 'allow', durationMs: 120000 } }
+    });
+    const results = [];
+    for (const item of sample) {
+      const isReply = item.metadata.sampleKind === 'reply';
+      const event = { eventId: item.notificationId, traceId: `${item.notificationId}:trace`, type: 'message_end', stopReason: isReply ? 'end_turn' : 'tool_result', source: item.source };
+      const result = this.notificationApi.ingestEvent({ event, notification: { ...item, metadata: { ...item.metadata, testCreateCards: createCards, testEntryPoint: 'parallel-card-sample' } }, profiles: [{ id: 'default' }], presentationProfile });
+      results.push({ notificationId: result.record.notificationId, channelId: isReply ? 'stack.reply' : 'stack.tool', eventId: isReply ? 'chat.assistant_reply.completed' : 'tool.execution.succeeded' });
+    }
+    if (createCards) await this.waitForNotificationSceneQueues();
+    return { ok: true, count, channels: { 'stack.reply': count, 'stack.tool': count }, generated: results.length, results };
   }
 
   async runNotificationTest(input = {}) {
