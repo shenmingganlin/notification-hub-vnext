@@ -105,11 +105,40 @@ bool DeviceOutput::start(Mixer& mixer, std::string& error) {
             local_hr = state->render->GetBuffer(static_cast<UINT32>(frames_to_mix), &destination);
             if (FAILED(local_hr)) { std::lock_guard lock(state->error_mutex); state->error = hresult_error("IAudioRenderClient::GetBuffer", local_hr); state->available = false; break; }
             const auto total_samples = frames_to_mix * channels;
-            if (state->mix_format->wBitsPerSample == 32 && state->mix_format->wFormatTag == WAVE_FORMAT_IEEE_FLOAT) {
+            const auto bits = state->mix_format->wBitsPerSample;
+            const auto bytes_per_sample = static_cast<std::size_t>((bits + 7u) / 8u);
+            const auto expected_bytes = frames_to_mix * state->mix_format->nBlockAlign;
+            const auto expected_sample_bytes = total_samples * bytes_per_sample;
+            if (bytes_per_sample == 0 || state->mix_format->nBlockAlign < channels * bytes_per_sample || expected_sample_bytes > expected_bytes) {
+                state->render->ReleaseBuffer(static_cast<UINT32>(frames_to_mix), AUDCLNT_BUFFERFLAGS_SILENT);
+                std::lock_guard lock(state->error_mutex);
+                state->error = "Unsupported WASAPI mix format (bits=" + std::to_string(bits) + ", channels=" + std::to_string(channels) + ", blockAlign=" + std::to_string(state->mix_format->nBlockAlign) + ")";
+                state->available = false;
+                break;
+            }
+            const bool is_float = bits == 32 && state->mix_format->wFormatTag == WAVE_FORMAT_IEEE_FLOAT;
+            if (is_float) {
                 std::copy(mix_buffer.begin(), mix_buffer.begin() + total_samples, reinterpret_cast<float*>(destination));
-            } else {
+            } else if (bits == 16) {
                 auto* output = reinterpret_cast<std::int16_t*>(destination);
                 for (std::size_t index = 0; index < total_samples; ++index) output[index] = static_cast<std::int16_t>(std::clamp(mix_buffer[index] * 32767.0f, -32768.0f, 32767.0f));
+            } else if (bits == 24) {
+                for (std::size_t index = 0; index < total_samples; ++index) {
+                    const auto value = static_cast<std::int32_t>(std::clamp(mix_buffer[index] * 8388607.0f, -8388608.0f, 8388607.0f));
+                    const auto offset = index * 3u;
+                    destination[offset] = static_cast<BYTE>(value & 0xff);
+                    destination[offset + 1] = static_cast<BYTE>((value >> 8) & 0xff);
+                    destination[offset + 2] = static_cast<BYTE>((value >> 16) & 0xff);
+                }
+            } else if (bits == 32) {
+                auto* output = reinterpret_cast<std::int32_t*>(destination);
+                for (std::size_t index = 0; index < total_samples; ++index) output[index] = static_cast<std::int32_t>(std::clamp(mix_buffer[index] * 2147483647.0f, -2147483648.0f, 2147483647.0f));
+            } else {
+                state->render->ReleaseBuffer(static_cast<UINT32>(frames_to_mix), AUDCLNT_BUFFERFLAGS_SILENT);
+                std::lock_guard lock(state->error_mutex);
+                state->error = "Unsupported WASAPI sample width (bits=" + std::to_string(bits) + ")";
+                state->available = false;
+                break;
             }
             local_hr = state->render->ReleaseBuffer(static_cast<UINT32>(frames_to_mix), mixed == 0 ? AUDCLNT_BUFFERFLAGS_SILENT : 0);
             if (FAILED(local_hr)) { std::lock_guard lock(state->error_mutex); state->error = hresult_error("IAudioRenderClient::ReleaseBuffer", local_hr); state->available = false; break; }
