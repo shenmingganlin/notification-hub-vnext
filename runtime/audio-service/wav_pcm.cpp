@@ -2,12 +2,19 @@
 
 #include <algorithm>
 #include <cstring>
+#include <string>
 
 namespace notification_hub::audio {
 namespace {
 std::uint16_t u16(const std::uint8_t* p) { return static_cast<std::uint16_t>(p[0] | (p[1] << 8)); }
 std::uint32_t u32(const std::uint8_t* p) { return static_cast<std::uint32_t>(p[0] | (p[1] << 8) | (p[2] << 16) | (p[3] << 24)); }
 WavResult fail(std::string code, std::string message) { return {false, {}, std::move(code), std::move(message)}; }
+}
+
+bool is_pcm_subformat(const std::uint8_t* guid) {
+    static constexpr std::uint8_t pcm_guid[16] = {0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x10, 0x00,
+                                                   0x80, 0x00, 0x00, 0xaa, 0x00, 0x38, 0x9b, 0x71};
+    return std::memcmp(guid, pcm_guid, sizeof(pcm_guid)) == 0;
 }
 
 WavResult parse_wav_pcm(std::span<const std::uint8_t> bytes) {
@@ -20,7 +27,11 @@ WavResult parse_wav_pcm(std::span<const std::uint8_t> bytes) {
         if (size > bytes.size() - pos) return fail("AUDIO_WAV_TRUNCATED", "WAV chunk exceeds input");
         const auto chunk = bytes.subspan(pos, size);
         if (std::memcmp(bytes.data() + pos - 8, "fmt ", 4) == 0) {
-            if (size < 16 || u16(chunk.data()) != 1) return fail("AUDIO_WAV_UNSUPPORTED", "only PCM format tag 1 is supported");
+            if (size < 16) return fail("AUDIO_WAV_UNSUPPORTED", "WAV format chunk is too small");
+            const auto format_tag = u16(chunk.data());
+            const bool classic_pcm = format_tag == 1;
+            const bool extensible_pcm = format_tag == 0xfffe && size >= 40 && u16(chunk.data() + 16) >= 22 && is_pcm_subformat(chunk.data() + 24);
+            if (!classic_pcm && !extensible_pcm) return fail("AUDIO_WAV_UNSUPPORTED", "only PCM WAV audio is supported");
             format.channels = u16(chunk.data() + 2); format.sample_rate = u32(chunk.data() + 4);
             format.block_align = u16(chunk.data() + 12); format.bits_per_sample = u16(chunk.data() + 14); have_fmt = true;
         } else if (std::memcmp(bytes.data() + pos - 8, "data", 4) == 0) data = chunk;
