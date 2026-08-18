@@ -8,14 +8,18 @@
 
 #include <algorithm>
 #include <chrono>
+#include <ctime>
 #include <cstdint>
 #include <fstream>
+#include <iomanip>
 #include <iostream>
 #include <mutex>
 #include <optional>
 #include <sstream>
 #include <string>
 #include <string_view>
+#include <thread>
+#include <atomic>
 #include <vector>
 
 #ifdef _WIN32
@@ -50,8 +54,20 @@ std::optional<float> number_field(std::string_view json, std::string_view name) 
     } catch (...) { return std::nullopt; }
 }
 std::string timestamp() {
-    return std::to_string(std::chrono::duration_cast<std::chrono::milliseconds>(
-        std::chrono::system_clock::now().time_since_epoch()).count());
+#ifdef _WIN32
+    const auto now = std::chrono::system_clock::now();
+    const auto time = std::chrono::system_clock::to_time_t(now);
+    std::tm utc{};
+    gmtime_s(&utc, &time);
+    const auto millis = std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()) % 1000;
+    char date[32]{};
+    std::strftime(date, sizeof(date), "%Y-%m-%dT%H:%M:%S", &utc);
+    std::ostringstream output;
+    output << date << '.' << std::setfill('0') << std::setw(3) << millis.count() << 'Z';
+    return output.str();
+#else
+    return "1970-01-01T00:00:00.000Z";
+#endif
 }
 #ifdef _WIN32
 bool write_all(HANDLE pipe, const std::vector<std::uint8_t>& bytes) {
@@ -102,9 +118,21 @@ int run_audio_engine(std::string_view pipe_name) {
     }
     transport::FrameDecoder decoder;
     std::uint64_t voice_sequence = 0;
-    bool shutdown = false;
+    std::atomic<bool> shutdown{false};
+    std::mutex pipe_write_mutex;
+    std::thread event_thread([&] {
+        while (!shutdown.load()) {
+            const auto finished = mixer.collect_finished();
+            for (const auto& voice : finished) {
+                const auto event = protocol::serialize_event("audio.voice_finished", "evt-audio-" + voice.voice_id, "trace-audio-" + voice.voice_id, timestamp(), "{\"voiceId\":\"" + voice.voice_id + "\",\"soundId\":\"" + voice.sound_id + "\",\"reason\":\"" + voice.reason + "\"}");
+                std::lock_guard lock(pipe_write_mutex);
+                if (!send_payload(pipe, event)) { shutdown = true; break; }
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        }
+    });
     std::uint8_t buffer[16 * 1024];
-    while (!shutdown) {
+    while (!shutdown.load()) {
         DWORD read = 0;
         if (!ReadFile(pipe, buffer, sizeof(buffer), &read, nullptr) || read == 0) break;
         decoder.append(std::string_view(reinterpret_cast<char*>(buffer), read));
@@ -157,14 +185,14 @@ int run_audio_engine(std::string_view pipe_name) {
             } else {
                 reply = error_response(request, "AUDIO_UNKNOWN_COMMAND", "unsupported audio engine command");
             }
-            if (!send_payload(pipe, reply)) { shutdown = true; break; }
-            const auto finished = mixer.collect_finished();
-            for (const auto& voice : finished) {
-                const auto event = protocol::serialize_event("audio.voice_finished", "evt-audio-" + voice.voice_id, "trace-audio-" + voice.voice_id, timestamp(), "{\"voiceId\":\"" + voice.voice_id + "\",\"soundId\":\"" + voice.sound_id + "\",\"reason\":\"" + voice.reason + "\"}");
-                if (!send_payload(pipe, event)) { shutdown = true; break; }
+            {
+                std::lock_guard lock(pipe_write_mutex);
+                if (!send_payload(pipe, reply)) { shutdown = true; break; }
             }
         }
     }
+    shutdown = true;
+    if (event_thread.joinable()) event_thread.join();
     output.stop();
     FlushFileBuffers(pipe); DisconnectNamedPipe(pipe); CloseHandle(pipe);
     if (SUCCEEDED(com_result)) CoUninitialize();
