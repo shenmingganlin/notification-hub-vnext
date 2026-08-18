@@ -391,11 +391,17 @@ export default class NotificationHubVNextPlugin {
     // mute, and lifecycle cleanup identical to real notifications.
     this.soundBackend = this.soundBackendFactory({
       platform: process.platform,
-      executablePath: path.resolve(ctx?.pluginDir || process.cwd(), 'runtime', 'notification-hub-audio-service.exe'),
+      executablePath: path.resolve(ctx?.pluginDir || process.cwd(), 'runtime', 'notification-hub-audio-engine.exe'),
       context: ctx
     });
     this.soundScheduler = this.soundSchedulerFactory({
       keyOf: resolveSoundPlaybackKey,
+      durationOf: (decision) => {
+        const soundId = typeof decision?.soundId === 'string' && decision.soundId.trim()
+          ? decision.soundId.trim()
+          : (typeof decision?.cue === 'string' && decision.cue.trim() ? `builtin.${decision.cue.trim()}` : null);
+        return soundId ? (this.soundAssetRegistry.get(soundId)?.durationMs ?? 0) : 0;
+      },
       play: ({ decision }) => playNotificationSound({
         decision,
         backend: this.soundBackend,

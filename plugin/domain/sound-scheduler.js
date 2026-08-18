@@ -19,11 +19,12 @@ export function createSoundScheduler({
   setTimer = (callback, delay) => setTimeout(callback, delay),
   clearTimer = (timer) => clearTimeout(timer),
   maxQueue = 64,
-  keyOf = defaultSoundKey
+  keyOf = defaultSoundKey,
+  durationOf = () => 0
 } = {}) {
   if (typeof play !== 'function') throw schedulerError('play must be a function');
-  if (typeof now !== 'function' || typeof setTimer !== 'function' || typeof clearTimer !== 'function' || typeof keyOf !== 'function') {
-    throw schedulerError('now, setTimer, clearTimer and keyOf must be functions');
+  if (typeof now !== 'function' || typeof setTimer !== 'function' || typeof clearTimer !== 'function' || typeof keyOf !== 'function' || typeof durationOf !== 'function') {
+    throw schedulerError('now, setTimer, clearTimer, keyOf and durationOf must be functions');
   }
   // Kept as a validated compatibility option. Sound playback is eager and no longer uses a wait queue.
   if (!Number.isInteger(maxQueue) || maxQueue < 1) throw schedulerError('maxQueue must be a positive integer');
@@ -46,15 +47,18 @@ export function createSoundScheduler({
     const awaitPlayback = context.awaitPlayback !== false;
     const onSettled = typeof context.onSettled === 'function' ? context.onSettled : null;
     let resolve;
+    let startedAt = now();
     const item = {
       soundKey: key,
       settled: false,
-      resolve: null
+      resolve: null,
+      releaseTimer: null
     };
     const promise = new Promise((settlePromise) => { resolve = settlePromise; });
     item.resolve = (value) => {
       if (item.settled) return;
       item.settled = true;
+      if (item.releaseTimer !== null) clearTimer(item.releaseTimer);
       removeActive(item);
       resolve(value);
     };
@@ -66,7 +70,15 @@ export function createSoundScheduler({
     if (decision.importance === 'critical' || decision.priority === 'critical') lastCriticalAt = now();
 
     const settle = (value) => {
-      item.resolve(value);
+      startedAt = now();
+      const duration = Number.isFinite(durationOf(decision, context)) ? Math.max(0, durationOf(decision, context)) : 0;
+      const elapsed = Math.max(0, now() - startedAt);
+      const release = () => {
+        item.releaseTimer = null;
+        item.resolve(value);
+      };
+      if (duration > elapsed) item.releaseTimer = setTimer(release, duration - elapsed);
+      else release();
       try { onSettled?.(value); } catch { /* diagnostic callbacks are observational */ }
     };
     const playbackPromise = Promise.resolve()
@@ -98,8 +110,7 @@ export function createSoundScheduler({
         });
         settle(settled);
         return settled;
-      })
-      .finally(() => removeActive(item));
+      });
     if (!awaitPlayback) {
       return Promise.resolve(result('started', {
         soundKey: item.soundKey,

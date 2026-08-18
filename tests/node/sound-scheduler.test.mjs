@@ -75,6 +75,28 @@ test('merges different built-in cues that resolve to the same Windows system sou
   assert.equal((await first).status, 'played');
 });
 
+test('keeps the same sound suppressed for its asset duration after eager playback is accepted', async () => {
+  const player = controlledPlayer();
+  const timers = [];
+  const scheduler = createSoundScheduler({
+    play: player.play.bind(player),
+    durationOf: () => 100,
+    setTimer(callback) { timers.push(callback); return timers.length; },
+    clearTimer() {}
+  });
+
+  const first = scheduler.schedule(decision('chat-incoming'), { stableKey: 'first' });
+  await flush();
+  player.resolveNext({ played: true, accepted: true, voiceId: 'voice-1' });
+  await flush();
+
+  const second = scheduler.schedule(decision('chat-incoming'), { stableKey: 'second' });
+  assert.equal(player.calls.length, 1);
+  assert.equal((await second).status, 'merged');
+  timers.shift()?.();
+  assert.equal((await first).status, 'played');
+});
+
 test('does not merge repeated cues when suppression is disabled', async () => {
   const player = controlledPlayer();
   const scheduler = createSoundScheduler({ play: player.play.bind(player) });
