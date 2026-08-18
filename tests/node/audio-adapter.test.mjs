@@ -168,7 +168,7 @@ test('custom soundId resolves through the asset registry and plays a relative as
     assert.equal(result.source, 'file');
     assert.equal(result.soundId, 'custom.tool.failed');
     assert.equal(result.path, soundPath);
-    assert.deepEqual(calls, [{ method: 'playFile', input: { path: soundPath, volume: 0.7 } }]);
+    assert.deepEqual(calls, [{ method: 'playFile', input: { path: soundPath, soundId: 'custom.tool.failed', volume: 0.7 } }]);
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
@@ -199,7 +199,7 @@ test('valid custom WAV path is played through the file backend', async () => {
     });
     assert.deepEqual(calls, [{
       method: 'playFile',
-      input: { path: soundPath, volume: 0.7 }
+      input: { path: soundPath, soundId: null, volume: 0.7 }
     }]);
   } finally {
     await rm(directory, { recursive: true, force: true });

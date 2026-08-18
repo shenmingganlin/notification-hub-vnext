@@ -19,7 +19,13 @@ export const COMMAND_TYPES = Object.freeze([
   'scene.set-mode',
   'config.update',
   'diagnostic.subscribe',
-  'shutdown'
+  'shutdown',
+  'audio.health',
+  'audio.cue',
+  'audio.load',
+  'audio.play',
+  'audio.stop',
+  'audio.unload'
 ]);
 
 export const RESPONSE_TYPES = Object.freeze(['ack', 'error']);

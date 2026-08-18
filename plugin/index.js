@@ -15,7 +15,8 @@ import {
 import { createSoundScheduler } from './domain/sound-scheduler.js';
 import path from 'node:path';
 import { mkdir, rename, rm, writeFile } from 'node:fs/promises';
-import { createWindowsAudioBackend, playNotificationSound, resolveSoundPlaybackKey } from './domain/audio-adapter.js';
+import { playNotificationSound, resolveSoundPlaybackKey } from './domain/audio-adapter.js';
+import { createNativeAudioBackend } from './domain/native-audio-backend.js';
 import { createSoundAssetRegistry } from './domain/sound-asset-registry.js';
 import { createSoundDiagnostic } from './domain/sound-diagnostic.js';
 import { createSoundRuleExplanation } from './domain/sound-rule-explanation.js';
@@ -326,7 +327,7 @@ export default class NotificationHubVNextPlugin {
     notificationPersistenceFactory = createNotificationPersistenceFromHostContext,
     settingsPersistenceFactory = createSettingsPersistenceFromHostContext,
     soundSettingsPersistenceFactory = createSoundSettingsPersistenceFromHostContext,
-    soundBackendFactory = createWindowsAudioBackend,
+    soundBackendFactory = (options) => createNativeAudioBackend(options),
     soundPreviewBackendFactory = soundBackendFactory,
     soundFilePickerFactory = createWindowsSaveFilePicker,
     soundSchedulerFactory = createSoundScheduler,
@@ -378,7 +379,11 @@ export default class NotificationHubVNextPlugin {
     // Settings tests intentionally share the production scheduler and backend.
     // This keeps active duplicate suppression, physical resource keys, global
     // mute, and lifecycle cleanup identical to real notifications.
-    this.soundBackend = this.soundBackendFactory({ platform: process.platform, persistent: false });
+    this.soundBackend = this.soundBackendFactory({
+      platform: process.platform,
+      executablePath: path.resolve(ctx?.pluginDir || process.cwd(), 'runtime', 'notification-hub-audio-service.exe'),
+      context: ctx
+    });
     this.soundScheduler = this.soundSchedulerFactory({
       keyOf: resolveSoundPlaybackKey,
       play: ({ decision }) => playNotificationSound({
@@ -506,6 +511,11 @@ export default class NotificationHubVNextPlugin {
     await this.restoreSoundSettings();
     await this.restoreVisualSettings();
     await this.restoreEventPresentationSettings();
+    // Start the native audio service before the first notification. This is
+    // deliberately best-effort: a missing audio device must not block cards.
+    void Promise.resolve(this.soundBackend?.warmup?.()).catch((error) => {
+      this.recordSoundDiagnostic(error, 'native-service-start');
+    });
     await this.startNotificationPersistence();
     await this.restoreNotificationDisplaySettings();
     await this.restoreSidebarDisplaySettings();
@@ -578,6 +588,7 @@ export default class NotificationHubVNextPlugin {
     await this.stopNotificationDisplaySettingsPersistence();
     await this.stopSidebarDisplaySettingsPersistence();
     await this.stopSettingsRuntimeSync();
+    await this.soundBackend?.dispose?.();
     this.notificationTestToolCleanup?.();
     this.notificationTestToolCleanup = null;
     this.notificationTestCapabilityCleanup?.();

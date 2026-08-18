@@ -165,10 +165,10 @@ async function playCue(backend, cue, volume, reason = 'played', diagnostic = nul
       path: '',
       volume,
       reason: deviceUnavailable ? 'audio-device-unavailable' : played ? reason : 'playback-failed',
-      diagnostic: deviceUnavailable ? 'AUDIO_DEVICE_UNAVAILABLE' : played ? diagnostic : 'SOUND_PLAYBACK_FAILED',
+      diagnostic: deviceUnavailable ? 'AUDIO_DEVICE_UNAVAILABLE' : played ? diagnostic : (playback?.diagnostic ?? 'SOUND_PLAYBACK_FAILED'),
       muted: playback?.muted === true
     });
-  } catch {
+  } catch (error) {
     return playbackResult({
       played: false,
       source: 'cue',
@@ -176,7 +176,8 @@ async function playCue(backend, cue, volume, reason = 'played', diagnostic = nul
       path: '',
       volume,
       reason: 'playback-failed',
-      diagnostic: 'SOUND_PLAYBACK_FAILED'
+      diagnostic: error?.code ?? 'SOUND_PLAYBACK_FAILED',
+      error: error?.message ?? String(error)
     });
   }
 }
@@ -603,7 +604,7 @@ export async function playNotificationSound({ decision, backend, options = {} } 
         });
       }
       try {
-        const playback = await backend.playFile({ path: customPath, volume });
+        const playback = await backend.playFile({ path: customPath, soundId, volume });
         const played = playback === true || playback?.played === true;
         const deviceUnavailable = playback?.deviceAvailable === false;
         return playbackResult({
@@ -614,9 +615,9 @@ export async function playNotificationSound({ decision, backend, options = {} } 
           path: customPath,
           volume,
           reason: deviceUnavailable ? 'audio-device-unavailable' : played ? 'played' : 'playback-failed',
-          diagnostic: deviceUnavailable ? 'AUDIO_DEVICE_UNAVAILABLE' : played ? null : 'SOUND_PLAYBACK_FAILED'
+          diagnostic: deviceUnavailable ? 'AUDIO_DEVICE_UNAVAILABLE' : played ? null : (playback?.diagnostic ?? 'SOUND_PLAYBACK_FAILED')
         });
-      } catch {
+      } catch (error) {
         return playbackResult({
           played: false,
           source: 'file',
@@ -625,7 +626,8 @@ export async function playNotificationSound({ decision, backend, options = {} } 
           path: customPath,
           volume,
           reason: 'playback-failed',
-          diagnostic: 'SOUND_PLAYBACK_FAILED'
+          diagnostic: error?.code ?? 'SOUND_PLAYBACK_FAILED',
+          error: error?.message ?? String(error)
         });
       }
     }
