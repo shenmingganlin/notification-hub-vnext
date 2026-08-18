@@ -1,5 +1,6 @@
 import { createEffectRules, resolveEffectRule } from './effect-rules.js';
 import { createCardChannelPolicies } from './card-runtime-policy.js';
+import { createBehaviorChannels, resolveBehaviorChannel } from './behavior-channel.js';
 
 export const BEHAVIOR_PROFILE_IDS = Object.freeze(['stack', 'ticker', 'popup']);
 
@@ -86,7 +87,8 @@ export function createPresentationProfile(input = {}) {
   }
   const visualRules = createEffectRules(input.visualRules ?? [], 'visual');
   const channelPolicies = createCardChannelPolicies(input.channelPolicies ?? {});
-  return freezeDeep({ version: 'v1', global, categories, events, visualRules, channelPolicies });
+  const channels = createBehaviorChannels(input.channels ?? {});
+  return freezeDeep({ version: 'v1', global, categories, events, visualRules, channelPolicies, channels });
 }
 
 export function resolvePresentationBinding({ eventId, categoryId, profile, defaults } = {}) {
@@ -95,8 +97,11 @@ export function resolvePresentationBinding({ eventId, categoryId, profile, defau
   const category = requiredText('categoryId', categoryId);
   const binding = resolvedProfile.events[id] ?? resolvedProfile.categories[category] ?? resolvedProfile.global;
   const visualRule = resolveEffectRule(resolvedProfile.visualRules, id, 'visual');
+  const hasDefinedChannel = Object.prototype.hasOwnProperty.call(resolvedProfile.channels, binding.behaviorChannelId);
+  const channel = hasDefinedChannel ? resolveBehaviorChannel({ channelId: binding.behaviorChannelId, channels: resolvedProfile.channels }) : null;
   return freezeDeep({
     ...clone(binding),
+    ...(channel ? { behaviorProfileId: channel.behaviorProfileId, behaviorChannelId: channel.channelId, channelPolicyId: channel.policy.policyId } : {}),
     ...(visualRule ? { visualProfileId: visualRule.effect.preset, visualRuleId: visualRule.id, visualRulePreset: visualRule.effect.preset, visualRuleIntensity: visualRule.effect.intensity } : {}),
     eventId: id,
     categoryId: category,

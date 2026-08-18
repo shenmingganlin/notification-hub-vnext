@@ -2,6 +2,7 @@ import { getEventDefinition } from './notification-event-catalog.js';
 import { createCanonicalEvent, canonicalEventFromLegacy } from './notification-semantics.js';
 import { resolvePresentationBinding } from './notification-presentation-profile.js';
 import { resolveCardChannelPolicy } from './card-runtime-policy.js';
+import { resolveBehaviorChannel } from './behavior-channel.js';
 
 function selectorError(code, message, field, details = {}) {
   const error = new Error(message);
@@ -42,7 +43,9 @@ export function createPresentationSelector({ record = {}, canonicalEvent = null,
   const importance = record?.importance === 'high' || record?.importance === 'critical' || record?.importance === 'important'
     ? 'important'
     : (record?.importance === true ? 'important' : 'normal');
-  const channelPolicy = resolveCardChannelPolicy({ eventId: normalizedEvent.eventId, categoryId: normalizedEvent.categoryId, binding, profile: profile ?? {} });
+  const hasDefinedChannel = Boolean(profile?.channels && Object.prototype.hasOwnProperty.call(profile.channels, binding.behaviorChannelId));
+  const channel = hasDefinedChannel ? resolveBehaviorChannel({ channelId: binding.behaviorChannelId, channels: profile.channels }) : null;
+  const channelPolicy = channel?.policy ?? resolveCardChannelPolicy({ eventId: normalizedEvent.eventId, categoryId: normalizedEvent.categoryId, binding, profile: profile ?? {} });
   return freezeDeep({
     version: 'v1',
     notificationId: record?.notificationId ?? null,
@@ -68,8 +71,8 @@ export function createPresentationSelector({ record = {}, canonicalEvent = null,
       eventId: normalizedEvent.eventId,
       categoryId: normalizedEvent.categoryId,
       eventTypeId: normalizedEvent.eventTypeId,
-      behaviorProfileId: binding.behaviorProfileId,
-      channelId: binding.behaviorChannelId,
+      behaviorProfileId: channel?.behaviorProfileId ?? binding.behaviorProfileId,
+      channelId: channel?.channelId ?? binding.behaviorChannelId,
       channelPolicyId: channelPolicy.policyId,
       channelPolicy
     },

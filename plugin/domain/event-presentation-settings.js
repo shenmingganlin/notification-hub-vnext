@@ -3,6 +3,7 @@ import { createImportanceSettings } from './notification-importance.js';
 import { createEffectRules } from './effect-rules.js';
 import { createPresentationBinding, createPresentationProfile } from './notification-presentation-profile.js';
 import { createCardChannelPolicies } from './card-runtime-policy.js';
+import { createBehaviorChannels } from './behavior-channel.js';
 
 export const EVENT_PRESENTATION_SETTINGS_VERSION = 1;
 
@@ -69,12 +70,14 @@ export function createEventPresentationSettings(input = {}) {
   const importanceKeywords = createImportanceSettings(input.importanceKeywords ?? {});
   const visualRules = createEffectRules(input.visualRules ?? [], 'visual');
   const channelPolicies = createCardChannelPolicies(input.channelPolicies ?? {});
+  const channels = createBehaviorChannels(input.channels ?? {});
   const settings = {
     version: EVENT_PRESENTATION_SETTINGS_VERSION,
     global,
     categories,
     events,
     channelPolicies,
+    channels,
     visualRules,
     importanceKeywords
   };
@@ -106,6 +109,7 @@ export function updateEventPresentationSettings(settings, patch = {}) {
       }
     }),
     ...(patch.channelPolicies === undefined ? {} : { channelPolicies: createCardChannelPolicies(patch.channelPolicies) }),
+    ...(patch.channels === undefined ? {} : { channels: createBehaviorChannels(patch.channels) }),
     ...(patch.visualRules === undefined ? {} : { visualRules: createEffectRules(patch.visualRules, 'visual') }),
     ...(patch.importanceKeywords === undefined ? {} : { importanceKeywords: createImportanceSettings(patch.importanceKeywords) })
   };
