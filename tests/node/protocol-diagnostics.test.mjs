@@ -42,7 +42,15 @@ test('protocol exports the planned command set', () => {
     'scene.set-mode',
     'config.update',
     'diagnostic.subscribe',
-    'shutdown'
+    'shutdown',
+    'audio.health',
+    'audio.cue',
+    'audio.load',
+    'audio.play',
+    'audio.stop',
+    'audio.stop_all',
+    'audio.unload',
+    'audio.shutdown'
   ]);
 });
 
@@ -102,8 +110,8 @@ test('ack and error responses correlate to the request', () => {
   assert.equal(error.payload.retryable, true);
 });
 
-test('scene changed events use the versioned event envelope', () => {
-  assert.deepEqual(EVENT_TYPES, ['scene.changed']);
+test('scene changed and audio voice events use the versioned event envelope', () => {
+  assert.deepEqual(EVENT_TYPES, ['scene.changed', 'audio.voice_finished']);
   const event = createEvent({
     eventType: 'scene.changed',
     requestId: 'evt-scene',

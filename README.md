@@ -119,6 +119,20 @@ Notification Center 仍保留两排筛选：第一排按分类，第二排按通
 
 The repository preset targets the confirmed `Visual Studio 18 2026` x64 generator.
 
+## Audio formats
+
+The resident Audio Engine decodes and mixes these formats on Windows through Media Foundation:
+
+```text
+.wav  PCM WAV (including 16-bit and 24-bit PCM)
+.mp3  MP3
+.m4a  AAC-LC in an MP4/M4A container
+.aac  AAC/ADTS
+.wma  WMA
+```
+
+Compressed audio is decoded to float32 PCM and then follows the same AssetCache, Mixer, independent voice, and WASAPI path as WAV. The current matrix has been verified with real Hana playback for WAV, MP3, M4A, AAC, and WMA samples. Unsupported or damaged media remains diagnostic-only and may use the legacy Windows fallback; audio failure must not block notification delivery, settings persistence, or plugin shutdown. Support for unusual codecs and system-specific Media Foundation extensions remains conditional on the codecs installed on Windows.
+
 ## vNext and legacy isolation
 
 The vNext package uses the plugin ID `notification-hub-vnext`. Its Native Runtime is loaded from the installed vNext plugin directory, its SceneState and recovery files use the vNext `dataDir`, and each host instance uses a `notification-hub-vnext-*` Named Pipe. The package does not contain the legacy plugin, legacy helper, or legacy data files. Installing it by dragging the generated ZIP into Hana therefore leaves the existing `notification-hub` plugin untouched; both plugins may run concurrently.
