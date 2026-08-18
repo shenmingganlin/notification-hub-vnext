@@ -543,19 +543,17 @@ export default class NotificationHubVNextPlugin {
     const legacyBackend = this.soundBackend;
     const engineBackend = this.audioEngineBackendFactory({ host: this.audioEngineHost, client: this.audioEngineHost.client, platform: process.platform });
     await engineBackend.warmup?.();
-    const isPcmWav = async (filePath) => {
-      if (typeof filePath !== 'string' || path.extname(filePath).toLowerCase() !== '.wav') return false;
-      try {
-        const header = await readFile(filePath, { encoding: null, flag: 'r' });
-        return header.length >= 12 && header.subarray(0, 4).toString('ascii') === 'RIFF' && header.subarray(8, 12).toString('ascii') === 'WAVE';
-      } catch {
-        return false;
-      }
-    };
     this.soundBackend = Object.freeze({
       playCue: (options) => engineBackend.playCue(options),
-      playFile: async (options) => (await isPcmWav(options?.path)) ? engineBackend.playFile(options) : legacyBackend.playFile(options),
-      load: async (soundId, filePath, fingerprint) => (await isPcmWav(filePath)) ? engineBackend.load(soundId, filePath, fingerprint) : Promise.resolve({ loaded: true, delegated: true }),
+      playFile: async (options) => {
+        try {
+          return await engineBackend.playFile(options);
+        } catch (error) {
+          this.recordSoundDiagnostic(error, 'audio-engine-media-fallback');
+          return legacyBackend.playFile(options);
+        }
+      },
+      load: (soundId, filePath, fingerprint) => engineBackend.load(soundId, filePath, fingerprint),
       unload: (soundId) => engineBackend.unload(soundId),
       warmup: () => engineBackend.warmup?.(),
       dispose: async () => {

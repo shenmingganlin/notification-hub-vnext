@@ -46,6 +46,7 @@ add_executable(notification-hub-audio-engine
   audio-engine/main.cpp
   audio-engine/engine.cpp
   audio-engine/asset-cache.cpp
+  audio-engine/media-decoder.cpp
   audio-engine/mixer.cpp
   audio-engine/device-output.cpp
   audio-service/wav_pcm.cpp
@@ -55,7 +56,7 @@ add_executable(notification-hub-audio-engine
 target_include_directories(notification-hub-audio-engine PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_features(notification-hub-audio-engine PRIVATE cxx_std_20)
 if (WIN32)
-  target_link_libraries(notification-hub-audio-engine PRIVATE ole32 mmdevapi avrt)
+  target_link_libraries(notification-hub-audio-engine PRIVATE ole32 mmdevapi avrt mfplat mfreadwrite mfuuid)
 endif()
 add_test(NAME audio_engine_self_test COMMAND notification-hub-audio-engine --self-test)
 

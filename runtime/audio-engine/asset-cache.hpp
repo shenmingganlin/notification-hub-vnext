@@ -37,6 +37,7 @@ public:
                         std::size_t max_asset_bytes = 16u * 1024u * 1024u);
 
     CacheResult load(const std::string& sound_id, const std::filesystem::path& path);
+    CacheResult load_decoded(const std::string& sound_id, std::uint32_t sample_rate, std::uint16_t channels, std::vector<float> samples, std::uint64_t source_fingerprint = 0);
     std::shared_ptr<const PcmAsset> find(const std::string& sound_id) const;
     bool unload(const std::string& sound_id);
     void clear();

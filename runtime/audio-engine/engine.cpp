@@ -3,11 +3,13 @@
 #include "asset-cache.hpp"
 #include "device-output.hpp"
 #include "mixer.hpp"
+#include "media-decoder.hpp"
 #include "../protocol/message.hpp"
 #include "../transport/frame.hpp"
 
 #include <algorithm>
 #include <chrono>
+#include <cstring>
 #include <ctime>
 #include <cstdint>
 #include <fstream>
@@ -157,7 +159,18 @@ int run_audio_engine(std::string_view pipe_name) {
             } else if (request.type == "audio.load") {
                 const auto id = field(request.payload_json, "soundId");
                 const auto path = field(request.payload_json, "path");
-                const auto loaded = cache.load(id, std::filesystem::u8path(path));
+                const auto utf8_file = std::filesystem::u8path(path);
+                CacheResult loaded;
+                std::ifstream probe(utf8_file, std::ios::binary);
+                char signature[12]{};
+                probe.read(signature, sizeof(signature));
+                const bool is_wave = probe.gcount() >= 12 && std::memcmp(signature, "RIFF", 4) == 0 && std::memcmp(signature + 8, "WAVE", 4) == 0;
+                if (is_wave) {
+                    loaded = cache.load(id, utf8_file);
+                } else {
+                    const auto decoded = decode_media_file(utf8_file);
+                    loaded = decoded.ok ? cache.load_decoded(id, decoded.sample_rate, decoded.channels, decoded.samples) : CacheResult{false, decoded.code, decoded.message, nullptr};
+                }
                 if (!loaded.ok) reply = error_response(request, loaded.code, loaded.message);
                 else { std::ostringstream result; result << "{\"loaded\":true,\"durationMs\":" << (loaded.asset->frame_count() * 1000 / loaded.asset->sample_rate) << "}"; reply = response(request, result.str()); }
             } else if (request.type == "audio.unload") {

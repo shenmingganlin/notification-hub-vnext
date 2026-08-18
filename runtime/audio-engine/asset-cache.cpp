@@ -66,6 +66,19 @@ std::vector<float> to_float(const notification_hub::audio::PcmAsset& source) {
 AssetCache::AssetCache(std::size_t max_cached_bytes, std::size_t max_asset_bytes)
     : max_cached_bytes_(max_cached_bytes), max_asset_bytes_(max_asset_bytes) {}
 
+CacheResult AssetCache::load_decoded(const std::string& sound_id, std::uint32_t sample_rate, std::uint16_t channels, std::vector<float> samples, std::uint64_t source_fingerprint) {
+    if (sound_id.empty()) return fail("AUDIO_SOUND_ID_INVALID", "sound_id must not be empty");
+    if (!sample_rate || !channels || samples.empty() || samples.size() % channels) return fail("AUDIO_MEDIA_FORMAT_INVALID", "decoded PCM layout is invalid");
+    if (samples.size() * sizeof(float) > max_asset_bytes_) return fail("AUDIO_ASSET_LIMIT_REACHED", "decoded audio exceeds the per-asset cache limit");
+    const auto existing = assets_.find(sound_id);
+    const auto existing_bytes = existing == assets_.end() ? 0u : existing->second->byte_size();
+    if (cached_bytes_ - existing_bytes + samples.size() * sizeof(float) > max_cached_bytes_) return fail("AUDIO_CACHE_LIMIT_REACHED", "audio cache limit reached");
+    auto asset = std::make_shared<PcmAsset>();
+    asset->sound_id = sound_id; asset->sample_rate = sample_rate; asset->channels = channels; asset->bits_per_sample = 32; asset->samples = std::move(samples); asset->fingerprint = source_fingerprint;
+    cached_bytes_ = cached_bytes_ - existing_bytes + asset->byte_size(); assets_[sound_id] = asset;
+    return {true, {}, {}, std::move(asset)};
+}
+
 CacheResult AssetCache::load(const std::string& sound_id, const std::filesystem::path& path) {
     if (sound_id.empty()) return fail("AUDIO_SOUND_ID_INVALID", "sound_id must not be empty");
     const auto path_text = path.string();
