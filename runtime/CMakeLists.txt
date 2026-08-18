@@ -7,22 +7,6 @@ function(notification_hub_enable_size_optimization target)
   endif()
 endfunction()
 
-add_executable(notification-hub-audio-service
-  audio-service/main.cpp
-  audio-service/service.cpp
-  audio-service/wav_pcm.cpp
-  audio-service/audio_output.cpp
-  protocol/message.cpp
-  transport/frame.cpp
-)
-target_include_directories(notification-hub-audio-service PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-target_compile_features(notification-hub-audio-service PRIVATE cxx_std_20)
-if (WIN32)
-  target_link_libraries(notification-hub-audio-service PRIVATE ole32 mmdevapi avrt)
-endif()
-notification_hub_enable_size_optimization(notification-hub-audio-service)
-add_test(NAME runtime_audio_service_self_test COMMAND notification-hub-audio-service --self-test)
-
 add_executable(notification-hub-audio-engine-asset-cache-test
   ../tests/native/audio-engine-asset-cache.test.cpp
   audio-engine/asset-cache.cpp
