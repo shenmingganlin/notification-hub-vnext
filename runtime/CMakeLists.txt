@@ -30,6 +30,18 @@ target_include_directories(notification-hub-audio-engine-mixer-test PRIVATE ${CM
 target_compile_features(notification-hub-audio-engine-mixer-test PRIVATE cxx_std_20)
 add_test(NAME audio_engine_mixer COMMAND notification-hub-audio-engine-mixer-test)
 
+add_executable(notification-hub-audio-engine-device-output-test
+  ../tests/native/audio-engine-device-output.test.cpp
+  audio-engine/device-output.cpp
+  audio-engine/mixer.cpp
+)
+target_include_directories(notification-hub-audio-engine-device-output-test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_SOURCE_DIR})
+target_compile_features(notification-hub-audio-engine-device-output-test PRIVATE cxx_std_20)
+if (WIN32)
+  target_link_libraries(notification-hub-audio-engine-device-output-test PRIVATE ole32 mmdevapi avrt)
+endif()
+add_test(NAME audio_engine_device_output COMMAND notification-hub-audio-engine-device-output-test)
+
 add_executable(notification-hub-runtime
   app/main.cpp
   diagnostics/event.cpp
