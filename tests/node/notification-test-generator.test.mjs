@@ -4,7 +4,8 @@ import test from 'node:test';
 import {
   NOTIFICATION_TEST_EVENTS,
   createNotificationTestNotifications,
-  normalizeNotificationTestInput
+  normalizeNotificationTestInput,
+  createParallelCardSample
 } from '../../plugin/domain/notification-test-generator.js';
 
 test('notification test generator normalizes bounded input and lists semantic events', () => {
@@ -34,6 +35,14 @@ test('notification test generator emits valid source events and user-facing noti
   assert.equal(notifications[3].event.stopReason, 'tool_error');
   assert.equal(notifications[4].event.stopReason, 'timeout');
   assert.equal(notifications[5].event.type, 'session_unhealthy_warning');
+});
+
+test('parallel card sample creates independent reply and tool channels', () => {
+  const sample = createParallelCardSample({ count: 3, idFactory: (index, kind) => `${kind}-${index}` });
+  assert.equal(sample.length, 6);
+  assert.deepEqual(sample.slice(0, 3).map((entry) => entry.metadata.channelId), ['stack.reply', 'stack.reply', 'stack.reply']);
+  assert.deepEqual(sample.slice(3).map((entry) => entry.metadata.channelId), ['stack.tool', 'stack.tool', 'stack.tool']);
+  assert.equal(new Set(sample.map((entry) => entry.notificationId)).size, 6);
 });
 
 test('notification test generator annotates every card with event semantics and ordinal', () => {

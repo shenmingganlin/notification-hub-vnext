@@ -139,6 +139,28 @@ export function createNotificationTestNotifications(input = {}, { now = () => Da
   }));
 }
 
+export function createParallelCardSample({ count = 4, now = () => Date.now(), idFactory } = {}) {
+  if (!Number.isInteger(count) || count < 1 || count > 100) throw generatorError('NOTIFICATION_SAMPLE_COUNT_INVALID', 'count must be an integer from 1 to 100');
+  if (typeof now !== 'function' || (idFactory !== undefined && typeof idFactory !== 'function')) throw generatorError('NOTIFICATION_SAMPLE_FACTORY_INVALID', 'now and idFactory must be functions');
+  const makeId = idFactory ?? ((index, kind) => `nh-card-sample-${kind}-${now().toString(36)}-${index + 1}`);
+  const make = (index, kind, eventId, channelId, title) => {
+    const id = String(makeId(index, kind));
+    return Object.freeze({
+      notificationId: id,
+      title,
+      content: `并行卡片样板 · ${title} · ${index + 1}/${count}`,
+      type: kind === 'reply' ? 'assistant_message' : 'tool_result',
+      source: kind === 'reply' ? 'notification-hub.sample.reply' : 'notification-hub.sample.tool',
+      importance: 'normal',
+      metadata: Object.freeze({ sample: 'parallel-card-channels', sampleKind: kind, eventId, channelId, test: true })
+    });
+  };
+  return Object.freeze([
+    ...Array.from({ length: count }, (_, index) => make(index, 'reply', 'chat.assistant_reply.completed', 'stack.reply', '助手回复极简卡片')),
+    ...Array.from({ length: count }, (_, index) => make(index, 'tool', 'tool.execution.succeeded', 'stack.tool', '工具事件极简卡片'))
+  ]);
+}
+
 export function getNotificationTestEventDefinition(eventName) {
   return TEST_EVENT_DEFINITIONS[eventName] ?? null;
 }
