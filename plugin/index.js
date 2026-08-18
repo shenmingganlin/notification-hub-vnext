@@ -14,9 +14,11 @@ import {
 } from './domain/sound-settings-persistence-config.js';
 import { createSoundScheduler } from './domain/sound-scheduler.js';
 import path from 'node:path';
+import { existsSync } from 'node:fs';
 import { mkdir, rename, rm, writeFile } from 'node:fs/promises';
 import { playNotificationSound, resolveSoundPlaybackKey } from './domain/audio-adapter.js';
 import { createNativeAudioBackend } from './domain/native-audio-backend.js';
+import { createAudioEngineHost } from './domain/audio-engine-host.js';
 import { createSoundAssetRegistry } from './domain/sound-asset-registry.js';
 import { createSoundDiagnostic } from './domain/sound-diagnostic.js';
 import { createSoundRuleExplanation } from './domain/sound-rule-explanation.js';
@@ -335,7 +337,8 @@ export default class NotificationHubVNextPlugin {
     notificationDisplaySettingsPersistenceFactory = createNotificationDisplaySettingsPersistence,
     sidebarDisplaySettingsPersistenceFactory = createSidebarDisplaySettingsPersistence,
     visualSettingsPersistenceFactory = createVisualSettingsPersistenceFromHostContext,
-    eventPresentationSettingsPersistenceFactory = createEventPresentationSettingsPersistenceFromHostContext
+    eventPresentationSettingsPersistenceFactory = createEventPresentationSettingsPersistenceFromHostContext,
+    audioEngineHostFactory = (options) => createAudioEngineHost(options)
   } = {}) {
     this.ctx = ctx;
     this.adapterFactory = adapterFactory;
@@ -351,6 +354,9 @@ export default class NotificationHubVNextPlugin {
     this.sidebarDisplaySettingsPersistenceFactory = sidebarDisplaySettingsPersistenceFactory;
     this.visualSettingsPersistenceFactory = visualSettingsPersistenceFactory;
     this.eventPresentationSettingsPersistenceFactory = eventPresentationSettingsPersistenceFactory;
+    this.audioEngineHostFactory = audioEngineHostFactory;
+    this.audioEngineHost = null;
+    this.audioEngineStatus = { state: 'disabled', reason: 'engine-binary-not-present' };
     this.runtimeHost = null;
     this.notificationStore = new NotificationStore();
     this.settingsStore = new SettingsStore();
@@ -448,6 +454,7 @@ export default class NotificationHubVNextPlugin {
       updateLayoutSettings: this.updateLayoutSettings.bind(this),
       getSettingsStatus: this.getSettingsStatus.bind(this),
       getSoundSettingsStatus: this.getSoundSettingsStatus.bind(this),
+      getAudioEngineStatus: this.getAudioEngineStatus.bind(this),
       clearSoundDiagnostics: this.clearSoundDiagnostics.bind(this),
       exportSoundDiagnostics: this.exportSoundDiagnostics.bind(this),
       getSoundAssetStatus: this.getSoundAssetStatus.bind(this),
@@ -498,6 +505,42 @@ export default class NotificationHubVNextPlugin {
     };
   }
 
+  getAudioEngineStatus() {
+    return {
+      ...this.audioEngineStatus,
+      host: this.audioEngineHost?.getStatus?.() ?? null
+    };
+  }
+
+  async startAudioEngineHost() {
+    if (process.platform !== 'win32') {
+      this.audioEngineStatus = { state: 'disabled', reason: 'unsupported-platform' };
+      return this.audioEngineStatus;
+    }
+    const executablePath = path.resolve(this.ctx?.pluginDir || process.cwd(), 'runtime', 'notification-hub-audio-engine.exe');
+    if (!existsSync(executablePath)) {
+      this.audioEngineStatus = { state: 'disabled', reason: 'engine-binary-not-present', executablePath };
+      return this.audioEngineStatus;
+    }
+    try {
+      this.audioEngineHost = this.audioEngineHostFactory({ executablePath, pluginDir: this.ctx?.pluginDir || process.cwd() });
+      this.audioEngineHost.on?.('diagnostic', (diagnostic) => this.recordSoundDiagnostic({ code: diagnostic.code, message: diagnostic.message, details: diagnostic.details }, 'audio-engine'));
+      await this.audioEngineHost.start();
+      this.audioEngineStatus = { state: 'ready', executablePath, health: this.audioEngineHost.getStatus().health };
+    } catch (error) {
+      this.audioEngineStatus = { state: 'failed', executablePath, code: error.code ?? 'AUDIO_ENGINE_START_FAILED', message: error.message, details: error.details ?? {} };
+      this.recordSoundDiagnostic(error, 'audio-engine-start');
+    }
+    return this.audioEngineStatus;
+  }
+
+  async stopAudioEngineHost() {
+    if (!this.audioEngineHost) return;
+    await this.audioEngineHost.dispose().catch((error) => this.recordSoundDiagnostic(error, 'audio-engine-stop'));
+    this.audioEngineHost = null;
+    this.audioEngineStatus = { state: 'stopped' };
+  }
+
   async onload() {
     this.ctx._notificationHubVNextPlugin = this.runtimeTestApi;
     this.ctx._notificationHubVNextRuntimeApi = this.runtimeTestApi;
@@ -507,6 +550,7 @@ export default class NotificationHubVNextPlugin {
     this.ctx._notificationHubVNextEventPresentationSettingsStore = this.eventPresentationSettingsStore;
     this.ctx._notificationHubVNextSettingsApi = this.runtimeTestApi;
     this.runtimeError = null;
+    await this.startAudioEngineHost();
     await this.restoreSoundAssets();
     await this.restoreSoundSettings();
     await this.restoreVisualSettings();
@@ -589,6 +633,7 @@ export default class NotificationHubVNextPlugin {
     await this.stopSidebarDisplaySettingsPersistence();
     await this.stopSettingsRuntimeSync();
     await this.soundBackend?.dispose?.();
+    await this.stopAudioEngineHost();
     this.notificationTestToolCleanup?.();
     this.notificationTestToolCleanup = null;
     this.notificationTestCapabilityCleanup?.();
