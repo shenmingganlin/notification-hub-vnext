@@ -115,7 +115,7 @@ async function isPathInsideRealRoot(root, target) {
   }
 }
 
-function playbackResult({ played, source, cue, soundId, path: soundPath, volume, reason, diagnostic, voiceId = null, muted = false }) {
+function playbackResult({ played, source, cue, soundId, path: soundPath, volume, reason, diagnostic, voiceId = null, durationMs = 0, muted = false }) {
   return freezeResult({
     attempted: true,
     played,
@@ -127,6 +127,7 @@ function playbackResult({ played, source, cue, soundId, path: soundPath, volume,
     reason,
     diagnostic,
     ...(voiceId ? { voiceId } : {}),
+    ...(Number.isFinite(durationMs) && durationMs > 0 ? { durationMs } : {}),
     ...(muted ? { muted: true } : {})
   });
 }
@@ -627,7 +628,8 @@ export async function playNotificationSound({ decision, backend, options = {} } 
           volume,
           reason: deviceUnavailable ? 'audio-device-unavailable' : played ? 'played' : 'playback-failed',
           diagnostic: deviceUnavailable ? 'AUDIO_DEVICE_UNAVAILABLE' : played ? null : (playback?.diagnostic ?? 'SOUND_PLAYBACK_FAILED'),
-          voiceId: playback?.voiceId ?? null
+          voiceId: playback?.voiceId ?? null,
+          durationMs: playback?.durationMs ?? 0
         });
       } catch (error) {
         return playbackResult({

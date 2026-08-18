@@ -71,7 +71,11 @@ export function createSoundScheduler({
 
     const settle = (value) => {
       startedAt = now();
-      const duration = Number.isFinite(durationOf(decision, context)) ? Math.max(0, durationOf(decision, context)) : 0;
+      const reportedDuration = value?.playback?.durationMs;
+      const configuredDuration = durationOf(decision, context, value);
+      const duration = Number.isFinite(reportedDuration) && reportedDuration >= 0
+        ? reportedDuration
+        : (Number.isFinite(configuredDuration) ? Math.max(0, configuredDuration) : 0);
       const elapsed = Math.max(0, now() - startedAt);
       const release = () => {
         item.releaseTimer = null;

@@ -470,6 +470,58 @@ test('vNext sound settings test merges same sound while the first preview is act
   }
 });
 
+test('vNext sound settings test suppresses rapid accepted playback for the asset duration', async () => {
+  const ctx = context({ notificationPersistenceEnabled: false, soundSettingsPersistenceEnabled: false });
+  const calls = [];
+  const plugin = new NotificationHubVNextPlugin(ctx, {
+    adapterFactory: () => new FakeAdapter(),
+    soundBackendFactory: () => ({
+      warmup: async () => true,
+      playCue: async (input) => { calls.push(input); return { played: true, accepted: true, voiceId: `voice-${calls.length}` }; },
+      playFile: async (input) => { calls.push(input); return { played: true, accepted: true, voiceId: `voice-${calls.length}` }; },
+      dispose() {}
+    })
+  });
+  await plugin.onload();
+  try {
+    const firstPromise = plugin.testSoundSettings({ labels: ['chat'], event: 'arrived', importance: 'normal' });
+    await new Promise((resolve) => setImmediate(resolve));
+    const second = await plugin.testSoundSettings({ labels: ['chat'], event: 'arrived', importance: 'normal' });
+    assert.equal(calls.length, 1);
+    assert.equal(second.playback.status, 'merged');
+    const first = await firstPromise;
+    assert.equal(first.playback.status, 'played');
+  } finally {
+    await plugin.onunload();
+  }
+});
+
+test('vNext sound asset test suppresses rapid accepted playback for the asset duration', async () => {
+  const ctx = context({ notificationPersistenceEnabled: false, soundSettingsPersistenceEnabled: false });
+  const calls = [];
+  const plugin = new NotificationHubVNextPlugin(ctx, {
+    adapterFactory: () => new FakeAdapter(),
+    soundBackendFactory: () => ({
+      warmup: async () => true,
+      playCue: async (input) => { calls.push(input); return { played: true, accepted: true, voiceId: `voice-${calls.length}` }; },
+      playFile: async (input) => { calls.push(input); return { played: true, accepted: true, voiceId: `voice-${calls.length}` }; },
+      dispose() {}
+    })
+  });
+  await plugin.onload();
+  try {
+    const firstPromise = plugin.testSoundAsset({ soundId: 'builtin.chat-incoming' });
+    await new Promise((resolve) => setImmediate(resolve));
+    const second = await plugin.testSoundAsset({ soundId: 'builtin.chat-incoming' });
+    assert.equal(calls.length, 1);
+    assert.equal(second.playback.status, 'merged');
+    const first = await firstPromise;
+    assert.equal(first.playback.status, 'played');
+  } finally {
+    await plugin.onunload();
+  }
+});
+
 test('vNext sound settings test propagates a backend played:false result as failed', async () => {
   const ctx = context({ notificationPersistenceEnabled: false, soundSettingsPersistenceEnabled: false });
   const plugin = new NotificationHubVNextPlugin(ctx, {

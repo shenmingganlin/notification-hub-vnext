@@ -16,11 +16,11 @@ const BUILTIN_CUE_FILES = Object.freeze({
   'critical-error': 'Windows Critical Stop.wav'
 });
 
-function acceptedResult(result) {
+function acceptedResult(result, durationMs = 0) {
   if (!result || result.accepted !== true || typeof result.voiceId !== 'string' || !result.voiceId) {
     throw backendError('AUDIO_ENGINE_PLAY_REJECTED', 'Audio Engine did not accept the voice', { result });
   }
-  return { played: true, accepted: true, voiceId: result.voiceId, source: 'audio-engine' };
+  return { played: true, accepted: true, voiceId: result.voiceId, source: 'audio-engine', ...(durationMs > 0 ? { durationMs } : {}) };
 }
 
 export function createAudioEngineBackend({
@@ -41,6 +41,7 @@ export function createAudioEngineBackend({
       async warmup() { return false; },
       async dispose() {},
       async load() {},
+      getDuration() { return 0; },
       async unload() {}
     });
   }
@@ -48,6 +49,7 @@ export function createAudioEngineBackend({
     throw backendError('AUDIO_ENGINE_CLIENT_INVALID', 'Audio Engine backend requires a client');
   }
   const loaded = new Map(assetFingerprint);
+  const durations = new Map();
   let disposed = false;
 
   async function ensureReady() {
@@ -65,6 +67,7 @@ export function createAudioEngineBackend({
     if (loaded.get(soundId) === (fingerprint ?? filePath)) return { loaded: true, cached: true };
     const result = await client.request('audio.load', { soundId, path: filePath.replaceAll('\\', '/') }, { retryable: false });
     loaded.set(soundId, fingerprint ?? filePath);
+    if (Number.isFinite(result?.durationMs) && result.durationMs >= 0) durations.set(soundId, result.durationMs);
     return { loaded: result.loaded !== false, cached: false, ...result };
   }
 
@@ -75,14 +78,14 @@ export function createAudioEngineBackend({
       if (!builtinPath) throw backendError('AUDIO_BUILTIN_CUE_NOT_FOUND', `Built-in cue is unavailable: ${cue}`);
       await load(soundId, builtinPath, builtinPath);
       try {
-        return acceptedResult(await client.request('audio.play', { soundId, volume }, { retryable: false }));
+        return acceptedResult(await client.request('audio.play', { soundId, volume }, { retryable: false }), durations.get(soundId) ?? 0);
       } catch (error) {
         throw backendError(error.code ?? 'AUDIO_ENGINE_PLAY_FAILED', error.message ?? String(error), error.details ?? {});
       }
     },
     async playFile({ path, soundId, volume }) {
       await load(soundId, path);
-      return acceptedResult(await client.request('audio.play', { soundId, volume }, { retryable: false }));
+      return acceptedResult(await client.request('audio.play', { soundId, volume }, { retryable: false }), durations.get(soundId) ?? 0);
     },
     async warmup() {
       await ensureReady();
@@ -97,6 +100,10 @@ export function createAudioEngineBackend({
     async dispose() {
       disposed = true;
       loaded.clear();
+      durations.clear();
+    },
+    getDuration(soundId) {
+      return durations.get(soundId) ?? 0;
     },
     load
   });
