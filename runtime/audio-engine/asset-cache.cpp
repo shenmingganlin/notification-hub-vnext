@@ -42,14 +42,22 @@ std::uint64_t fingerprint(const std::vector<std::uint8_t>& bytes) {
 }
 
 std::vector<float> to_float(const notification_hub::audio::PcmAsset& source) {
-    const auto count = source.samples.size() / sizeof(std::int16_t);
+    const auto bytes_per_sample = source.format.bits_per_sample == 24 ? 3u : 2u;
+    const auto count = source.samples.size() / bytes_per_sample;
     std::vector<float> samples(count);
     for (std::size_t index = 0; index < count; ++index) {
-        const auto low = source.samples[index * 2];
-        const auto high = source.samples[index * 2 + 1];
-        const auto value = static_cast<std::int16_t>(static_cast<std::uint16_t>(low) |
-            (static_cast<std::uint16_t>(high) << 8));
-        samples[index] = static_cast<float>(value) / 32768.0f;
+        const auto offset = index * bytes_per_sample;
+        if (bytes_per_sample == 3u) {
+            std::int32_t value = static_cast<std::int32_t>(source.samples[offset]) |
+                (static_cast<std::int32_t>(source.samples[offset + 1]) << 8) |
+                (static_cast<std::int32_t>(source.samples[offset + 2]) << 16);
+            if ((value & 0x00800000) != 0) value |= static_cast<std::int32_t>(0xff000000);
+            samples[index] = static_cast<float>(value) / 8388608.0f;
+        } else {
+            const auto value = static_cast<std::int16_t>(static_cast<std::uint16_t>(source.samples[offset]) |
+                (static_cast<std::uint16_t>(source.samples[offset + 1]) << 8));
+            samples[index] = static_cast<float>(value) / 32768.0f;
+        }
     }
     return samples;
 }
@@ -68,7 +76,8 @@ CacheResult AssetCache::load(const std::string& sound_id, const std::filesystem:
     if (bytes.empty()) return fail("AUDIO_ASSET_EMPTY", "audio asset is empty");
     const auto parsed = notification_hub::audio::parse_wav_pcm(bytes);
     if (!parsed.ok) return fail(parsed.code, parsed.message);
-    const auto float_bytes = parsed.asset.samples.size() / sizeof(std::int16_t) * sizeof(float);
+    const auto bytes_per_sample = parsed.asset.format.bits_per_sample == 24 ? 3u : 2u;
+    const auto float_bytes = parsed.asset.samples.size() / bytes_per_sample * sizeof(float);
     if (float_bytes > max_asset_bytes_) return fail("AUDIO_ASSET_LIMIT_REACHED", "audio asset exceeds the per-asset cache limit");
     const auto existing = assets_.find(sound_id);
     const auto source_fingerprint = fingerprint(bytes);
@@ -79,6 +88,7 @@ CacheResult AssetCache::load(const std::string& sound_id, const std::filesystem:
     asset->sound_id = sound_id;
     asset->sample_rate = parsed.asset.format.sample_rate;
     asset->channels = parsed.asset.format.channels;
+    asset->bits_per_sample = parsed.asset.format.bits_per_sample;
     asset->samples = to_float(parsed.asset);
     asset->fingerprint = source_fingerprint;
     cached_bytes_ = cached_bytes_ - existing_bytes + asset->byte_size();

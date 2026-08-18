@@ -14,6 +14,7 @@ struct PcmAsset {
     std::string sound_id;
     std::uint32_t sample_rate{};
     std::uint16_t channels{};
+    std::uint16_t bits_per_sample{};
     std::vector<float> samples;
     std::uint64_t fingerprint{};
 

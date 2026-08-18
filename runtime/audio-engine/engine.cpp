@@ -88,7 +88,7 @@ bool send_payload(HANDLE pipe, std::string_view payload) {
 }
 
 bool audio_engine_self_test() {
-    const auto asset = std::make_shared<PcmAsset>(PcmAsset{"self-test", 48000, 1, {0.1f, 0.2f}, 1});
+    const auto asset = std::make_shared<PcmAsset>(PcmAsset{"self-test", 48000, 1, 16, {0.1f, 0.2f}, 1});
     Mixer mixer(2);
     const auto result = mixer.play(asset, "voice-self-test", 1.0f);
     if (!result.ok || mixer.active_voice_count() != 1) return false;

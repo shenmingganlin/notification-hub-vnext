@@ -43,7 +43,9 @@ WavResult parse_wav_pcm(std::span<const std::uint8_t> bytes) {
         pos += size + (size & 1u);
     }
     if (!have_fmt || data.empty()) return fail("AUDIO_WAV_MISSING_CHUNK", "WAV needs fmt and data chunks");
-    if (!format.channels || !format.sample_rate || format.bits_per_sample != 16 || !format.block_align || data.size() % format.block_align) {
+    const auto bytes_per_sample = static_cast<std::uint16_t>((format.bits_per_sample + 7u) / 8u);
+    const auto expected_block_align = static_cast<std::uint32_t>(format.channels) * bytes_per_sample;
+    if (!format.channels || !format.sample_rate || (format.bits_per_sample != 16 && format.bits_per_sample != 24) || !format.block_align || format.block_align != expected_block_align || data.size() % format.block_align) {
         return fail("AUDIO_WAV_UNSUPPORTED", "unsupported PCM layout (channels=" + std::to_string(format.channels) + ", sampleRate=" + std::to_string(format.sample_rate) + ", bits=" + std::to_string(format.bits_per_sample) + ", blockAlign=" + std::to_string(format.block_align) + ", dataBytes=" + std::to_string(data.size()) + ")");
     }
     return {true, {format, std::vector<std::uint8_t>(data.begin(), data.end())}, {}, {}};
