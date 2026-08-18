@@ -22,6 +22,14 @@ target_include_directories(notification-hub-audio-engine-asset-cache-test PRIVAT
 target_compile_features(notification-hub-audio-engine-asset-cache-test PRIVATE cxx_std_20)
 add_test(NAME audio_engine_asset_cache COMMAND notification-hub-audio-engine-asset-cache-test)
 
+add_executable(notification-hub-audio-engine-mixer-test
+  ../tests/native/audio-engine-mixer.test.cpp
+  audio-engine/mixer.cpp
+)
+target_include_directories(notification-hub-audio-engine-mixer-test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_SOURCE_DIR})
+target_compile_features(notification-hub-audio-engine-mixer-test PRIVATE cxx_std_20)
+add_test(NAME audio_engine_mixer COMMAND notification-hub-audio-engine-mixer-test)
+
 add_executable(notification-hub-runtime
   app/main.cpp
   diagnostics/event.cpp
