@@ -1,4 +1,4 @@
-import { realpath, stat } from 'node:fs/promises';
+import { readFile, realpath, stat } from 'node:fs/promises';
 import { spawn } from 'node:child_process';
 import os from 'node:os';
 import path from 'node:path';
@@ -474,9 +474,18 @@ export function createWindowsAudioBackend({
       }
       const extension = path.extname(soundPath).toLowerCase();
       if (!DEFAULT_FORMATS.includes(extension)) return { played: false };
+      let contentType = extension;
+      try {
+        const header = await readFile(soundPath, { encoding: null, flag: 'r' });
+        if (header.length >= 12 && header.subarray(0, 4).toString('ascii') === 'RIFF' && header.subarray(8, 12).toString('ascii') === 'WAVE') contentType = '.wav';
+        else if (header.length >= 2 && header[0] === 0xff && (header[1] & 0xe0) === 0xe0) contentType = '.mp3';
+        else if (header.length >= 3 && header.subarray(0, 3).toString('ascii') === 'ID3') contentType = '.mp3';
+      } catch {
+        // Let the media backend return its normal open error.
+      }
       const escapedPath = soundPath.replace(/'/g, "''");
       const safeVolume = Math.max(0, Math.min(1, volume));
-      const mediaType = extension === '.wav' ? 'waveaudio' : 'mpegvideo';
+      const mediaType = contentType === '.wav' ? 'waveaudio' : 'mpegvideo';
       const script = [
         "$ErrorActionPreference = 'Stop'",
         "if (-not ([System.Management.Automation.PSTypeName]'NhMci').Type) {",
@@ -490,8 +499,8 @@ export function createWindowsAudioBackend({
         `$alias = 'nhSound' + [Guid]::NewGuid().ToString('N')`,
         `$file = '${escapedPath}'`,
         `$open = [NhMci]::mciSendString(('open "' + $file + '" type ${mediaType} alias ' + $alias), $null, 0, [IntPtr]::Zero)`,
-        `if ($open -ne 0 -and '${extension}' -eq '.wav') { $open = [NhMci]::mciSendString(('open "' + $file + '" alias ' + $alias), $null, 0, [IntPtr]::Zero) }`,
-        `if ($open -ne 0 -and '${extension}' -ne '.wav') { throw "MCI open failed: $open" }`,
+        `if ($open -ne 0 -and '${contentType}' -eq '.wav') { $open = [NhMci]::mciSendString(('open "' + $file + '" alias ' + $alias), $null, 0, [IntPtr]::Zero) }`,
+        `if ($open -ne 0 -and '${contentType}' -ne '.wav') { throw "MCI open failed: $open" }`,
         `$volume = [int](${safeVolume.toFixed(6)} * 1000)`,
         '$played = $false',
         'if ($open -eq 0) {',
@@ -503,7 +512,7 @@ export function createWindowsAudioBackend({
         '    }',
         '  } finally { [NhMci]::mciSendString(("close " + $alias), $null, 0, [IntPtr]::Zero) | Out-Null }',
         '}',
-        `if (-not $played -and '${extension}' -eq '.wav') {`,
+        `if (-not $played -and '${contentType}' -eq '.wav') {`,
         '  Add-Type -AssemblyName PresentationCore',
         '  Add-Type -AssemblyName WindowsBase',
         '  $player = [System.Windows.Media.MediaPlayer]::new()',
@@ -518,7 +527,7 @@ export function createWindowsAudioBackend({
         '    $played = $true',
         '  } finally { $player.Close() }',
         '}',
-        `if (-not $played -and '${extension}' -ne '.wav') { throw "MCI playback failed: $open" }`,
+        `if (-not $played -and '${contentType}' -ne '.wav') { throw "MCI playback failed: $open" }`,
         'if (-not $played) { throw "WAV playback failed" }'
       ].join("\n");
       return runScript(script);

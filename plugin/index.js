@@ -15,7 +15,7 @@ import {
 import { createSoundScheduler } from './domain/sound-scheduler.js';
 import path from 'node:path';
 import { existsSync } from 'node:fs';
-import { mkdir, rename, rm, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { createWindowsAudioBackend, playNotificationSound, resolveSoundPlaybackKey } from './domain/audio-adapter.js';
 import { createAudioEngineHost } from './domain/audio-engine-host.js';
 import { createAudioEngineBackend } from './domain/audio-engine-backend.js';
@@ -540,10 +540,29 @@ export default class NotificationHubVNextPlugin {
 
   async activateAudioEngineBackend() {
     if (!this.audioEngineHost) throw Object.assign(new Error('Audio Engine Host is unavailable'), { code: 'AUDIO_ENGINE_NOT_READY' });
-    const previous = this.soundBackend;
-    this.soundBackend = this.audioEngineBackendFactory({ host: this.audioEngineHost, client: this.audioEngineHost.client, platform: process.platform });
-    await this.soundBackend.warmup?.();
-    if (previous && previous !== this.soundBackend) await previous.dispose?.();
+    const legacyBackend = this.soundBackend;
+    const engineBackend = this.audioEngineBackendFactory({ host: this.audioEngineHost, client: this.audioEngineHost.client, platform: process.platform });
+    await engineBackend.warmup?.();
+    const isPcmWav = async (filePath) => {
+      if (typeof filePath !== 'string' || path.extname(filePath).toLowerCase() !== '.wav') return false;
+      try {
+        const header = await readFile(filePath, { encoding: null, flag: 'r' });
+        return header.length >= 12 && header.subarray(0, 4).toString('ascii') === 'RIFF' && header.subarray(8, 12).toString('ascii') === 'WAVE';
+      } catch {
+        return false;
+      }
+    };
+    this.soundBackend = Object.freeze({
+      playCue: (options) => engineBackend.playCue(options),
+      playFile: async (options) => (await isPcmWav(options?.path)) ? engineBackend.playFile(options) : legacyBackend.playFile(options),
+      load: async (soundId, filePath, fingerprint) => (await isPcmWav(filePath)) ? engineBackend.load(soundId, filePath, fingerprint) : Promise.resolve({ loaded: true, delegated: true }),
+      unload: (soundId) => engineBackend.unload(soundId),
+      warmup: () => engineBackend.warmup?.(),
+      dispose: async () => {
+        await engineBackend.dispose?.();
+        await legacyBackend?.dispose?.();
+      }
+    });
     return this.soundBackend;
   }
 
