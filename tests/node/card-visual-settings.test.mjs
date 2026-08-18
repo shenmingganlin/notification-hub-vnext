@@ -25,6 +25,18 @@ test('minimal card settings accept controlled behavior and appearance fields', (
   assert.equal(settings.types.minimal.appearance.borderRadius, 24);
 });
 
+test('minimal card settings accept bounded dimensions and layout spacing', () => {
+  const settings = createCardVisualSettings({ types: { minimal: {
+    behavior: { anchor: 'top-right', gap: 12, margin: 24 },
+    appearance: { width: 480, height: 120 }
+  } } });
+  assert.deepEqual(settings.types.minimal.behavior, { layout: 'simple', boundary: 'work-area', anchor: 'top-right', gap: 12, margin: 24 });
+  assert.equal(settings.types.minimal.appearance.width, 480);
+  assert.equal(settings.types.minimal.appearance.height, 120);
+  assert.throws(() => createCardVisualSettings({ types: { minimal: { appearance: { width: 100 } } } }), (error) => error.code === 'CARD_VISUAL_DIMENSION_INVALID');
+  assert.throws(() => createCardVisualSettings({ types: { minimal: { behavior: { margin: 97 } } } }), (error) => error.code === 'CARD_VISUAL_SPACING_INVALID');
+});
+
 test('card visual settings reject arbitrary styling and unsupported types', () => {
   assert.throws(() => createCardVisualSettings({ types: { minimal: { appearance: { css: 'body{}' } } } }), (error) => error.code === 'CARD_VISUAL_FIELD_UNKNOWN');
   assert.throws(() => createCardVisualSettings({ types: { minimal: { appearance: { backgroundColor: 'red' } } } }), (error) => error.code === 'CARD_VISUAL_COLOR_INVALID');

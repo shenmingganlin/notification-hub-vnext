@@ -2,13 +2,14 @@ export const CARD_TYPES = Object.freeze(['minimal', 'danmaku', 'popup']);
 export const IMPLEMENTED_CARD_TYPES = Object.freeze(['minimal']);
 export const CARD_LAYOUTS = Object.freeze(['simple']);
 export const CARD_BOUNDARIES = Object.freeze(['work-area']);
+export const CARD_ANCHORS = Object.freeze(['top-left', 'top-right', 'bottom-left', 'bottom-right']);
 export const CARD_SIZES = Object.freeze(['small', 'medium', 'large']);
 export const CARD_ASPECT_RATIOS = Object.freeze(['default', 'square', 'wide']);
 
 const CARD_SETTINGS_FIELDS = Object.freeze(['activeType', 'types']);
 const TYPE_FIELDS = Object.freeze(['behavior', 'appearance']);
-const BEHAVIOR_FIELDS = Object.freeze(['layout', 'boundary']);
-const APPEARANCE_FIELDS = Object.freeze(['size', 'aspectRatio', 'backgroundColor', 'borderRadius', 'opacity']);
+const BEHAVIOR_FIELDS = Object.freeze(['layout', 'boundary', 'anchor', 'gap', 'margin']);
+const APPEARANCE_FIELDS = Object.freeze(['size', 'aspectRatio', 'width', 'height', 'backgroundColor', 'borderRadius', 'opacity']);
 const HEX_COLOR = /^#[0-9a-f]{6}$/i;
 
 export const MINIMAL_CARD_DEFAULTS = Object.freeze({
@@ -51,11 +52,14 @@ function validateBehavior(value, field) {
   assertKnownFields(value, BEHAVIOR_FIELDS, field);
   if ('layout' in value && !CARD_LAYOUTS.includes(value.layout)) throw fail('CARD_VISUAL_LAYOUT_INVALID', `${field}.layout is unsupported`, { field: `${field}.layout` });
   if ('boundary' in value && !CARD_BOUNDARIES.includes(value.boundary)) throw fail('CARD_VISUAL_BOUNDARY_INVALID', `${field}.boundary is unsupported`, { field: `${field}.boundary` });
+  if ('anchor' in value && !CARD_ANCHORS.includes(value.anchor)) throw fail('CARD_VISUAL_ANCHOR_INVALID', `${field}.anchor is unsupported`, { field: `${field}.anchor` });
+  for (const key of ['gap', 'margin']) if (key in value && (!Number.isInteger(value[key]) || value[key] < 0 || value[key] > (key === 'gap' ? 48 : 96))) throw fail('CARD_VISUAL_SPACING_INVALID', `${field}.${key} is out of range`, { field: `${field}.${key}` });
 }
 function validateAppearance(value, field) {
   assertKnownFields(value, APPEARANCE_FIELDS, field);
   if ('size' in value && !CARD_SIZES.includes(value.size)) throw fail('CARD_VISUAL_SIZE_INVALID', `${field}.size is unsupported`, { field: `${field}.size` });
   if ('aspectRatio' in value && !CARD_ASPECT_RATIOS.includes(value.aspectRatio)) throw fail('CARD_VISUAL_ASPECT_RATIO_INVALID', `${field}.aspectRatio is unsupported`, { field: `${field}.aspectRatio` });
+  for (const key of ['width', 'height']) if (key in value && (!Number.isInteger(value[key]) || value[key] < (key === 'width' ? 240 : 64) || value[key] > (key === 'width' ? 720 : 360))) throw fail('CARD_VISUAL_DIMENSION_INVALID', `${field}.${key} is out of range`, { field: `${field}.${key}` });
   if ('backgroundColor' in value && (typeof value.backgroundColor !== 'string' || !HEX_COLOR.test(value.backgroundColor))) throw fail('CARD_VISUAL_COLOR_INVALID', `${field}.backgroundColor must be a #RRGGBB color`, { field: `${field}.backgroundColor` });
   if ('borderRadius' in value && (!Number.isInteger(value.borderRadius) || value.borderRadius < 0 || value.borderRadius > 48)) throw fail('CARD_VISUAL_RADIUS_INVALID', `${field}.borderRadius must be an integer from 0 to 48`, { field: `${field}.borderRadius` });
   if ('opacity' in value && (typeof value.opacity !== 'number' || !Number.isFinite(value.opacity) || value.opacity < 0.3 || value.opacity > 1)) throw fail('CARD_VISUAL_OPACITY_INVALID', `${field}.opacity must be between 0.3 and 1`, { field: `${field}.opacity` });
@@ -66,10 +70,9 @@ function normalizeType(value, type) {
   if ('behavior' in value) validateBehavior(value.behavior, `card.types.${type}.behavior`);
   if ('appearance' in value) validateAppearance(value.appearance, `card.types.${type}.appearance`);
   if (type !== 'minimal' && Object.keys(value).length > 0) throw fail('CARD_VISUAL_TYPE_NOT_IMPLEMENTED', `Card type ${type} is not implemented`, { field: `card.types.${type}` });
-  return {
-    behavior: { ...clone(MINIMAL_CARD_DEFAULTS.behavior), ...clone(value.behavior ?? {}) },
-    appearance: { ...clone(MINIMAL_CARD_DEFAULTS.appearance), ...clone(value.appearance ?? {}) }
-  };
+  const behavior = { ...clone(MINIMAL_CARD_DEFAULTS.behavior), ...clone(value.behavior ?? {}) };
+  const appearance = { ...clone(MINIMAL_CARD_DEFAULTS.appearance), ...clone(value.appearance ?? {}) };
+  return { behavior, appearance };
 }
 
 export function createCardVisualSettings(input = {}) {

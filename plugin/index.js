@@ -266,9 +266,11 @@ function notificationCardText(value, fallback, maxLength) {
 function notificationCardDimensions(appearance = {}) {
   const sizes = { small: { width: 360, height: 180 }, medium: { width: 420, height: 220 }, large: { width: 500, height: 260 } };
   const base = sizes[appearance.size] ?? sizes.medium;
-  if (appearance.aspectRatio === 'square') return { width: base.width, height: base.width };
-  if (appearance.aspectRatio === 'wide') return { width: base.width, height: Math.max(160, Math.round(base.width * 0.48)) };
-  return { ...base };
+  const width = Number.isInteger(appearance.width) ? Math.max(240, Math.min(720, appearance.width)) : base.width;
+  const height = Number.isInteger(appearance.height) ? Math.max(64, Math.min(360, appearance.height)) : base.height;
+  if (appearance.aspectRatio === 'square') return { width, height: width };
+  if (appearance.aspectRatio === 'wide') return { width, height: Math.max(160, Math.round(width * 0.48)) };
+  return { width, height };
 }
 
 function notificationCardPosition(index, workArea, layout, dimensions = RUNTIME_NOTIFICATION_CARD_SIZE) {
@@ -278,7 +280,7 @@ function notificationCardPosition(index, workArea, layout, dimensions = RUNTIME_
     width: Number.isFinite(workArea?.width) && workArea.width > 0 ? workArea.width : 2560,
     height: Number.isFinite(workArea?.height) && workArea.height > 0 ? workArea.height : 1528
   };
-  const spacing = Number.isInteger(layout?.spacing) && layout.spacing >= 0 ? layout.spacing : 12;
+  const spacing = Number.isInteger(dimensions.gap) && dimensions.gap >= 0 ? dimensions.gap : (Number.isInteger(layout?.spacing) && layout.spacing >= 0 ? layout.spacing : 12);
   const stepX = dimensions.width + spacing;
   const stepY = dimensions.height + spacing;
   const columns = Math.max(1, Math.floor((area.width - 80 + spacing) / stepX));
@@ -293,11 +295,16 @@ function notificationCardPosition(index, workArea, layout, dimensions = RUNTIME_
   const y = layout?.anchor?.includes('top')
     ? area.top + row * stepY
     : area.top + area.height - dimensions.height - row * stepY;
-  return { x: Math.round(direction < 0 ? x : x), y: Math.round(y) };
+  const margin = Number.isInteger(dimensions.margin) ? dimensions.margin : 18;
+  return { x: Math.round(direction < 0 ? x : x) + (x <= area.left ? margin : -margin), y: Math.round(y) + (y <= area.top ? margin : -margin) };
 }
 
 function notificationCardPayload(record, index, workArea, layout, visual, presentation = null, behavior = null) {
-  const dimensions = notificationCardDimensions(visual?.appearance);
+  const dimensions = {
+    ...notificationCardDimensions(visual?.appearance),
+    gap: visual?.behavior?.gap,
+    margin: visual?.behavior?.margin
+  };
   const position = notificationCardPosition(index, workArea, layout, dimensions);
   return {
     id: notificationCardId(record.notificationId),
