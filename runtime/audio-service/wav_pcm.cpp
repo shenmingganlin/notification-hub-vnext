@@ -27,19 +27,25 @@ WavResult parse_wav_pcm(std::span<const std::uint8_t> bytes) {
         if (size > bytes.size() - pos) return fail("AUDIO_WAV_TRUNCATED", "WAV chunk exceeds input");
         const auto chunk = bytes.subspan(pos, size);
         if (std::memcmp(bytes.data() + pos - 8, "fmt ", 4) == 0) {
-            if (size < 16) return fail("AUDIO_WAV_UNSUPPORTED", "WAV format chunk is too small");
+            if (size < 16) return fail("AUDIO_WAV_UNSUPPORTED", "WAV format chunk is too small (fmtBytes=" + std::to_string(size) + ")");
             const auto format_tag = u16(chunk.data());
+            const auto channels = u16(chunk.data() + 2);
+            const auto sample_rate = u32(chunk.data() + 4);
+            const auto block_align = u16(chunk.data() + 12);
+            const auto bits_per_sample = u16(chunk.data() + 14);
             const bool classic_pcm = format_tag == 1;
             const bool extensible_pcm = format_tag == 0xfffe && size >= 40 && u16(chunk.data() + 16) >= 22 && is_pcm_subformat(chunk.data() + 24);
-            if (!classic_pcm && !extensible_pcm) return fail("AUDIO_WAV_UNSUPPORTED", "only PCM WAV audio is supported");
-            format.channels = u16(chunk.data() + 2); format.sample_rate = u32(chunk.data() + 4);
-            format.block_align = u16(chunk.data() + 12); format.bits_per_sample = u16(chunk.data() + 14); have_fmt = true;
+            const auto format_details = "tag=" + std::to_string(format_tag) + ", channels=" + std::to_string(channels) + ", sampleRate=" + std::to_string(sample_rate) + ", bits=" + std::to_string(bits_per_sample) + ", blockAlign=" + std::to_string(block_align) + ", fmtBytes=" + std::to_string(size);
+            if (!classic_pcm && !extensible_pcm) return fail("AUDIO_WAV_UNSUPPORTED", "unsupported WAV format (" + format_details + ", extensiblePcm=" + (extensible_pcm ? "true" : "false") + ")");
+            format.channels = channels; format.sample_rate = sample_rate;
+            format.block_align = block_align; format.bits_per_sample = bits_per_sample; have_fmt = true;
         } else if (std::memcmp(bytes.data() + pos - 8, "data", 4) == 0) data = chunk;
         pos += size + (size & 1u);
     }
     if (!have_fmt || data.empty()) return fail("AUDIO_WAV_MISSING_CHUNK", "WAV needs fmt and data chunks");
-    if (!format.channels || !format.sample_rate || format.bits_per_sample != 16 || !format.block_align || data.size() % format.block_align)
-        return fail("AUDIO_WAV_UNSUPPORTED", "only aligned 16-bit PCM with a valid format is supported");
+    if (!format.channels || !format.sample_rate || format.bits_per_sample != 16 || !format.block_align || data.size() % format.block_align) {
+        return fail("AUDIO_WAV_UNSUPPORTED", "unsupported PCM layout (channels=" + std::to_string(format.channels) + ", sampleRate=" + std::to_string(format.sample_rate) + ", bits=" + std::to_string(format.bits_per_sample) + ", blockAlign=" + std::to_string(format.block_align) + ", dataBytes=" + std::to_string(data.size()) + ")");
+    }
     return {true, {format, std::vector<std::uint8_t>(data.begin(), data.end())}, {}, {}};
 }
 }  // namespace notification_hub::audio
