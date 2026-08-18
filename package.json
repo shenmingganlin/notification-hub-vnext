@@ -1,6 +1,6 @@
 {
   "name": "notification-hub-vnext",
-  "version": "0.1.0-alpha.16",
+  "version": "0.1.0",
   "private": true,
   "description": "Notification Hub vNext: a Windows notification scene system for HanaAgent.",
   "type": "module",

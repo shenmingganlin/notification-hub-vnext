@@ -66,7 +66,7 @@ test('diagnostics status route returns page status from the plugin API', async (
   const harness = createRouteHarness();
   const status = {
     pluginName: 'notification-hub-vnext',
-    pluginVersion: '0.1.0-alpha.16',
+    pluginVersion: '0.1.0',
     runtime: { state: 'running', connected: true },
     summary: { total: 1, errors: 0, warnings: 1, recoverable: 1, currentFailure: false },
     diagnostics: [{ code: 'TRANSPORT_RECONNECT_RETRY', severity: 'warning' }]

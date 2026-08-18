@@ -90,7 +90,7 @@ export * from './domain/notification-store-snapshot.js';
 export * from './domain/notification-store-store.js';
 export * from './domain/notification-store-persistence.js';
 
-export const pluginVersion = '0.1.0-alpha.16';
+export const pluginVersion = '0.1.0';
 export const pluginName = 'notification-hub-vnext';
 export const RUNTIME_TEST_CARD_PREFIX = 'nh-vnext-test-';
 export const RUNTIME_NOTIFICATION_CARD_PREFIX = 'nh-vnext-notification-';

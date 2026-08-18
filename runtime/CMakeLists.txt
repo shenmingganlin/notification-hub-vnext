@@ -81,7 +81,7 @@ target_include_directories(notification-hub-runtime PRIVATE
 target_compile_features(notification-hub-runtime PRIVATE cxx_std_20)
 
 target_compile_definitions(notification-hub-runtime PRIVATE
-  NOTIFICATION_HUB_VERSION="0.1.0-alpha.16"
+  NOTIFICATION_HUB_VERSION="0.1.0"
 )
 
 if (WIN32)

@@ -186,7 +186,7 @@ test('vNext plugin owns one isolated RuntimeHostAdapter through onload/onunload'
 
   await plugin.onload();
   assert.equal(pluginName, 'notification-hub-vnext');
-  assert.equal(pluginVersion, '0.1.0-alpha.16');
+  assert.equal(pluginVersion, '0.1.0');
   assert.equal(adapter.started, 1);
   assert.equal(plugin.runtimeHost, adapter);
   assert.equal(ctx.logs.some(([level, ...args]) => level === 'debug' && args.some((value) => JSON.stringify(value).includes('TEST_DIAGNOSTIC'))), true);
@@ -1168,7 +1168,7 @@ test('vNext plugin instance exposes a JSON-safe install response boundary', asyn
   const serialized = JSON.stringify({ id: pluginName, ctx, instance: plugin });
 
   assert.match(serialized, /"pluginName":"notification-hub-vnext"/);
-  assert.match(serialized, /"pluginVersion":"0\.1\.0-alpha\.16"/);
+  assert.match(serialized, /"pluginVersion":"0\.1\.0"/);
   await plugin.onunload();
 });
 

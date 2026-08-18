@@ -139,7 +139,7 @@ The vNext package uses the plugin ID `notification-hub-vnext`. Its Native Runtim
 
 ## Version
 
-Current development version: `0.1.0-alpha.16`
+Current stable version: `0.1.0`
 
 ## License
 
