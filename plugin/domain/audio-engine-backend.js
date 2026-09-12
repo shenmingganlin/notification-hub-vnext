@@ -49,6 +49,8 @@ export function createAudioEngineBackend({
     throw backendError('AUDIO_ENGINE_CLIENT_INVALID', 'Audio Engine backend requires a client');
   }
   const loaded = new Map(assetFingerprint);
+  const inFlightLoads = new Map();
+  const inFlightBySoundId = new Map();
   const durations = new Map();
   let disposed = false;
 
@@ -64,11 +66,31 @@ export function createAudioEngineBackend({
     if (typeof soundId !== 'string' || !soundId || typeof filePath !== 'string' || !filePath) {
       throw backendError('AUDIO_LOAD_INPUT_INVALID', 'soundId and filePath are required');
     }
-    if (loaded.get(soundId) === (fingerprint ?? filePath)) return { loaded: true, cached: true };
-    const result = await client.request('audio.load', { soundId, path: filePath.replaceAll('\\', '/') }, { retryable: false });
-    loaded.set(soundId, fingerprint ?? filePath);
-    if (Number.isFinite(result?.durationMs) && result.durationMs >= 0) durations.set(soundId, result.durationMs);
-    return { loaded: result.loaded !== false, cached: false, ...result };
+    const requestedFingerprint = fingerprint ?? filePath;
+    const cacheKey = `${soundId}\u0000${requestedFingerprint}`;
+    const pendingForSound = inFlightBySoundId.get(soundId);
+    if (pendingForSound) {
+      if (pendingForSound.fingerprint === requestedFingerprint) return pendingForSound.promise;
+      await pendingForSound.promise.catch(() => {});
+      return load(soundId, filePath, fingerprint);
+    }
+    if (loaded.get(soundId) === requestedFingerprint) return { loaded: true, cached: true };
+    const pending = inFlightLoads.get(cacheKey);
+    if (pending) return pending;
+    const request = (async () => {
+      const result = await client.request('audio.load', { soundId, path: filePath.replaceAll('\\', '/') }, { retryable: false });
+      if (result?.loaded !== false) loaded.set(soundId, requestedFingerprint);
+      if (Number.isFinite(result?.durationMs) && result.durationMs >= 0) durations.set(soundId, result.durationMs);
+      return { loaded: result.loaded !== false, cached: false, ...result };
+    })();
+    inFlightLoads.set(cacheKey, request);
+    inFlightBySoundId.set(soundId, { fingerprint: requestedFingerprint, promise: request });
+    try {
+      return await request;
+    } finally {
+      if (inFlightLoads.get(cacheKey) === request) inFlightLoads.delete(cacheKey);
+      if (inFlightBySoundId.get(soundId)?.promise === request) inFlightBySoundId.delete(soundId);
+    }
   }
 
   return Object.freeze({
@@ -89,8 +111,12 @@ export function createAudioEngineBackend({
     },
     async warmup() {
       await ensureReady();
-      for (const item of preload) await load(item.soundId, item.path, item.fingerprint);
-      return true;
+      let loadedAll = true;
+      for (const item of preload) {
+        const result = await load(item.soundId, item.path, item.fingerprint);
+        if (result?.loaded === false) loadedAll = false;
+      }
+      return loadedAll;
     },
     async unload(soundId) {
       await ensureReady();
@@ -100,6 +126,8 @@ export function createAudioEngineBackend({
     async dispose() {
       disposed = true;
       loaded.clear();
+      inFlightLoads.clear();
+      inFlightBySoundId.clear();
       durations.clear();
     },
     getDuration(soundId) {

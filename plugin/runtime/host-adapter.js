@@ -99,6 +99,7 @@ export class RuntimeHostAdapter extends EventEmitter {
     this.startPromise = null;
     this.lifecycleGeneration = 0;
     this.runtimeRestartInProgress = false;
+    this.forwardedListeners = [];
   }
 
   getRuntimeStatus() {
@@ -219,8 +220,8 @@ export class RuntimeHostAdapter extends EventEmitter {
       });
       this.client = client;
       this.manager = manager;
-      this.forwardEvents(manager, 'manager');
-      this.forwardEvents(client, 'client');
+      this.forwardEvents(manager, 'manager', generation);
+      this.forwardEvents(client, 'client', generation);
 
       await manager.start();
       assertCurrentStart();
@@ -259,6 +260,7 @@ export class RuntimeHostAdapter extends EventEmitter {
     const pendingStart = this.startPromise;
     const manager = this.manager;
     const client = this.client;
+    this.detachForwardedEvents();
     try {
       await manager?.stop();
     } catch (error) {
@@ -283,13 +285,16 @@ export class RuntimeHostAdapter extends EventEmitter {
   }
 
   async cleanupAfterStartFailure() {
+    const manager = this.manager;
+    const client = this.client;
+    this.detachForwardedEvents();
     try {
-      await this.manager?.stop();
+      await manager?.stop();
     } catch (error) {
       this.emitDiagnostic(error.code ?? 'RUNTIME_HOST_CLEANUP_FAILED', error.message, error.details);
     }
     try {
-      await this.client?.close();
+      await client?.close();
     } catch (error) {
       this.emitDiagnostic(error.code ?? 'RUNTIME_HOST_CLEANUP_FAILED', error.message, error.details);
     }
@@ -303,14 +308,26 @@ export class RuntimeHostAdapter extends EventEmitter {
     }
   }
 
-  forwardEvents(source, sourceName) {
+  forwardEvents(source, sourceName, generation) {
     if (!source?.on) return;
     for (const event of ['diagnostic', 'state', 'stdout', 'stderr', 'exit', 'restarted', 'scene.changed']) {
-      source.on(event, (payload) => {
+      const listener = (payload) => {
+        if (generation !== this.lifecycleGeneration
+          || (sourceName === 'manager' && source !== this.manager)
+          || (sourceName === 'client' && source !== this.client)) return;
         this.handleForwardedEvent(event, payload, sourceName);
         this.emit(event, { source: sourceName, payload });
-      });
+      };
+      source.on(event, listener);
+      this.forwardedListeners.push({ source, event, listener });
     }
+  }
+
+  detachForwardedEvents() {
+    for (const { source, event, listener } of this.forwardedListeners) {
+      source.off?.(event, listener);
+    }
+    this.forwardedListeners = [];
   }
 
   setState(state) {

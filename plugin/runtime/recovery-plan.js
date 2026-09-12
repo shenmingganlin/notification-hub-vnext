@@ -100,7 +100,7 @@ export async function loadRecoveryPlan({ sceneStatePath, recoverySnapshotPath, a
     };
   }
 
-  if (allowEmpty && (attempts.length === 0 || attempts.every((attempt) => attempt.kind === 'missing'))) {
+  if (allowEmpty && (attempts.length === 0 || attempts.every((attempt) => attempt.kind === 'missing' || attempt.kind === 'invalid'))) {
     return {
       source: 'empty',
       snapshot: createRecoverySnapshot(),

@@ -28,6 +28,10 @@ test('diagnostics page renders structured evidence without raw process streams o
   assert.match(html, /diagnostics-status/);
   assert.match(html, /request\("diagnostics-status"\)/);
   assert.match(html, /导出诊断记录/);
+  assert.match(html, /导出 Runtime 日志/);
+  assert.match(html, /清空 Runtime 日志/);
+  assert.match(html, /runtime-log-export/);
+  assert.match(html, /runtime-log-clear/);
   assert.match(html, /notification-hub-diagnostics/);
   assert.match(html, /diagnostics-export/);
   assert.match(html, /正在打开 Windows 保存对话框/);
@@ -41,6 +45,24 @@ test('diagnostics page renders structured evidence without raw process streams o
   assert.match(html, /data-page-navigation-path="#diagnostics"/);
 });
 
+test('diagnostics export rejects invalid JSON before calling the API', async () => {
+  const harness = createRouteHarness();
+  let called = false;
+  registerDiagnosticsRoute(harness.app, { _notificationHubVNextRuntimeApi: {
+    async exportDiagnostics() { called = true; }
+  } });
+  const response = await harness.routes.get('POST /diagnostics-export')({
+    ...harness.contextFor(),
+    req: { ...harness.contextFor().req, json: async () => { throw new SyntaxError('Unexpected token'); } }
+  });
+  assert.equal(response.status, 400);
+  assert.deepEqual(response.value, {
+    ok: false,
+    error: { code: 'ROUTE_INVALID_JSON', message: '请求体必须是合法 JSON。', details: { field: 'body' } }
+  });
+  assert.equal(called, false);
+});
+
 test('diagnostics export route saves through the plugin API and preserves cancellation', async () => {
   const harness = createRouteHarness();
   const calls = [];
@@ -51,6 +73,23 @@ test('diagnostics export route saves through the plugin API and preserves cancel
   const response = await harness.routes.get('POST /diagnostics-export')(harness.contextFor({ name: 'diagnostics-test' }));
   assert.deepEqual(response.value, { ok: true, cancelled: true, savedToFile: false, savedFilename: null });
   assert.deepEqual(calls, [{ name: 'diagnostics-test' }]);
+});
+
+test('runtime log export and clear routes use the runtime API', async () => {
+  const harness = createRouteHarness();
+  const calls = [];
+  registerDiagnosticsRoute(harness.app, { _notificationHubVNextRuntimeApi: {
+    async exportRuntimeLog(input) { calls.push(['export', input]); return { cancelled: false, count: 2 }; },
+    clearRuntimeLog() { calls.push(['clear']); return { cleared: 2 }; },
+    getRuntimeLog() { return [{ event: 'state', state: 'running' }]; }
+  } });
+  const exported = await harness.routes.get('POST /runtime-log-export')(harness.contextFor({ name: 'runtime-log-test' }));
+  const cleared = await harness.routes.get('POST /runtime-log-clear')(harness.contextFor());
+  const listed = await harness.routes.get('GET /runtime-log')(harness.contextFor());
+  assert.deepEqual(exported.value, { ok: true, cancelled: false, count: 2 });
+  assert.deepEqual(cleared.value, { ok: true, cleared: 2 });
+  assert.deepEqual(listed.value, { ok: true, entries: [{ event: 'state', state: 'running' }] });
+  assert.deepEqual(calls, [['export', { name: 'runtime-log-test' }], ['clear']]);
 });
 
 test('diagnostics export route returns a stable unavailable error', async () => {

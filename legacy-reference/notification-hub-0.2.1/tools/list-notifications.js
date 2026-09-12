@@ -12,7 +12,8 @@ export const parameters = {
   type: "object",
   properties: {
     limit: { type: "integer", description: "返回条数，默认 10", default: 10 },
-    type: { type: "string", enum: ["conversation", "channel", "dm", "status", ""], description: "筛选通知类型" },
+    // Gemini rejects empty enum values; omit this optional field to query all types.
+    type: { type: "string", enum: ["conversation", "channel", "dm", "status"], description: "筛选通知类型" },
   },
 };
 

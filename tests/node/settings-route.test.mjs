@@ -1,7 +1,19 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import registerSettingsRoute, { renderSettingsPage } from '../../plugin/routes/settings.js';
+import registerSettingsRouteImpl, { renderSettingsPage } from '../../plugin/routes/settings.js';
+import { createSoundSettingsServices } from '../../plugin/services/sound-settings-services.js';
+import { createSoundAssetServices } from '../../plugin/services/sound-asset-services.js';
+
+function registerSettingsRoute(app, ctx = {}) {
+  const nextContext = { ...ctx };
+  if (ctx._notificationHubVNextPlugin && !ctx._notificationHubVNextSettingsApi) {
+    nextContext._notificationHubVNextSettingsApi = ctx._notificationHubVNextPlugin;
+    nextContext._notificationHubVNextSoundSettingsServices = createSoundSettingsServices({ settingsApi: ctx._notificationHubVNextPlugin });
+    nextContext._notificationHubVNextSoundAssetServices = createSoundAssetServices({ settingsApi: ctx._notificationHubVNextPlugin });
+  }
+  return registerSettingsRouteImpl(app, nextContext);
+}
 
 function createRouteHarness() {
   const routes = new Map();
@@ -70,6 +82,10 @@ function api() {
     async retrySettingsApply() { calls.push('retry'); return { ...status, status: 'applied' }; },
     async updateLayoutSettings(patch) { calls.push(['layout-update', patch]); return { ...status, layoutStatus: { status: 'applied', applied: { layout: 'shelf', ...patch } } }; },
     getVisualSettingsStatus() { calls.push('visual-status'); return { revision: 1, status: 'saved', profile: { version: 1 } }; },
+    listVisualProfiles() { calls.push('visual-profiles'); return [{ profileId: 'visual.default', name: '默认视觉方案', references: [] }]; },
+    saveVisualProfile(input) { calls.push(['visual-profile-save', input]); return { profileId: input.profileId, name: input.name, references: [], visualRevision: 2 }; },
+    previewApplyVisualProfile(input) { calls.push(['visual-profile-preview', input]); return { added: input.eventIds.length, replaced: 0, unchanged: 0 }; },
+    applyVisualProfileToEvents(input) { calls.push(['visual-profile-apply', input]); return { added: input.eventIds, replaced: [], unchanged: [], visualRevision: 2 }; },
     getEventPresentationSettings() { calls.push('event-presentation-status'); return { revision: 1, status: 'saved', rows: [], settings: { importanceKeywords: { keywords: [] } } }; },
     async updateEventPresentationSettings(patch) { calls.push(['event-presentation-update', patch]); return { revision: 2, status: 'applied', rows: [], settings: { importanceKeywords: { keywords: [] } } }; }
   };
@@ -80,17 +96,18 @@ test('settings page is one shell with internal settings views', async () => {
   const plugin = api();
   registerSettingsRoute(harness.app, { _notificationHubVNextPlugin: plugin });
 
-  assert.equal(harness.routes.size, 28);
+  assert.equal(harness.routes.size, 36);
   const page = harness.routes.get('GET /settings')(harness.contextFor({}, '/settings'));
   assert.equal(page.kind, 'html');
   assert.match(page.value, /Notification Hub 设置/);
   assert.match(page.value, /settings-shell/);
   assert.match(page.value, /settings-shell-sidebar/);
   assert.match(page.value, /settings-view-content/);
-  assert.match(page.value, /常规与显示/);
+  assert.match(page.value, /常规/);
   assert.match(page.value, /声音/);
   assert.match(page.value, /通知视觉/);
-  assert.match(page.value, /事件表现/);
+  assert.doesNotMatch(page.value, /通知行为/);
+  assert.doesNotMatch(page.value, /事件表现/);
   assert.match(page.value, /历史与隐私/);
   assert.match(page.value, /NotificationHubSettingsShell/);
   assert.doesNotMatch(page.value, /mountInitialView/);
@@ -98,6 +115,7 @@ test('settings page is one shell with internal settings views', async () => {
   assert.match(page.value, /settings-content\?view=/);
   assert.match(page.value, /window\.hana\.api\.fetch/);
   assert.match(page.value, /notification-hub-view-before-unload/);
+  assert.match(page.value, /SETTINGS_VIEW_SCRIPT_MOUNT_FAILED/);
   assert.doesNotMatch(page.value, /document\.open\(\)/);
   assert.doesNotMatch(page.value, /document\.write\(/);
   assert.doesNotMatch(page.value, /scene-card-count/);
@@ -125,15 +143,23 @@ test('settings page is one shell with internal settings views', async () => {
   assert.match(soundPage.value, /asset-list/);
   assert.match(soundPage.value, /sound-package-import/);
   assert.match(soundPage.value, /sound-package-export/);
+  const soundAudioPanel = soundPage.value.indexOf('<article class="panel audio-library-panel');
+  const soundAdvancedTools = soundPage.value.indexOf('<details class="advanced-tools"');
+  assert.ok(soundAudioPanel >= 0 && soundAdvancedTools > soundAudioPanel);
+  assert.match(page.value, /settings-shell-nav-item[^}]*font-weight:400/);
+  assert.match(page.value, /settings-shell-content:has\(\[data-settings-view-root="visual"\]\)/);
+  assert.match(page.value, /settings-shell-content:has\(\[data-settings-sound-root="true"\]\)/);
   assert.match(soundPage.value, /<!doctype html>/i);
 
   const generalFragment = harness.routes.get('GET /settings-content')(harness.contextFor({}, '/settings-content?view=general'));
   assert.equal(generalFragment.kind, 'html');
-  assert.match(generalFragment.value, /常规与显示|通知中心显示/);
+  assert.match(generalFragment.value, /常规|通知中心显示/);
   assert.match(generalFragment.value, /settings-display-limit-mode/);
-  assert.match(generalFragment.value, /card-lifetime/);
-  assert.match(generalFragment.value, /0～3600/);
   assert.match(generalFragment.value, /notification-center-display-settings/);
+  assert.match(generalFragment.value, /重要性关键词/);
+  assert.doesNotMatch(generalFragment.value, /卡持续时间/);
+  assert.doesNotMatch(generalFragment.value, /0～3600/);
+  assert.doesNotMatch(generalFragment.value, /当前边界/);
   assert.doesNotMatch(generalFragment.value, /<!doctype html>/i);
   assert.doesNotMatch(generalFragment.value, /page-navigation/);
 
@@ -160,6 +186,15 @@ test('settings child views keep independent APIs', async () => {
   const displayUpdateResponse = await harness.routes.get('POST /notification-display-settings')(harness.contextFor({ mode: 'custom', limit: 321, cardLifetimeSeconds: 0 }));
   assert.equal(displayUpdateResponse.value.ok, true);
   assert.deepEqual(plugin.calls.at(-1), ['display-update', { mode: 'custom', limit: 321, cardLifetimeSeconds: 0 }]);
+
+  const profilesResponse = await harness.routes.get('GET /visual-profiles')(harness.contextFor());
+  assert.equal(profilesResponse.value.ok, true);
+  const saveProfileResponse = await harness.routes.get('POST /visual-profiles/save')(harness.contextFor({ profileId: 'visual.default', name: '默认视觉方案', profile: {} }));
+  assert.equal(saveProfileResponse.value.ok, true);
+  const previewProfileResponse = await harness.routes.get('POST /visual-profiles/preview-apply')(harness.contextFor({ profileId: 'visual.default', eventIds: ['tool.execution.succeeded'] }));
+  assert.equal(previewProfileResponse.value.preview.added, 1);
+  const applyProfileResponse = await harness.routes.get('POST /visual-profiles/apply')(harness.contextFor({ profileId: 'visual.default', eventIds: ['tool.execution.succeeded'], behaviorChannelId: 'stack.tool' }));
+  assert.equal(applyProfileResponse.value.result.added[0], 'tool.execution.succeeded');
 
   const soundAssetsResponse = await harness.routes.get('GET /sound-assets-status')(harness.contextFor());
   const explainResponse = await harness.routes.get('POST /sound-rule-explain')(harness.contextFor({ input: { labels: ['chat'], event: 'arrived', importance: 'normal' } }));
@@ -208,6 +243,146 @@ test('settings child views keep independent APIs', async () => {
   const retryResponse = await harness.routes.get('POST /settings-retry')(harness.contextFor());
   assert.equal(retryResponse.value.ok, true);
   assert.equal(plugin.calls.at(-1), 'retry');
+});
+
+test('settings routes reject invalid JSON before entering the plugin API', async () => {
+  const harness = createRouteHarness();
+  let called = false;
+  registerSettingsRoute(harness.app, {
+    _notificationHubVNextPlugin: {
+      async updateSettings() { called = true; }
+    }
+  });
+  const response = await harness.routes.get('POST /settings-update')({
+    ...harness.contextFor(),
+    req: { ...harness.contextFor().req, json: async () => { throw new SyntaxError('Unexpected token'); } }
+  });
+  assert.equal(response.status, 400);
+  assert.deepEqual(response.value, {
+    ok: false,
+    error: { code: 'ROUTE_INVALID_JSON', message: '请求体必须是合法 JSON。', details: { field: 'body' } }
+  });
+  assert.equal(called, false);
+});
+
+test('sound asset and package JSON routes reject invalid JSON with the shared route error body', async () => {
+  const routeNames = [
+    'POST /sound-asset-configure',
+    'POST /sound-asset-delete',
+    'POST /sound-asset-import',
+    'POST /sound-asset-test',
+    'POST /sound-combo-package-export',
+    'POST /sound-package-export'
+  ];
+  for (const routeName of routeNames) {
+    const harness = createRouteHarness();
+    let called = false;
+    registerSettingsRoute(harness.app, { _notificationHubVNextPlugin: {
+      updateSoundAssetConfiguration() { called = true; },
+      deleteSoundAsset() { called = true; },
+      importSoundAsset() { called = true; },
+      testSoundAsset() { called = true; },
+      exportSoundComboPackage() { called = true; },
+      exportSoundPackage() { called = true; }
+    } });
+    const base = harness.contextFor({});
+    const request = { ...base.req, json: async () => { throw new SyntaxError('Unexpected token'); } };
+    if (routeName === 'POST /sound-asset-import') request.header = () => 'application/json';
+    const response = await harness.routes.get(routeName)({ ...base, req: request });
+    assert.equal(response.status, 400, routeName);
+    assert.deepEqual(response.value.error, { code: 'ROUTE_INVALID_JSON', message: '请求体必须是合法 JSON。', details: { field: 'body' } });
+    assert.equal(called, false, routeName);
+  }
+});
+
+test('sound asset and package routes use domain-specific HTTP status mappings', async () => {
+  const notFound = createRouteHarness();
+  registerSettingsRoute(notFound.app, { _notificationHubVNextPlugin: {
+    async updateSoundAssetConfiguration() { throw Object.assign(new Error('missing'), { code: 'SOUND_ASSET_NOT_FOUND', details: { field: 'soundId' } }); }
+  } });
+  const notFoundResponse = await notFound.routes.get('POST /sound-asset-configure')(notFound.contextFor({ soundId: 'missing' }));
+  assert.equal(notFoundResponse.status, 404);
+  assert.equal(notFoundResponse.value.error.code, 'SOUND_ASSET_NOT_FOUND');
+
+  const conflict = createRouteHarness();
+  registerSettingsRoute(conflict.app, { _notificationHubVNextPlugin: {
+    async deleteSoundAsset() { throw Object.assign(new Error('in use'), { code: 'SOUND_ASSET_IN_USE', details: { field: 'soundId' } }); }
+  } });
+  const conflictResponse = await conflict.routes.get('POST /sound-asset-delete')(conflict.contextFor({ soundId: 'busy' }));
+  assert.equal(conflictResponse.status, 409);
+  assert.equal(conflictResponse.value.error.code, 'SOUND_ASSET_IN_USE');
+
+  const invalidExport = createRouteHarness();
+  registerSettingsRoute(invalidExport.app, { _notificationHubVNextPlugin: {
+    async exportSoundPackage() { throw Object.assign(new Error('destination'), { code: 'SOUND_PACKAGE_DESTINATION_INVALID' }); }
+  } });
+  const invalidExportResponse = await invalidExport.routes.get('POST /sound-package-export')(invalidExport.contextFor({}));
+  assert.equal(invalidExportResponse.status, 400);
+
+  const internal = createRouteHarness();
+  registerSettingsRoute(internal.app, { _notificationHubVNextPlugin: {
+    async testSoundAsset() { throw Object.assign(new Error('storage'), { code: 'SOUND_ASSET_STORE_FAILED' }); }
+  } });
+  const internalResponse = await internal.routes.get('POST /sound-asset-test')(internal.contextFor({ soundId: 'custom' }));
+  assert.equal(internalResponse.status, 500);
+  assert.equal(internalResponse.value.error.code, 'SOUND_ASSET_STORE_FAILED');
+
+  const unavailable = createRouteHarness();
+  registerSettingsRoute(unavailable.app, { _notificationHubVNextPlugin: {} });
+  const unavailableResponse = await unavailable.routes.get('POST /sound-package-export')(unavailable.contextFor({}));
+  assert.equal(unavailableResponse.status, 503);
+  assert.deepEqual(unavailableResponse.value.error, { code: 'SOUND_ASSET_API_UNAVAILABLE', message: 'Sound package API unavailable', details: {} });
+});
+
+test('sound routes do not fall back to the legacy Plugin context when either sound service is missing', async () => {
+  const harness = createRouteHarness();
+  let called = false;
+  registerSettingsRouteImpl(harness.app, { _notificationHubVNextPlugin: {
+    getSoundSettingsStatus() { called = true; },
+    getSoundAssetStatus() { called = true; }
+  } });
+  const settingsResponse = await harness.routes.get('GET /sound-settings-status')(harness.contextFor());
+  const assetResponse = await harness.routes.get('GET /sound-assets-status')(harness.contextFor());
+  assert.equal(settingsResponse.status, 503);
+  assert.equal(settingsResponse.value.error.code, 'SOUND_SETTINGS_API_UNAVAILABLE');
+  assert.equal(assetResponse.status, 503);
+  assert.equal(assetResponse.value.error.code, 'SOUND_ASSET_API_UNAVAILABLE');
+  assert.equal(called, false);
+});
+
+test('sound routes use the explicitly injected narrow service for their responsibility', async () => {
+  const harness = createRouteHarness();
+  const calls = [];
+  const settingsService = { getSoundSettingsStatus() { calls.push('settings'); return { revision: 1 }; } };
+  const assetService = { getSoundAssetStatus() { calls.push('assets'); return { assets: [] }; } };
+  registerSettingsRouteImpl(harness.app, {
+    _notificationHubVNextSettingsApi: { getSoundSettingsStatus() { throw new Error('wrong source'); } },
+    _notificationHubVNextSoundSettingsServices: Object.freeze(settingsService),
+    _notificationHubVNextSoundAssetServices: Object.freeze(assetService),
+    _notificationHubVNextPlugin: { getSoundSettingsStatus() { throw new Error('legacy fallback'); }, getSoundAssetStatus() { throw new Error('legacy fallback'); } }
+  });
+  assert.equal((await harness.routes.get('GET /sound-settings-status')(harness.contextFor())).value.revision, 1);
+  assert.deepEqual((await harness.routes.get('GET /sound-assets-status')(harness.contextFor())).value.assets, []);
+  assert.deepEqual(calls, ['settings', 'assets']);
+});
+
+test('settings routes preserve unavailable and internal error status mappings', async () => {
+  const unavailable = createRouteHarness();
+  registerSettingsRoute(unavailable.app, {});
+  const unavailableResponse = await unavailable.routes.get('POST /settings-update')(unavailable.contextFor({}));
+  assert.equal(unavailableResponse.status, 503);
+  assert.equal(unavailableResponse.value.error.code, 'SETTINGS_API_UNAVAILABLE');
+  assert.deepEqual(unavailableResponse.value.error.details, {});
+
+  const internal = createRouteHarness();
+  registerSettingsRoute(internal.app, {
+    _notificationHubVNextPlugin: {
+      async updateSettings() { throw Object.assign(new Error('database unavailable'), { code: 'SETTINGS_STORE_WRITE_FAILED' }); }
+    }
+  });
+  const internalResponse = await internal.routes.get('POST /settings-update')(internal.contextFor({}));
+  assert.equal(internalResponse.status, 500);
+  assert.equal(internalResponse.value.error.code, 'SETTINGS_STORE_WRITE_FAILED');
 });
 
 test('settings routes return structured validation errors', async () => {

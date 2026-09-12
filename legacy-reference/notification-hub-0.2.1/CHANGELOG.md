@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.2.2 - 2026-08-23
+
+### Fixed
+
+- Removed the empty string from `list-notifications.type.enum`; Gemini-compatible providers reject empty enum values.
+- Kept `type` optional so omitting it still returns notifications across all types.
+
+### Validation
+
+- Added a schema regression check for empty enum values and unsupported `const`/`deprecated` fields.
+
+
 ## 0.2.1 - 2026-06-06
 
 ### Fixed

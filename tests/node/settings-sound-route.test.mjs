@@ -80,6 +80,15 @@ test('sound settings page exposes the simplified configuration workbench and aud
   assert.match(html, /导出音频包（\.nhsound）/);
   assert.match(html, /sound-settings-test/);
   assert.match(html, /声音实验台/);
+  assert.match(html, /custom-sound-panel/);
+  assert.match(html, /audio-library-panel/);
+  const audioPanel = html.indexOf('<article class="panel audio-library-panel');
+  const advancedTools = html.indexOf('<details class="advanced-tools"');
+  assert.ok(audioPanel >= 0 && advancedTools > audioPanel, '音频库应位于高级工具与诊断之前');
+  assert.match(html, /audio-library-primary/);
+  assert.match(html, /sound-workbench-panel/);
+  assert.match(html, /sound-diagnostics-panel/);
+  assert.match(html, /\.sound-diagnostics-panel\s*\{\s*grid-column:\s*1\s*\/\s*-1\s*;\s*\}/);
   assert.match(html, /workbench-event-id/);
   assert.match(html, /workbench-count/);
   assert.match(html, /workbench-interval/);
@@ -115,6 +124,37 @@ test('sound settings page exposes the simplified configuration workbench and aud
   assert.doesNotMatch(html, /overflow-x\s*:\s*hidden/);
   assert.doesNotMatch(html, /window\.confirm/);
   assert.doesNotMatch(html, /document\.open\(\)/);
+});
+
+test('sound settings page falls back cleanly when the status API is unavailable', () => {
+  const { app, routes } = harness();
+  registerSoundSettingsRoute(app, {});
+  const response = routes.get('GET /settings-sound')({
+    req: { url: '/settings-sound' },
+    html(value) { return { kind: 'html', value }; }
+  });
+  assert.equal(response.kind, 'html');
+  assert.match(response.value, /声音设置/);
+});
+
+test('sound settings route does not fall back to the broad plugin API', () => {
+  const { app, routes } = harness();
+  let called = false;
+  registerSoundSettingsRoute(app, {
+    _notificationHubVNextPlugin: {
+      getSoundSettingsStatus() {
+        called = true;
+        return { marker: 'must-not-be-read' };
+      }
+    }
+  });
+  const response = routes.get('GET /settings-sound')({
+    req: { url: '/settings-sound' },
+    html(value) { return { kind: 'html', value }; }
+  });
+  assert.equal(response.kind, 'html');
+  assert.equal(called, false);
+  assert.doesNotMatch(response.value, /must-not-be-read/);
 });
 
 test('sound settings route only registers a non-page-surface HTML route', () => {

@@ -7,6 +7,7 @@
 #include "../scene/layout.hpp"
 #include "../scene/work_area.hpp"
 #include "../scene/window.hpp"
+#include "../scene/visual.hpp"
 
 #ifdef _WIN32
 #include <windows.h>
@@ -36,6 +37,7 @@ using notification_hub::scene::Pixel;
 using notification_hub::scene::RuntimeSceneController;
 using notification_hub::scene::SceneWindow;
 using notification_hub::scene::SceneCardState;
+using notification_hub::scene::VisualStyle;
 using notification_hub::scene::StackAnchor;
 using notification_hub::scene::StackCardInput;
 using notification_hub::scene::StackDirection;
@@ -130,6 +132,82 @@ bool hit_test_self_test() {
         "Card and transparent-region hit testing completed", std::string(kTimestamp));
     std::cout << serialize_jsonl(event);
     return true;
+}
+
+bool visual_asset_self_test(std::string_view asset_path, std::string_view asset_sha256) {
+#ifndef _WIN32
+    static_cast<void>(asset_path);
+    return false;
+#else
+    if (asset_path.empty()) return false;
+    SceneWindow window(WindowConfig{L"Notification Hub PNG Self Test", L"PNG background", 420, 180, true});
+    VisualStyle visual{};
+    visual.specified = true;
+    visual.background_asset_path = std::string(asset_path);
+    visual.background_asset_sha256 = std::string(asset_sha256);
+    visual.background_color = "#0e1916";
+    window.update_visual(visual);
+    if (!window.create() || !window.is_renderer_ready() || !window.show() || !window.paint(true)) return false;
+    Pixel sample{};
+    const bool sampled = window.capture_pixels() && window.sample_pixel(380, 150, sample);
+    const bool image_visible = sampled && sample.red > 180 && sample.green < 100 && sample.blue < 100 && sample.alpha > 180;
+    window.request_close();
+    const auto pump_result = window.run_message_pump(false);
+    if (!image_visible || pump_result != 0 || window.is_created()) {
+        std::cerr << "png self-test sample=" << static_cast<int>(sample.red) << "," << static_cast<int>(sample.green) << "," << static_cast<int>(sample.blue) << "," << static_cast<int>(sample.alpha) << "\\n";
+        return false;
+    }
+    return true;
+#endif
+}
+
+bool visual_asset_opacity_self_test(std::string_view asset_path, std::string_view asset_sha256) {
+#ifndef _WIN32
+    static_cast<void>(asset_path); static_cast<void>(asset_sha256); return false;
+#else
+    if (asset_path.empty() || asset_sha256.empty()) return false;
+    SceneWindow window(WindowConfig{L"Notification Hub Opacity Self Test", L"Opacity", 420, 180, true});
+    VisualStyle visual{};
+    visual.specified = true;
+    visual.background_asset_path = std::string(asset_path);
+    visual.background_asset_sha256 = std::string(asset_sha256);
+    visual.background_color = "#0e1916";
+    visual.opacity = 0.5f;
+    window.update_visual(visual);
+    if (!window.create() || !window.is_renderer_ready() || !window.show() || !window.paint(true)) return false;
+    Pixel sample{};
+    const bool sampled = window.capture_pixels() && window.sample_pixel(380, 150, sample);
+    const bool valid = sampled && sample.red > 60 && sample.red < 200 && sample.alpha > 60 && sample.alpha < 255;
+    window.request_close();
+    const auto pump_result = window.run_message_pump(false);
+    return valid && pump_result == 0 && !window.is_created();
+#endif
+}
+
+bool visual_asset_fallback_self_test(std::string_view asset_path) {
+#ifndef _WIN32
+    static_cast<void>(asset_path);
+    return false;
+#else
+    if (asset_path.empty()) return false;
+    SceneWindow window(WindowConfig{L"Notification Hub PNG Fallback Self Test", L"Fallback", 420, 180, true});
+    VisualStyle visual{};
+    visual.specified = true;
+    visual.background_asset_path = std::string(asset_path);
+    visual.background_asset_sha256 = "a2f1fd24269194c781385faedf255eead2ddc66f0a8200d04bdaa040d42e2a22";
+    visual.background_color = "#123456";
+    visual.opacity = 1.0f;
+    window.update_visual(visual);
+    if (!window.create() || !window.is_renderer_ready() || !window.show() || !window.paint(true)) return false;
+    Pixel sample{};
+    const bool sampled = window.capture_pixels() && window.sample_pixel(380, 150, sample);
+    const bool color_fallback = sampled && sample.red >= 14 && sample.red <= 24
+        && sample.green >= 44 && sample.green <= 60
+        && sample.blue >= 76 && sample.blue <= 96 && sample.alpha > 180;
+    window.request_close();
+    const auto pump_result = window.run_message_pump(false);
+    return color_fallback && pump_result == 0 && !window.is_created();
+#endif
 }
 
 bool visual_self_test() {
@@ -1154,6 +1232,17 @@ bool protocol_self_test() {
         R"({"protocolVersion":1,"requestId":"req-health","traceId":"trace-health","type":"health","timestamp":"2026-08-01T00:00:00.000Z","payload":{}})";
 
     if (!expect_valid(hello, "hello") || !expect_valid(health, "health")) return false;
+    constexpr std::string_view audio_play =
+        R"({"protocolVersion":1,"requestId":"req-corpus-audio","traceId":"trace-corpus-audio","type":"audio.play","timestamp":"2026-08-01T00:00:00.000Z","payload":{"soundId":"default"}})";
+    constexpr std::string_view visual_assets =
+        R"({"protocolVersion":1,"requestId":"req-corpus-assets","traceId":"trace-corpus-assets","type":"visual-assets.configure","timestamp":"2026-08-01T00:00:00.000Z","payload":{"version":1,"assets":[]}})";
+    constexpr std::string_view voice_event =
+        R"({"protocolVersion":1,"requestId":"evt-corpus-voice","traceId":"trace-corpus-voice","type":"event","timestamp":"2026-08-01T00:00:00.000Z","payload":{"eventType":"audio.voice_finished","result":{}}})";
+    if (!expect_valid(audio_play, "audio.play") || !expect_valid(visual_assets, "visual-assets.configure")
+        || !expect_valid(voice_event, "event")) return false;
+    if (!expect_rejected(
+            R"({"protocolVersion":1,"requestId":"req-invalid-time","traceId":"trace-invalid-time","type":"health","timestamp":"2026-08-01","payload":{}})",
+            "PROTOCOL_INVALID_MESSAGE")) return false;
     constexpr std::string_view escaped_scene =
         R"({"protocolVersion":1,"requestId":"req-escaped","traceId":"trace-escaped","type":"scene.create","timestamp":"2026-08-01T00:00:00.000Z","payload":{"id":"card-\u4e2d\ud83d\ude80","title":"\u6d4b\u8bd5","body":"escaped unicode"}})";
     const auto escaped_result = parse_message(escaped_scene);
@@ -1180,6 +1269,16 @@ bool protocol_self_test() {
 
     const auto parsed = parse_message(hello);
     const auto ack = serialize_ack(parsed.message, R"({"status":"healthy"})");
+    const auto error = notification_hub::protocol::serialize_error({
+        "PROTOCOL_INVALID_MESSAGE", "invalid request", "req-test", "trace-test", "health", false, R"({"field":"timestamp"})"
+    });
+    if (error.find("\"requestType\":\"health\"") == std::string::npos
+        || error.find("\"accepted\":false") == std::string::npos
+        || error.find("\"retryable\":false") == std::string::npos
+        || error.find("\"details\":{\"field\":\"timestamp\"}") == std::string::npos) {
+        std::cerr << "error response contract failed\n";
+        return false;
+    }
     if (ack.find("\"type\":\"ack\"") == std::string::npos ||
         ack.find("\"requestId\":\"req-test\"") == std::string::npos) {
         std::cerr << "ack correlation failed\n";
@@ -1219,8 +1318,13 @@ bool protocol_self_test() {
 
 int main(int argc, char** argv) {
     if (argc > 1 && std::string_view(argv[1]) == "--self-test") {
-        std::cout << "notification-hub-runtime self-test: ok\n";
-        return 0;
+        const bool protocol_passed = protocol_self_test();
+        const bool transport_passed = transport_self_test();
+        const bool passed = protocol_passed && transport_passed;
+        std::cout << "notification-hub-runtime self-test: " << (passed ? "ok" : "failed")
+                  << " (protocol=" << (protocol_passed ? "ok" : "failed")
+                  << ", transport=" << (transport_passed ? "ok" : "failed") << ")\n";
+        return passed ? 0 : 1;
     }
     if (argc > 1 && std::string_view(argv[1]) == "--config-self-test") {
         const bool passed = notification_hub::config::config_self_test();
@@ -1310,6 +1414,21 @@ int main(int argc, char** argv) {
     if (argc > 1 && std::string_view(argv[1]) == "--visual-self-test") {
         const bool passed = visual_self_test();
         std::cout << "notification-hub-runtime visual self-test: " << (passed ? "ok" : "failed") << "\n";
+        return passed ? 0 : 1;
+    }
+    if (argc > 3 && std::string_view(argv[1]) == "--visual-asset-self-test") {
+        const bool passed = visual_asset_self_test(argv[2], argv[3]);
+        std::cout << "notification-hub-runtime visual asset self-test: " << (passed ? "ok" : "failed") << "\n";
+        return passed ? 0 : 1;
+    }
+    if (argc > 3 && std::string_view(argv[1]) == "--visual-asset-opacity-self-test") {
+        const bool passed = visual_asset_opacity_self_test(argv[2], argv[3]);
+        std::cout << "notification-hub-runtime visual asset opacity self-test: " << (passed ? "ok" : "failed") << "\n";
+        return passed ? 0 : 1;
+    }
+    if (argc > 2 && std::string_view(argv[1]) == "--visual-asset-fallback-self-test") {
+        const bool passed = visual_asset_fallback_self_test(argv[2]);
+        std::cout << "notification-hub-runtime visual asset fallback self-test: " << (passed ? "ok" : "failed") << "\n";
         return passed ? 0 : 1;
     }
     if (argc > 2 && std::string_view(argv[1]) == "--pipe-server") {

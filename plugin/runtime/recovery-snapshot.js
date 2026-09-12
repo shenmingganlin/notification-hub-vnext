@@ -33,12 +33,17 @@ function cloneJson(value) {
 }
 
 function validateVisualPayload(visual) {
+  const allowed = ['enabled', 'preset', 'intensity', 'category', 'cardType', 'behavior', 'appearance', 'interaction'];
   if (!isRecord(visual)
     || typeof visual.enabled !== 'boolean'
     || !['minimal', 'soft', 'accent', 'warning', 'critical'].includes(visual.preset)
     || !['reduced', 'balanced', 'expressive'].includes(visual.intensity)
     || (visual.category !== null && !['chat', 'channel', 'tool', 'error', 'plugin', 'model_service'].includes(visual.category))
-    || Object.keys(visual).some((field) => !['enabled', 'preset', 'intensity', 'category'].includes(field))) {
+    || (visual.cardType !== undefined && !['minimal', 'danmaku', 'popup'].includes(visual.cardType))
+    || (visual.behavior !== undefined && !isRecord(visual.behavior))
+    || (visual.appearance !== undefined && !isRecord(visual.appearance))
+    || (visual.interaction !== undefined && !isRecord(visual.interaction))
+    || Object.keys(visual).some((field) => !allowed.includes(field))) {
     throw recoveryError('RUNTIME_RECOVERY_INVALID_PAYLOAD', 'scene card visual payload is invalid');
   }
 }

@@ -3,6 +3,7 @@ import { spawn } from 'node:child_process';
 
 import { validateRecoverySnapshot } from './recovery-snapshot.js';
 import { selectRecoveryPlan } from './recovery-plan.js';
+import { RecoveryReplayCoordinator } from './recovery-replay.js';
 
 function processError(code, message, details = {}) {
   return Object.assign(new Error(message), { code, details });
@@ -27,6 +28,7 @@ export class RuntimeProcessManager extends EventEmitter {
     restartRuntimeArgs,
     readyTimeoutMs = 3000,
     restartDelayMs = 25,
+    stabilityWindowMs = 1000,
     maxRestartAttempts = 2,
     autoRestart = true,
     sceneStateSyncIntervalMs = 500,
@@ -35,7 +37,8 @@ export class RuntimeProcessManager extends EventEmitter {
     recoveryClient,
     sceneStatePersistence,
     clientVersion = 'notification-hub-host',
-    spawnOptions = {}
+    spawnOptions = {},
+    spawnProcess = spawn
   } = {}) {
     super();
     if (typeof runtimePath !== 'string' || runtimePath.length === 0) {
@@ -53,6 +56,7 @@ export class RuntimeProcessManager extends EventEmitter {
     this.restartRuntimeArgs = restartRuntimeArgs === undefined ? [...runtimeArgs] : [...restartRuntimeArgs];
     this.readyTimeoutMs = readyTimeoutMs;
     this.restartDelayMs = restartDelayMs;
+    this.stabilityWindowMs = stabilityWindowMs;
     this.maxRestartAttempts = maxRestartAttempts;
     this.autoRestart = autoRestart;
     if (!Number.isFinite(sceneStateSyncIntervalMs) || sceneStateSyncIntervalMs < 0) {
@@ -78,17 +82,25 @@ export class RuntimeProcessManager extends EventEmitter {
     this.persistenceDiagnosticHandler = null;
     this.persistenceDiagnosticSource = null;
     this.spawnOptions = { windowsHide: true, ...spawnOptions };
+    this.spawnProcess = spawnProcess;
     if (sceneStatePersistence !== undefined) this.setSceneStatePersistence(sceneStatePersistence);
     if (recoveryClient !== undefined) this.setRecoveryClient(recoveryClient);
     this.child = null;
     this.startPromise = null;
     this.startGeneration = 0;
     this.restartTimer = null;
+    this.stabilityTimer = null;
     this.sceneStateSyncTimer = null;
     this.sceneStateSyncInFlight = false;
     this.sceneStateSyncGeneration = 0;
     this.lastSceneStateFingerprint = null;
     this.recoveryInProgress = false;
+    this.recoveryAttempts = new Map();
+    this.recoveryReplay = new RecoveryReplayCoordinator({
+      snapshot: this.recoverySnapshot ?? { entries: [] },
+      attempts: this.recoveryAttempts,
+      diagnostics: this.recoveryDiagnostics
+    });
     this.intentionalStop = false;
     this.restartAttempts = 0;
     this.state = 'stopped';
@@ -113,7 +125,7 @@ export class RuntimeProcessManager extends EventEmitter {
     this.startPromise = new Promise((resolve, reject) => {
       let child;
       try {
-        child = spawn(
+        child = this.spawnProcess(
           this.runtimePath,
           [
             '--pipe-server',
@@ -161,7 +173,7 @@ export class RuntimeProcessManager extends EventEmitter {
           finish(reject, processError('RUNTIME_START_CANCELLED', 'Runtime start was cancelled'));
           return;
         }
-        this.restartAttempts = 0;
+        this.armStabilityWindow(child);
         this.setState('running', 'ready');
         finish(resolve);
       });
@@ -186,6 +198,7 @@ export class RuntimeProcessManager extends EventEmitter {
           if (!settled) finish(reject, processError('RUNTIME_START_CANCELLED', 'Runtime start was cancelled', { code, signal }));
           return;
         }
+        this.clearStabilityWindow();
         this.setState(this.intentionalStop ? 'stopped' : 'crashed', 'process-exit');
         this.emit('exit', { code, signal, intentional: this.intentionalStop });
         if (!settled) {
@@ -204,7 +217,24 @@ export class RuntimeProcessManager extends EventEmitter {
     return this.startPromise;
   }
 
+  armStabilityWindow(child) {
+    if (this.stabilityTimer) clearTimeout(this.stabilityTimer);
+    this.stabilityTimer = setTimeout(() => {
+      this.stabilityTimer = null;
+      if (this.child === child && this.state === 'running' && !this.intentionalStop) {
+        this.restartAttempts = 0;
+      }
+    }, this.stabilityWindowMs);
+    this.stabilityTimer.unref?.();
+  }
+
+  clearStabilityWindow() {
+    if (this.stabilityTimer) clearTimeout(this.stabilityTimer);
+    this.stabilityTimer = null;
+  }
+
   scheduleRestart() {
+    this.clearStabilityWindow();
     if (this.restartTimer || this.intentionalStop || this.restartAttempts >= this.maxRestartAttempts) {
       if (this.restartAttempts >= this.maxRestartAttempts) {
         this.emitDiagnostic('RUNTIME_RESTART_EXHAUSTED', 'Runtime restart attempts exhausted', {
@@ -250,6 +280,8 @@ export class RuntimeProcessManager extends EventEmitter {
     this.recoverySnapshot = validateRecoverySnapshot(snapshot);
     this.recoverySource = 'recovery-snapshot';
     this.recoveryDiagnostics = [];
+    this.recoveryReplay.setSnapshot(this.recoverySnapshot);
+    this.recoveryReplay.diagnostics = this.recoveryDiagnostics;
     return this.recoverySnapshot;
   }
 
@@ -266,6 +298,8 @@ export class RuntimeProcessManager extends EventEmitter {
     this.recoverySnapshot = validateRecoverySnapshot(plan.snapshot);
     this.recoverySource = plan.source ?? 'recovery-snapshot';
     this.recoveryDiagnostics = Array.isArray(plan.diagnostics) ? [...plan.diagnostics] : [];
+    this.recoveryReplay?.setSnapshot(this.recoverySnapshot);
+    if (this.recoveryReplay) this.recoveryReplay.diagnostics = this.recoveryDiagnostics;
     for (const diagnostic of this.recoveryDiagnostics) {
       this.emitDiagnostic(diagnostic.code, diagnostic.message, diagnostic);
     }
@@ -329,7 +363,8 @@ export class RuntimeProcessManager extends EventEmitter {
       }
       return null;
     }
-    return this.observeSceneStateSnapshot(snapshot, { updateRecovery: false });
+    const updateRecovery = message?.payload?.requestType !== 'health';
+    return this.observeSceneStateSnapshot(snapshot, { updateRecovery });
   }
 
   observeSceneStateEvent(message) {
@@ -510,46 +545,12 @@ export class RuntimeProcessManager extends EventEmitter {
 
     const previousRecoveryState = this.recoveryInProgress;
     this.recoveryInProgress = true;
-    const results = [];
     try {
-      for (const entry of [...this.recoverySnapshot.entries]) {
-        try {
-          const response = await client.request(entry.type, entry.payload, {
-            retryable: true,
-            maxAttempts: 2,
-            idempotencyKey: `recovery:${this.recoverySnapshot.updatedAt}:${entry.key}`
-          });
-          results.push({ key: entry.key, type: entry.type, response });
-          this.emit('recovery-applied', { key: entry.key, type: entry.type });
-        } catch (error) {
-          const wrapped = processError(
-            'RUNTIME_RECOVERY_ENTRY_SKIPPED',
-            `Recovery entry skipped: ${entry.key}`,
-            {
-              key: entry.key,
-              type: entry.type,
-              cause: error.code,
-              message: error.message
-            }
-          );
-          this.recoveryDiagnostics.push({
-            code: wrapped.code,
-            message: wrapped.message,
-            ...wrapped.details
-          });
-          const failedIndex = this.recoverySnapshot.entries.findIndex((candidate) => candidate.key === entry.key);
-          if (failedIndex >= 0) this.recoverySnapshot.entries.splice(failedIndex, 1);
-          this.emitDiagnostic(wrapped.code, wrapped.message, wrapped.details);
-          this.emit('recovery-skipped', wrapped.details);
-          results.push({
-            key: entry.key,
-            type: entry.type,
-            skipped: true,
-            error: wrapped
-          });
-        }
-      }
-      return results;
+      return await this.recoveryReplay.replay(client, {
+        onApplied: ({ key, type }) => this.emit('recovery-applied', { key, type }),
+        onDiagnostic: (error) => this.emitDiagnostic(error.code, error.message, error.details),
+        onSkipped: (details) => this.emit('recovery-skipped', details)
+      });
     } finally {
       this.recoveryInProgress = previousRecoveryState;
     }
@@ -557,6 +558,7 @@ export class RuntimeProcessManager extends EventEmitter {
 
   async restart() {
     await this.stop();
+    this.clearStabilityWindow();
     this.restartAttempts = 0;
     await this.start();
     await this.restoreRecoverySnapshot();
@@ -566,6 +568,7 @@ export class RuntimeProcessManager extends EventEmitter {
 
   async stop() {
     this.intentionalStop = true;
+    this.clearStabilityWindow();
     this.startGeneration += 1;
     this.stopSceneStateSync();
     let persistenceError = null;

@@ -1,0 +1,35 @@
+import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
+import { readFile } from 'node:fs/promises';
+import { spawn } from 'node:child_process';
+import test from 'node:test';
+import { PipeClient } from '../../plugin/runtime/pipe-client.js';
+const runtimePath = process.argv[2];
+test('Native manifest trust gates backgroundAssetId without blocking scene.create', async (t) => {
+  if (!runtimePath) { t.skip('requires Runtime executable'); return; }
+  const rootDir = process.cwd();
+  const relativePath = 'tests/fixtures/visual-asset-red.png';
+  const assetId = 'visual-asset-red';
+  const bytes = await readFile(`${rootDir}/${relativePath}`);
+  const sha256 = createHash('sha256').update(bytes).digest('hex');
+  const pipeName = `\\\\.\\pipe\\notification-hub-vnext-visual-card-${process.pid}`;
+  const runtime = spawn(runtimePath, ['--pipe-server', pipeName], { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
+  t.after(() => { if (!runtime.killed) runtime.kill(); });
+  let stdout = ''; runtime.stdout.setEncoding('utf8'); runtime.stdout.on('data', (chunk) => { stdout += chunk; });
+  await new Promise((resolve, reject) => { const timer = setTimeout(() => reject(new Error(`Runtime ready timeout: ${stdout}`)), 3000); const ready = () => { if (!stdout.includes('named pipe ready:')) return; clearTimeout(timer); runtime.stdout.off('data', ready); resolve(); }; runtime.stdout.on('data', ready); runtime.once('error', reject); });
+  const client = new PipeClient({ pipeName, connectTimeoutMs: 3000, requestTimeoutMs: 3000 }); t.after(() => client.close()); await client.request('hello', { clientVersion: 'visual-card-fallback-test' });
+  const configure = (record, key) => client.request('visual-assets.configure', { version: 1, rootDir, assets: [record] }, { retryable: false, idempotencyKey: key });
+  const card = (id) => client.request('scene.create', { id, title: id, body: 'asset fallback', x: 40, y: 40, width: 320, height: 160, visual: { enabled: true, preset: 'minimal', intensity: 'balanced', category: 'plugin', cardType: 'minimal', behavior: { layout: 'simple', boundary: 'work-area' }, appearance: { size: 'medium', aspectRatio: 'default', backgroundColor: '#123456', backgroundAssetId: assetId, borderRadius: 16, opacity: 1 } } }, { retryable: false, idempotencyKey: `${id}-create` });
+  const valid = await configure({ assetId, format: 'png', relativePath, sha256, enabled: true }, 'asset-valid');
+  assert.equal(valid.payload.result.applied, true);
+  const validCard = await card('asset-valid-card');
+  assert.ok(validCard.payload.result.sceneCards.find((item) => item.id === 'asset-valid-card').visual.appearance.backgroundAssetId === assetId);
+  const tampered = await configure({ assetId, format: 'png', relativePath, sha256: '0'.repeat(64), enabled: true }, 'asset-tampered');
+  assert.equal(tampered.payload.result.applied, true);
+  const tamperedCard = await card('asset-tampered-card');
+  assert.equal('backgroundAssetId' in tamperedCard.payload.result.sceneCards.find((item) => item.id === 'asset-tampered-card').visual.appearance, false);
+  await configure({ assetId, format: 'png', relativePath, sha256, enabled: false }, 'asset-disabled');
+  const disabledCard = await card('asset-disabled-card');
+  assert.equal('backgroundAssetId' in disabledCard.payload.result.sceneCards.find((item) => item.id === 'asset-disabled-card').visual.appearance, false);
+  await client.request('shutdown');
+});

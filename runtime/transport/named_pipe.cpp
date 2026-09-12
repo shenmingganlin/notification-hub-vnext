@@ -17,23 +17,100 @@
 #include <iomanip>
 #include <limits>
 #include <iostream>
+#include <regex>
+#include <array>
 #include <sstream>
 #include <string>
 #include <string_view>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 #ifdef _WIN32
 #include <windows.h>
+#include <wincrypt.h>
 #endif
 
 namespace notification_hub::transport {
 namespace {
 
+bool parse_visual_assets_config_payload(std::string_view payload, std::size_t& asset_count, std::vector<scene::VisualAssetRecord>& assets, std::string& root_dir, std::string& error_code, std::string& error_message) {
+    if (payload.find("\"version\":1") == std::string_view::npos) { error_code = "VISUAL_ASSET_MANIFEST_VERSION_INVALID"; error_message = "visual asset manifest version must be 1"; return false; }
+    if (payload.find("..") != std::string_view::npos || payload.find("http") != std::string_view::npos) { error_code = "VISUAL_ASSET_MANIFEST_PATH_INVALID"; error_message = "visual asset manifest contains an unsafe path"; return false; }
+    if (payload.find("\"assets\":[") == std::string_view::npos) { error_code = "VISUAL_ASSET_MANIFEST_INVALID"; error_message = "visual asset manifest assets must be an array"; return false; }
+    const std::regex root_pattern(R"(\"rootDir\"\s*:\s*\"([A-Za-z]:\\\\[^\"]+)\")");
+    const std::string text(payload);
+    std::smatch root_match;
+    if (!std::regex_search(text, root_match, root_pattern) || root_match[1].str().find("..") != std::string::npos) { error_code = "VISUAL_ASSET_ROOT_INVALID"; error_message = "visual asset manifest rootDir must be a safe absolute Windows path"; return false; }
+    root_dir = root_match[1].str();
+    asset_count = 0;
+    assets.clear();
+    const std::regex asset_pattern(R"(\"assetId\"\s*:\s*\"([A-Za-z0-9][A-Za-z0-9._-]{0,79})\"\s*,\s*\"format\"\s*:\s*\"(png|webp|jpg)\"\s*,\s*\"relativePath\"\s*:\s*\"([^\"]+)\"\s*,\s*\"sha256\"\s*:\s*\"([A-Fa-f0-9]{64})\"\s*,\s*\"enabled\"\s*:\s*(true|false))");
+    for (std::sregex_iterator it(text.begin(), text.end(), asset_pattern), end; it != end; ++it) {
+        scene::VisualAssetRecord asset{(*it)[1].str(), (*it)[2].str(), (*it)[3].str(), (*it)[4].str(), (*it)[5].str() == "true"};
+        const auto extension = asset.format == "jpg" ? ".jpg" : "." + asset.format;
+        if (asset.relative_path.find("..") != std::string::npos || asset.relative_path.find('\\\\') != std::string::npos || asset.relative_path.find("http") != std::string::npos || asset.relative_path.rfind(asset.asset_id + extension) != asset.relative_path.size() - asset.asset_id.size() - extension.size()) { error_code = "VISUAL_ASSET_MANIFEST_PATH_INVALID"; error_message = "visual asset manifest record path is invalid"; return false; }
+        assets.push_back(std::move(asset)); ++asset_count;
+    }
+    if (asset_count == 0 && payload.find("\"assets\":[]") == std::string_view::npos) { error_code = "VISUAL_ASSET_MANIFEST_INVALID"; error_message = "visual asset manifest record is invalid"; return false; }
+    if (asset_count > 1000) { error_code = "VISUAL_ASSET_MANIFEST_TOO_LARGE"; error_message = "visual asset manifest contains too many assets"; return false; }
+    { std::unordered_set<std::string> asset_ids, sha256s; asset_ids.reserve(asset_count); sha256s.reserve(asset_count);
+        for (const auto& asset : assets) { std::string lower_sha(asset.sha256); std::transform(lower_sha.begin(), lower_sha.end(), lower_sha.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); }); if (!asset_ids.insert(asset.asset_id).second || !sha256s.insert(lower_sha).second) { error_code = "VISUAL_ASSET_MANIFEST_DUPLICATE"; error_message = "visual asset manifest contains duplicate assetId or sha256"; return false; } } }
+    return true;
+}
+
 #ifdef _WIN32
 
 std::wstring to_wide_ascii(std::string_view value) {
     return std::wstring(value.begin(), value.end());
+}
+
+std::string unescape_json_path(std::string value) {
+    std::string result;
+    result.reserve(value.size());
+    for (std::size_t index = 0; index < value.size(); ++index) {
+        if (value[index] == '\\\\' && index + 1 < value.size() && value[index + 1] == '\\\\') ++index;
+        result.push_back(value[index]);
+    }
+    return result;
+}
+
+bool verify_asset_file(std::string_view root_dir, const scene::VisualAssetRecord& asset) {
+    const auto root = to_wide_ascii(unescape_json_path(std::string(root_dir)));
+    const auto relative = to_wide_ascii(asset.relative_path);
+    std::wstring candidate = root;
+    if (!candidate.empty() && candidate.back() != L'\\\\') candidate += L'\\\\';
+    candidate += relative;
+    wchar_t full_root[32768]{};
+    wchar_t full_candidate[32768]{};
+    if (!GetFullPathNameW(root.c_str(), static_cast<DWORD>(std::size(full_root)), full_root, nullptr)
+        || !GetFullPathNameW(candidate.c_str(), static_cast<DWORD>(std::size(full_candidate)), full_candidate, nullptr)) return false;
+    std::wstring root_prefix(full_root);
+    if (!root_prefix.empty() && root_prefix.back() != L'\\\\') root_prefix += L'\\\\';
+    if (std::wstring(full_candidate).rfind(root_prefix, 0) != 0) return false;
+    const auto attributes = GetFileAttributesW(full_candidate);
+    if (attributes == INVALID_FILE_ATTRIBUTES || (attributes & FILE_ATTRIBUTE_DIRECTORY) != 0) return false;
+    HANDLE file = CreateFileW(full_candidate, GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (file == INVALID_HANDLE_VALUE) return false;
+    HCRYPTPROV provider{}; HCRYPTHASH hash{}; bool valid = false;
+    if (CryptAcquireContextW(&provider, nullptr, nullptr, PROV_RSA_AES, CRYPT_VERIFYCONTEXT)
+        && CryptCreateHash(provider, CALG_SHA_256, 0, 0, &hash)) {
+        std::array<std::uint8_t, 8192> buffer{}; DWORD read = 0; bool read_ok = true;
+        while (ReadFile(file, buffer.data(), static_cast<DWORD>(buffer.size()), &read, nullptr) && read > 0) {
+            if (!CryptHashData(hash, buffer.data(), read, 0)) { read_ok = false; break; }
+        }
+        DWORD digest_size = 32; std::array<std::uint8_t, 32> digest{};
+        if (read_ok && CryptGetHashParam(hash, HP_HASHVAL, digest.data(), &digest_size, 0)) {
+            static constexpr char hex[] = "0123456789abcdef"; std::string actual; actual.reserve(64);
+            for (const auto byte : digest) { actual.push_back(hex[byte >> 4]); actual.push_back(hex[byte & 0x0f]); }
+            auto expected = asset.sha256; std::transform(expected.begin(), expected.end(), expected.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+            valid = actual == expected;
+        }
+        CryptDestroyHash(hash);
+    }
+    if (provider) CryptReleaseContext(provider, 0);
+    CloseHandle(file);
+    return valid;
 }
 
 bool write_all(HANDLE pipe, const std::vector<std::uint8_t>& bytes) {
@@ -176,7 +253,7 @@ bool parse_visual_style(std::string_view payload, size_t& position, scene::Visua
         while (true) { skip(); if (position < payload.size() && payload[position] == '}') { ++position; return true; } std::string key; if (!parse_json_string_token(payload, position, key) || !consume(':') || !parser(key)) return false; skip(); if (position < payload.size() && payload[position] == ',') { ++position; continue; } if (position < payload.size() && payload[position] == '}') { ++position; return true; } return false; }
     };
     if (!consume('{')) return false;
-    bool seen_enabled = false, seen_preset = false, seen_intensity = false, seen_category = false, seen_card_type = false, seen_behavior = false, seen_appearance = false;
+    bool seen_enabled = false, seen_preset = false, seen_intensity = false, seen_category = false, seen_card_type = false, seen_behavior = false, seen_appearance = false, seen_interaction = false;
     visual.specified = true;
     while (true) {
         skip(); if (position < payload.size() && payload[position] == '}') { ++position; break; }
@@ -189,7 +266,9 @@ bool parse_visual_style(std::string_view payload, size_t& position, scene::Visua
         else if (key == "behavior" && !seen_behavior) {
             if (!parse_object([&](const std::string& nested) { if (nested == "layout") return parse_json_string_token(payload, position, visual.layout); if (nested == "boundary") return parse_json_string_token(payload, position, visual.boundary); return false; })) return false; seen_behavior = true;
         } else if (key == "appearance" && !seen_appearance) {
-            if (!parse_object([&](const std::string& nested) { double number{}; if (nested == "size") return parse_json_string_token(payload, position, visual.size); if (nested == "aspectRatio") return parse_json_string_token(payload, position, visual.aspect_ratio); if (nested == "backgroundColor") return parse_json_string_token(payload, position, visual.background_color); if (nested == "borderRadius") { if (!parse_number(number)) return false; visual.border_radius = static_cast<int>(number); return true; } if (nested == "opacity") { if (!parse_number(number)) return false; visual.opacity = static_cast<float>(number); return true; } return false; })) return false; seen_appearance = true;
+            if (!parse_object([&](const std::string& nested) { double number{}; if (nested == "size") return parse_json_string_token(payload, position, visual.size); if (nested == "aspectRatio") return parse_json_string_token(payload, position, visual.aspect_ratio); if (nested == "backgroundColor") return parse_json_string_token(payload, position, visual.background_color); if (nested == "backgroundAssetId") return parse_json_string_token(payload, position, visual.background_asset_id); if (nested == "backgroundFit") return parse_json_string_token(payload, position, visual.background_fit); if (nested == "backgroundPadding") { if (!parse_number(number)) return false; visual.background_padding = static_cast<float>(number); return true; } if (nested == "borderRadius") { if (!parse_number(number)) return false; visual.border_radius = static_cast<int>(number); return true; } if (nested == "opacity") { if (!parse_number(number)) return false; visual.opacity = static_cast<float>(number); return true; } return false; })) return false; seen_appearance = true;
+        } else if (key == "interaction" && !seen_interaction) {
+            if (!parse_object([&](const std::string& nested) { double number{}; if (nested == "dismissMode") return parse_json_string_token(payload, position, visual.dismiss_mode); if (nested == "closeButtonPosition") return parse_json_string_token(payload, position, visual.close_button_position); if (nested == "timeoutMs") { if (!parse_number(number)) return false; visual.dismiss_timeout_ms = static_cast<int>(number); return true; } return false; })) return false; seen_interaction = true;
         } else return false;
         skip(); if (position < payload.size() && payload[position] == ',') { ++position; continue; } if (position < payload.size() && payload[position] == '}') { ++position; break; } return false;
     }
@@ -653,6 +732,17 @@ int run_named_pipe_server(std::string_view pipe_name, bool drop_after_health, bo
                     || parsed.message.type == "scene.dismiss";
                 const bool is_layout_command = parsed.message.type == "scene.set-mode";
                 const bool is_config_command = parsed.message.type == "config.update";
+                const bool is_visual_assets_command = parsed.message.type == "visual-assets.configure";
+                std::size_t requested_visual_asset_count = 0;
+                std::vector<scene::VisualAssetRecord> requested_visual_assets;
+                std::string requested_visual_asset_root;
+                std::string visual_manifest_error_code;
+                std::string visual_manifest_error_message;
+                if (is_visual_assets_command && !parse_visual_assets_config_payload(parsed.message.payload_json, requested_visual_asset_count, requested_visual_assets, requested_visual_asset_root, visual_manifest_error_code, visual_manifest_error_message)) {
+                    protocol::ProtocolError error{visual_manifest_error_code, visual_manifest_error_message, parsed.message.request_id, parsed.message.trace_id, parsed.message.type};
+                    if (!send_payload(pipe, protocol::serialize_error(error))) { close_pipe(pipe); return 11; }
+                    continue;
+                }
                 bool payload_valid = true;
                 if (parsed.message.type == "scene.update" && !is_card_update) {
                     payload_valid = parse_scene_update_payload(parsed.message.payload_json, requested_scene_state);
@@ -674,7 +764,8 @@ int run_named_pipe_server(std::string_view pipe_name, bool drop_after_health, bo
                                 ? "scene.set-mode requires a valid stack or shelf layout payload"
                                 : "scene.update requires integer x, y, width, and height"),
                         parsed.message.request_id,
-                        parsed.message.trace_id
+                        parsed.message.trace_id,
+                        parsed.message.type
                     };
                     if (!send_payload(pipe, protocol::serialize_error(error))) {
                         close_pipe(pipe);
@@ -693,7 +784,8 @@ int run_named_pipe_server(std::string_view pipe_name, bool drop_after_health, bo
                                 "TRANSPORT_IDEMPOTENCY_CONFLICT",
                                 "idempotencyKey was already used for a different request",
                                 parsed.message.request_id,
-                                parsed.message.trace_id
+                                parsed.message.trace_id,
+                                parsed.message.type
                             };
                             if (!send_payload(pipe, protocol::serialize_error(error))) {
                                 close_pipe(pipe);
@@ -703,6 +795,12 @@ int run_named_pipe_server(std::string_view pipe_name, bool drop_after_health, bo
                         }
                         deduplicated = true;
                     }
+                }
+                if (!deduplicated && is_visual_assets_command) {
+#ifdef _WIN32
+                    for (auto& asset : requested_visual_assets) if (asset.enabled && !verify_asset_file(requested_visual_asset_root, asset)) asset.enabled = false;
+#endif
+                    scene_controller.configure_visual_assets(requested_visual_assets, requested_visual_asset_root);
                 }
                 if (!deduplicated && is_layout_command) {
                     std::string apply_error_code;
@@ -715,7 +813,8 @@ int run_named_pipe_server(std::string_view pipe_name, bool drop_after_health, bo
                             apply_error_code,
                             apply_error_message,
                             parsed.message.request_id,
-                            parsed.message.trace_id
+                            parsed.message.trace_id,
+                            parsed.message.type
                         };
                         if (!send_payload(pipe, protocol::serialize_error(error))) {
                             close_pipe(pipe);
@@ -734,7 +833,8 @@ int run_named_pipe_server(std::string_view pipe_name, bool drop_after_health, bo
                             apply_error_code,
                             apply_error_message,
                             parsed.message.request_id,
-                            parsed.message.trace_id
+                            parsed.message.trace_id,
+                            parsed.message.type
                         };
                         if (!send_payload(pipe, protocol::serialize_error(error))) {
                             close_pipe(pipe);
@@ -753,7 +853,8 @@ int run_named_pipe_server(std::string_view pipe_name, bool drop_after_health, bo
                             apply_error_code,
                             apply_error_message,
                             parsed.message.request_id,
-                            parsed.message.trace_id
+                            parsed.message.trace_id,
+                            parsed.message.type
                         };
                         if (!send_payload(pipe, protocol::serialize_error(error))) {
                             close_pipe(pipe);
@@ -772,7 +873,8 @@ int run_named_pipe_server(std::string_view pipe_name, bool drop_after_health, bo
                             apply_error_code,
                             apply_error_message,
                             parsed.message.request_id,
-                            parsed.message.trace_id
+                            parsed.message.trace_id,
+                            parsed.message.type
                         };
                         if (!send_payload(pipe, protocol::serialize_error(error))) {
                             close_pipe(pipe);
@@ -791,7 +893,8 @@ int run_named_pipe_server(std::string_view pipe_name, bool drop_after_health, bo
                             apply_error_code,
                             apply_error_message,
                             parsed.message.request_id,
-                            parsed.message.trace_id
+                            parsed.message.trace_id,
+                            parsed.message.type
                         };
                         if (!send_payload(pipe, protocol::serialize_error(error))) {
                             close_pipe(pipe);
@@ -810,7 +913,8 @@ int run_named_pipe_server(std::string_view pipe_name, bool drop_after_health, bo
                             apply_error_code,
                             apply_error_message,
                             parsed.message.request_id,
-                            parsed.message.trace_id
+                            parsed.message.trace_id,
+                            parsed.message.type
                         };
                         if (!send_payload(pipe, protocol::serialize_error(error))) {
                             close_pipe(pipe);
@@ -826,21 +930,14 @@ int run_named_pipe_server(std::string_view pipe_name, bool drop_after_health, bo
                 const auto generic_result = deduplicated
                     ? "{\"status\":\"accepted\",\"deduplicated\":true}"
                     : "{\"status\":\"accepted\",\"deduplicated\":false}";
-                const auto result_json = is_config_command
-                    ? runtime_config.result_json(deduplicated)
-                    : (parsed.message.type == "scene.update" && !is_card_update
-                    ? scene_controller.state_result_json(deduplicated)
-                    : (parsed.message.type == "scene.create" || is_card_update || parsed.message.type == "scene.dismiss" || is_layout_command
-                        ? scene_controller.cards_result_json(deduplicated)
-                        : (parsed.message.type == "health"
-                            ? std::string("{\"status\":\"accepted\",\"deduplicated\":")
-                                + (deduplicated ? "true" : "false")
-                                + ",\"sceneState\":" + scene_controller.state_json()
-                                + ",\"sceneCards\":" + scene_controller.cards_json()
-                                + ",\"sceneStateSnapshot\":" + scene_controller.scene_state_snapshot_json()
-                                + ",\"layout\":" + scene_controller.layout_json()
-                                + ",\"workArea\":" + scene_controller.work_area_json() + "}"
-                            : std::string(generic_result))));
+                std::string result_json;
+                if (is_config_command) result_json = runtime_config.result_json(deduplicated);
+                else if (is_visual_assets_command) result_json = std::string("{\"status\":\"accepted\",\"deduplicated\":") + (deduplicated ? "true" : "false") + ",\"applied\":true,\"assetCount\":" + std::to_string(requested_visual_asset_count) + "}";
+                else if (parsed.message.type == "scene.update" && !is_card_update) result_json = scene_controller.state_result_json(deduplicated);
+                else if (parsed.message.type == "scene.dismiss") result_json = scene_controller.dismiss_result_json(deduplicated, requested_dismiss_id);
+                else if (parsed.message.type == "scene.create" || is_card_update || is_layout_command) result_json = scene_controller.cards_result_json(deduplicated);
+                else if (parsed.message.type == "health") result_json = std::string("{\"status\":\"accepted\",\"deduplicated\":") + (deduplicated ? "true" : "false") + ",\"sceneState\":" + scene_controller.state_json() + ",\"sceneCards\":" + scene_controller.cards_json() + ",\"sceneStateSnapshot\":" + scene_controller.scene_state_snapshot_json() + ",\"layout\":" + scene_controller.layout_json() + ",\"workArea\":" + scene_controller.work_area_json() + "}";
+                else result_json = generic_result;
                 if (!send_payload(pipe, protocol::serialize_ack(parsed.message, result_json))) {
                     std::cerr << "TRANSPORT_PIPE_WRITE_FAILED: " << GetLastError() << "\n";
                     close_pipe(pipe);

@@ -22,6 +22,9 @@ struct ProtocolError {
     std::string message;
     std::string request_id;
     std::string trace_id;
+    std::string request_type;
+    bool retryable{};
+    std::string details_json{"{}"};
 };
 
 struct ParseResult {

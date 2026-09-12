@@ -42,7 +42,10 @@ export class EventPresentationSettingsStore extends EventEmitter {
       ...(patch.global === undefined ? {} : { global: patch.global }),
       ...(patch.categories === undefined ? {} : { categories: { ...clone(current.categories), ...clone(patch.categories) } }),
       ...(patch.events === undefined ? {} : { events: { ...clone(current.events), ...clone(patch.events) } }),
-      ...(patch.importanceKeywords === undefined ? {} : { importanceKeywords: patch.importanceKeywords })
+      ...(patch.importanceKeywords === undefined ? {} : { importanceKeywords: patch.importanceKeywords }),
+      ...(patch.channelPolicies === undefined ? {} : { channelPolicies: patch.channelPolicies }),
+      ...(patch.channels === undefined ? {} : { channels: patch.channels }),
+      ...(patch.visualRules === undefined ? {} : { visualRules: patch.visualRules })
     });
     this.#snapshot = this.#state(next, this.#snapshot.revision + 1, this.#snapshot.revision + 1, this.#snapshot.appliedRevision, EVENT_PRESENTATION_SETTINGS_STATUSES.SAVED, null);
     this.emit('change', this.#snapshot);

@@ -1,5 +1,6 @@
 import { createBehaviorCard, createBehaviorProfile } from './notification-behavior.js';
 import { createCardChannelPolicy } from './card-runtime-policy.js';
+import { createBehaviorStateStore } from './notification-behavior-state.js';
 
 function managerError(code, message, field) {
   const error = new Error(message);
@@ -8,86 +9,58 @@ function managerError(code, message, field) {
   return error;
 }
 
-function clone(value) {
-  if (Array.isArray(value)) return value.map(clone);
-  if (value && typeof value === 'object') return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, clone(item)]));
-  return value;
-}
-
-function freezeDeep(value) {
-  if (value && typeof value === 'object' && !Object.isFrozen(value)) {
-    Object.values(value).forEach(freezeDeep);
-    Object.freeze(value);
-  }
-  return value;
-}
-
 export function createBehaviorManager({ channelId, profile, policy = {}, adapter = null } = {}) {
   const normalizedProfile = createBehaviorProfile({ ...profile, channelId: channelId ?? profile?.channelId });
   const normalizedPolicy = createCardChannelPolicy({ ...policy, policyId: policy.policyId ?? channelId ?? normalizedProfile.channelId });
-  const cards = new Map();
-  const pending = new Map();
-  const aggregateKeys = new Set();
-  let suppressedCount = 0;
-  let queuedCount = 0;
+  const state = createBehaviorStateStore({ channelId: normalizedProfile.channelId });
   return {
     channelId: normalizedProfile.channelId,
     profile: normalizedProfile,
     policy: normalizedPolicy,
     adapter,
-    cards,
     enqueue(cardInput) {
       const card = createBehaviorCard({ ...cardInput, channelId: normalizedProfile.channelId });
-      const aggregateKey = `${card.eventId}:${card.payload?.deduplicationKey ?? ''}`;
-      if (normalizedPolicy.suppression === 'aggressive' && aggregateKeys.has(aggregateKey)) {
-        suppressedCount += 1;
+      if (normalizedPolicy.suppression === 'aggressive' && state.isSuppressed(card)) {
+        state.markSuppressed();
         return null;
       }
-      if (normalizedPolicy.suppression === 'aggressive') aggregateKeys.add(aggregateKey);
-      if (normalizedPolicy.suppression !== 'off' && cards.size >= normalizedPolicy.maxVisible) {
-        if (normalizedPolicy.overflow === 'drop-oldest') {
-          const oldest = cards.keys().next().value;
-          if (oldest) { cards.delete(oldest); suppressedCount += 1; }
-        } else if (normalizedPolicy.overflow === 'aggregate' || normalizedPolicy.overflow === 'queue') {
-          pending.set(card.cardId, card);
-          queuedCount = pending.size;
-          return card;
-        }
+      if (normalizedPolicy.suppression === 'aggressive') state.rememberAggregate(card);
+      const result = state.place(card, normalizedPolicy);
+      if (result.state === 'visible') adapter?.enqueue?.(result.card, normalizedProfile, normalizedPolicy);
+      return result.card;
+    },
+    removeByNotificationId(notificationId) {
+      if (typeof notificationId !== 'string' || !notificationId.trim()) throw managerError('NOTIFICATION_ID_INVALID', 'notificationId must be a non-empty string', 'notificationId');
+      const card = state.findByNotificationId(notificationId);
+      if (!card) return { removed: null, promoted: null };
+      return this.removeWithPromotion(card.cardId);
+    },
+    removeWithPromotion(cardId) {
+      if (typeof cardId !== 'string' || !cardId.trim()) throw managerError('NOTIFICATION_BEHAVIOR_CARD_ID_INVALID', 'cardId must be a non-empty string', 'cardId');
+      const result = state.remove(cardId);
+      if (!result.removed) return { removed: null, promoted: null };
+      if (result.visible) {
+        adapter?.remove?.(result.removed, normalizedProfile);
+        if (result.promoted) adapter?.enqueue?.(result.promoted, normalizedProfile, normalizedPolicy);
       }
-      cards.set(card.cardId, card);
-      adapter?.enqueue?.(card, normalizedProfile, normalizedPolicy);
-      return card;
+      return { removed: result.removed, promoted: result.promoted };
     },
     remove(cardId) {
       if (typeof cardId !== 'string' || !cardId.trim()) throw managerError('NOTIFICATION_BEHAVIOR_CARD_ID_INVALID', 'cardId must be a non-empty string', 'cardId');
-      const card = cards.get(cardId) ?? pending.get(cardId) ?? null;
-      if (!card) return null;
-      if (cards.has(cardId)) {
-        cards.delete(cardId);
-        adapter?.remove?.(card, normalizedProfile);
-        const next = pending.values().next().value;
-        if (next) {
-          pending.delete(next.cardId);
-          cards.set(next.cardId, next);
-          queuedCount = pending.size;
-          adapter?.enqueue?.(next, normalizedProfile, normalizedPolicy);
-        }
-      } else {
-        pending.delete(cardId);
-        queuedCount = pending.size;
+      const result = state.remove(cardId);
+      if (!result.removed) return null;
+      if (result.visible) {
+        adapter?.remove?.(result.removed, normalizedProfile);
+        if (result.promoted) adapter?.enqueue?.(result.promoted, normalizedProfile, normalizedPolicy);
       }
-      return card;
+      return result.removed;
+    },
+    restore(snapshot) {
+      state.restore(snapshot);
+      return state.snapshot({ profile: normalizedProfile, policy: normalizedPolicy });
     },
     snapshot() {
-      return freezeDeep({
-        version: 'v1',
-        channelId: normalizedProfile.channelId,
-        profile: clone(normalizedProfile),
-        policy: clone(normalizedPolicy),
-        cards: [...cards.values()].map(clone),
-        pending: [...pending.values()].map(clone),
-        metrics: { channelCount: 1, activeCardCount: cards.size + pending.size, visibleCardCount: cards.size, queuedCardCount: pending.size, suppressedCardCount: suppressedCount }
-      });
+      return state.snapshot({ profile: normalizedProfile, policy: normalizedPolicy });
     }
   };
 }
@@ -109,9 +82,15 @@ export function snapshotBehaviorManager(manager) {
 
 export function restoreBehaviorManager(manager, snapshot) {
   if (!manager || typeof manager.enqueue !== 'function') throw managerError('NOTIFICATION_BEHAVIOR_MANAGER_INVALID', 'manager must expose enqueue()', 'manager');
-  if (!snapshot || snapshot.channelId !== manager.channelId || !Array.isArray(snapshot.cards)) {
+  if (!snapshot || snapshot.channelId !== manager.channelId
+    || !Array.isArray(snapshot.cards)
+    || (snapshot.pending !== undefined && !Array.isArray(snapshot.pending))) {
     throw managerError('NOTIFICATION_BEHAVIOR_SNAPSHOT_INVALID', 'snapshot does not belong to this behavior channel', 'snapshot');
   }
-  for (const card of snapshot.cards) manager.enqueue(card);
-  return manager.snapshot();
+
+  // Restore recoverable state directly. Enqueueing would replay physical side effects
+  // and would apply current capacity rules to an already-valid snapshot.
+  return typeof manager.restore === 'function'
+    ? manager.restore(snapshot)
+    : manager.snapshot();
 }

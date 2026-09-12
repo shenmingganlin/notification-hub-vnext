@@ -7,7 +7,7 @@ import test from 'node:test';
 import { PipeClient } from '../../plugin/runtime/pipe-client.js';
 
 const execFileAsync = promisify(execFile);
-const runtimePath = process.argv[2];
+const runtimePath = process.env.NOTIFICATION_HUB_RUNTIME_PATH || process.argv[2];
 
 async function sendNativeCardAction(title, action) {
   const script = `

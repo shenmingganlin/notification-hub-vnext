@@ -235,6 +235,44 @@ test('RuntimeHostAdapter returns to running when the current PipeClient reconnec
   await adapter.stop();
 });
 
+test('RuntimeHostAdapter ignores events from an old lifecycle after stop and a new start', async () => {
+  const events = [];
+  const managers = [];
+  const clients = [];
+  const adapter = new RuntimeHostAdapter({
+    context: { dataDir: 'C:\\Hana\\data', config: { sceneStatePersistenceEnabled: false } },
+    runtimePath: 'runtime.exe',
+    pipeName: '\\\\.\\pipe\\host-adapter-stale-listener',
+    loadPlan: async () => ({ source: 'empty', snapshot: createRecoverySnapshot(), diagnostics: [] }),
+    managerFactory: (options) => {
+      const manager = new FakeManager(options, events);
+      managers.push(manager);
+      return manager;
+    },
+    clientFactory: (options) => {
+      const client = new FakeClient(options, events);
+      clients.push(client);
+      return client;
+    }
+  });
+
+  await adapter.start();
+  const oldManager = managers[0];
+  const oldClient = clients[0];
+  await adapter.stop();
+  await adapter.start();
+  assert.equal(adapter.state, 'running');
+
+  oldManager.emit('exit', { code: 9, signal: null, intentional: false });
+  oldManager.emit('diagnostic', { code: 'RUNTIME_RESTART_EXHAUSTED', message: 'old', details: {} });
+  oldClient.emit('state', { state: 'connected' });
+  oldClient.emit('diagnostic', { code: 'TRANSPORT_DISCONNECTED', message: 'old', details: {} });
+
+  assert.equal(adapter.state, 'running');
+  assert.equal(adapter.lastError, null);
+  await adapter.stop();
+});
+
 test('RuntimeHostAdapter clean stop does not create a stop error', async () => {
   const events = [];
   const adapter = new RuntimeHostAdapter({

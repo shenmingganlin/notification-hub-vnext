@@ -51,7 +51,8 @@ export function createWindowsSaveFilePicker({
       const filename = safeFilename(suggestedName, 'notification-hub-sounds', extension);
       await mkdir(tempDirectory, { recursive: true });
       const temporaryPath = path.join(tempDirectory, `notification-hub-save-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}.${String(extension).replace(/[^a-z0-9]+/giu, '').toLowerCase() || 'nhsound'}`);
-      await writeFile(temporaryPath, String(content), { encoding: 'utf8', flag: 'wx' });
+      const payload = Buffer.isBuffer(content) ? content : String(content);
+      await writeFile(temporaryPath, payload, { flag: 'wx' });
       const scriptPath = path.join(tempDirectory, `notification-hub-save-sound-package-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}.ps1`);
       // Windows PowerShell 5.1 requires a BOM to reliably detect UTF-8 scripts.
       // Without it, Chinese literals are decoded with the system code page and can cause ParserError.

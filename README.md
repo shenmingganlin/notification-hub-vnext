@@ -11,7 +11,7 @@ Notification Hub vNext is a Windows notification scene system for HanaAgent.
 
 ## Current status
 
-Current stable baseline: `0.1.0-alpha.8`.
+Current stable baseline: `0.1.4`.
 
 The project has completed the repository foundation, protocol and diagnostic contracts, the main Native Runtime lifecycle/configuration closure, and the core notification data path. Alpha.8 has passed real Hana validation for stable card creation, one-click-one-card dismissal, and remaining-card layout reflow.
 
@@ -20,6 +20,8 @@ The current product work is Windows-first and remains focused on the Notificatio
 The vNext plugin owns its Hana `onload/onunload` lifecycle, launches only the bundled Native Runtime, and persists SceneState below its own `dataDir`.
 
 Authoritative documentation:
+
+`VERSION` is the canonical release version. Package metadata, the plugin manifest, CMake Runtime metadata, protocol hello defaults, and release audits must match it. Historical diagnostic JSON files may contain older observed versions and are excluded from current release checks; they are not edited.
 
 - `notification-hub-vnext-plan.md`: the only complete project plan.
 - `CURRENT-STATUS.md`: current implementation status and reproducible acceptance evidence.
@@ -66,6 +68,8 @@ ctest --preset debug-vs2026
 # Build an installable ZIP for manual drag-and-drop installation in Hana.
 # The ZIP contains manifest.json at its root and the Release Runtime below runtime/.
 & pwsh -NoProfile -Command '& .\\scripts\\package-release.ps1 -Configuration Release'
+# Explicit artifact paths are also supported and must come from one current build output directory.
+& pwsh -NoProfile -Command '& .\\scripts\\package-release.ps1 -RuntimePath .\\build\\debug-vs2026\\runtime\\Release\\notification-hub-runtime.exe -AudioEnginePath .\\build\\debug-vs2026\\runtime\\Release\\notification-hub-audio-engine.exe'
 ```
 
 ## Hana 真实事件与压力测试
@@ -139,7 +143,7 @@ The vNext package uses the plugin ID `notification-hub-vnext`. Its Native Runtim
 
 ## Version
 
-Current stable version: `0.1.0`
+Current stable version: `0.1.4`
 
 ## License
 

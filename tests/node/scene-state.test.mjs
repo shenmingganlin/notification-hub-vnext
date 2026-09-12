@@ -42,6 +42,81 @@ test('SceneState preserves explicit card order and round-trips', () => {
   assert.deepEqual(parseSceneState(serializeSceneState(state)), state);
 });
 
+test('SceneState accepts the complete controlled visual returned by Native', () => {
+  const state = createSceneState({
+    sceneWindow: { x: 0, y: 0, width: 420, height: 220 },
+    cardOrder: ['card-rich'],
+    cards: [{
+      id: 'card-rich', title: 'Rich card', body: 'Native visual state', x: 0, y: 0, width: 420, height: 220,
+      visual: {
+        enabled: true,
+        preset: 'minimal',
+        intensity: 'balanced',
+        category: null,
+        cardType: 'minimal',
+        behavior: { layout: 'simple', boundary: 'work-area' },
+        appearance: {
+          size: 'medium',
+          aspectRatio: 'default',
+          backgroundColor: '#0e1916',
+          backgroundFit: 'fill',
+          backgroundPadding: 0,
+          borderRadius: 16,
+          opacity: 0.96
+        },
+        interaction: { dismissMode: 'closeButton', closeButtonPosition: 'top-right', timeoutMs: 30000 }
+      }
+    }],
+    layout: null
+  });
+
+  assert.equal(state.cards[0].visual.appearance.backgroundFit, 'fill');
+  assert.equal(state.cards[0].visual.category, null);
+  assert.equal(state.cards[0].visual.interaction.dismissMode, 'closeButton');
+  assert.deepEqual(parseSceneState(serializeSceneState(state)), state);
+  const transparent = createSceneState({
+    ...state,
+    cards: state.cards.map((card) => ({
+      ...card,
+      visual: { ...card.visual, appearance: { ...card.visual.appearance, opacity: 0 } }
+    }))
+  });
+  assert.equal(transparent.cards[0].visual.appearance.opacity, 0);
+  assert.throws(
+    () => createSceneState({
+      ...state,
+      cards: [{ ...state.cards[0], visual: { ...state.cards[0].visual, category: '' } }]
+    }),
+    (error) => error.code === 'RUNTIME_SCENE_STATE_CARD_INVALID'
+  );
+  assert.throws(
+    () => createSceneState({
+      ...state,
+      cards: [{ ...state.cards[0], visual: { ...state.cards[0].visual, unexpected: true } }]
+    }),
+    (error) => error.code === 'RUNTIME_SCENE_STATE_CARD_INVALID'
+  );
+});
+
+test('SceneState accepts implemented danmaku and popup visual types and rejects unknown types', () => {
+  for (const [cardType, width, height] of [['danmaku', 520, 96], ['popup', 500, 280]]) {
+    const state = createSceneState({
+      sceneWindow: { x: 0, y: 0, width, height },
+      cardOrder: [`card-${cardType}`],
+      cards: [{
+        id: `card-${cardType}`, title: cardType, body: '', x: cardType === 'danmaku' ? 100 : 500, y: cardType === 'danmaku' ? 18 : 180, width, height,
+        visual: { enabled: true, preset: 'minimal', intensity: 'balanced', category: null, cardType, behavior: { layout: 'simple', boundary: 'work-area' }, appearance: { size: cardType === 'danmaku' ? 'small' : 'large', aspectRatio: cardType === 'danmaku' ? 'wide' : 'default', backgroundColor: '#0e1916', backgroundFit: 'fill', backgroundPadding: 0, borderRadius: 12, opacity: 0.96 } }
+      }],
+      layout: null
+    });
+    assert.equal(state.cards[0].visual.cardType, cardType);
+  }
+  assert.throws(() => createSceneState({
+    sceneWindow: { x: 0, y: 0, width: 420, height: 220 }, cardOrder: ['unknown'],
+    cards: [{ id: 'unknown', title: 'unknown', body: '', x: 0, y: 0, width: 420, height: 220, visual: { enabled: true, preset: 'minimal', intensity: 'balanced', category: null, cardType: 'future', behavior: { layout: 'simple', boundary: 'work-area' }, appearance: { size: 'medium', aspectRatio: 'default', backgroundColor: '#0e1916', backgroundFit: 'fill', backgroundPadding: 0, borderRadius: 16, opacity: 0.96 } } }], layout: null
+  }), (error) => error.code === 'RUNTIME_SCENE_STATE_CARD_INVALID');
+});
+
 test('SceneState preserves controlled presentation and behavior metadata', () => {
   const state = createSceneState({
     sceneWindow: { x: 0, y: 0, width: 420, height: 180 },

@@ -392,7 +392,9 @@ test('RuntimeProcessManager skips one failed recovery entry and continues with l
 
   assert.deepEqual(requests, ['broken-card', 'valid-card']);
   assert.deepEqual(results.map((entry) => entry.skipped === true), [true, false]);
-  assert.deepEqual(manager.recoverySnapshot.entries.map((entry) => entry.key), ['valid-card']);
+  assert.deepEqual(manager.recoverySnapshot.entries.map((entry) => entry.key), ['broken-card', 'valid-card']);
+  assert.equal(recoveryEvents[0].status, 'retained');
+  assert.equal(recoveryEvents[0].attempt, 1);
   assert.equal(manager.recoveryDiagnostics.at(-1).cause, 'RUNTIME_SCENE_WINDOW_APPLY_FAILED');
   assert.equal(recoveryEvents[0].key, 'broken-card');
 });

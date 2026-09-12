@@ -5,54 +5,73 @@
   "description": "Transport-independent JSON envelope. Named Pipe framing is defined separately.",
   "type": "object",
   "additionalProperties": false,
-  "required": [
-    "protocolVersion",
-    "requestId",
-    "traceId",
-    "type",
-    "timestamp",
-    "payload"
-  ],
+  "required": ["protocolVersion", "requestId", "traceId", "type", "timestamp", "payload"],
   "properties": {
-    "protocolVersion": {
-      "const": 1
-    },
-    "requestId": {
-      "type": "string",
-      "minLength": 1
-    },
-    "traceId": {
-      "type": "string",
-      "minLength": 1
-    },
+    "protocolVersion": { "const": 1 },
+    "requestId": { "type": "string", "minLength": 1 },
+    "traceId": { "type": "string", "minLength": 1 },
     "type": {
       "type": "string",
       "enum": [
-        "hello",
-        "health",
-        "capabilities",
-        "scene.create",
-        "scene.update",
-        "scene.dismiss",
-        "scene.drag",
-        "scene.set-mode",
-        "config.update",
-        "diagnostic.subscribe",
-        "shutdown",
-        "ack",
-        "error"
+        "hello", "health", "capabilities", "scene.create", "scene.update", "scene.dismiss",
+        "scene.drag", "scene.set-mode", "config.update", "visual-assets.configure",
+        "diagnostic.subscribe", "shutdown", "audio.health", "audio.cue", "audio.load",
+        "audio.play", "audio.stop", "audio.stop_all", "audio.unload", "audio.shutdown",
+        "ack", "error", "event"
       ]
     },
     "timestamp": {
       "type": "string",
-      "format": "date-time"
+      "format": "date-time",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]+)?(Z|[+-][0-9]{2}:[0-9]{2})$"
     },
     "payload": {
-      "type": "object"
+      "oneOf": [
+        {
+          "type": "object",
+          "required": ["requestType", "accepted", "code", "message", "retryable", "details"],
+          "properties": {
+            "requestType": { "type": "string", "minLength": 1 },
+            "accepted": { "const": false },
+            "code": { "type": "string", "minLength": 1 },
+            "message": { "type": "string", "minLength": 1 },
+            "retryable": { "type": "boolean" },
+            "details": { "type": "object" }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "not": { "required": ["requestType", "accepted", "code", "message", "retryable", "details"] }
+        }
+      ]
     },
-    "idempotencyKey": {
-      "type": "string",
-      "minLength": 1
+    "idempotencyKey": { "type": "string", "minLength": 1 }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "type": { "const": "error" } } },
+      "then": {
+        "properties": {
+          "payload": {
+            "oneOf": [
+              {
+                "type": "object",
+                "required": ["requestType", "accepted", "code", "message", "retryable", "details"],
+                "properties": {
+                  "requestType": { "type": "string", "minLength": 1 },
+                  "accepted": { "const": false },
+                  "code": { "type": "string", "minLength": 1 },
+                  "message": { "type": "string", "minLength": 1 },
+                  "retryable": { "type": "boolean" },
+                  "details": { "type": "object" }
+                },
+                "additionalProperties": false
+              }
+            ]
+          }
+        }
+      }
     }
-  }
+  ]
 }

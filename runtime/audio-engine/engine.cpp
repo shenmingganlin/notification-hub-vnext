@@ -33,7 +33,7 @@ namespace notification_hub::audio_engine {
 namespace {
 std::string response(const protocol::Message& request, std::string_view result) { return protocol::serialize_ack(request, result); }
 std::string error_response(const protocol::Message& request, std::string_view code, std::string_view message) {
-    return protocol::serialize_error({std::string(code), std::string(message), request.request_id, request.trace_id});
+    return protocol::serialize_error({std::string(code), std::string(message), request.request_id, request.trace_id, request.type});
 }
 std::string field(std::string_view json, std::string_view name) {
     const auto needle = std::string("\"") + std::string(name) + "\":\"";

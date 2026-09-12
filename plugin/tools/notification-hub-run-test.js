@@ -15,6 +15,7 @@ export const sessionPermission = { kind: 'external_side_effect' };
 export async function execute(input = {}, ctx = {}) {
   const result = await ctx.bus?.request?.('notification-hub-vnext.run-test', {
     ...input,
+    playSound: input.playSound === true,
     events: Array.isArray(input.events) && input.events.length ? input.events : ['tool_completed'],
     entryPoint: 'tool'
   });

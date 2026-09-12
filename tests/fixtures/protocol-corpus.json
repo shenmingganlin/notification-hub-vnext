@@ -1,0 +1,65 @@
+{
+  "valid": [
+    {
+      "protocolVersion": 1,
+      "requestId": "req-corpus-health",
+      "traceId": "trace-corpus-health",
+      "type": "health",
+      "timestamp": "2026-08-01T00:00:00.000Z",
+      "payload": {}
+    },
+    {
+      "protocolVersion": 1,
+      "requestId": "req-corpus-audio",
+      "traceId": "trace-corpus-audio",
+      "type": "audio.play",
+      "timestamp": "2026-08-01T00:00:00.000Z",
+      "payload": { "soundId": "default" }
+    },
+    {
+      "protocolVersion": 1,
+      "requestId": "req-corpus-assets",
+      "traceId": "trace-corpus-assets",
+      "type": "visual-assets.configure",
+      "timestamp": "2026-08-01T00:00:00.000Z",
+      "payload": { "version": 1, "assets": [] }
+    },
+    {
+      "protocolVersion": 1,
+      "requestId": "evt-corpus-scene",
+      "traceId": "trace-corpus-scene",
+      "type": "event",
+      "timestamp": "2026-08-01T00:00:00.000Z",
+      "payload": { "eventType": "scene.changed", "result": {} }
+    },
+    {
+      "protocolVersion": 1,
+      "requestId": "req-corpus-error",
+      "traceId": "trace-corpus-error",
+      "type": "error",
+      "timestamp": "2026-08-01T00:00:00.000Z",
+      "payload": {
+        "requestType": "health",
+        "accepted": false,
+        "code": "PROTOCOL_INVALID_MESSAGE",
+        "message": "invalid request",
+        "retryable": false,
+        "details": { "field": "timestamp" }
+      }
+    }
+  ],
+  "invalid": [
+    {
+      "name": "invalid timestamp",
+      "message": {
+        "protocolVersion": 1,
+        "requestId": "req-corpus-invalid-time",
+        "traceId": "trace-corpus-invalid-time",
+        "type": "health",
+        "timestamp": "not-a-timestamp",
+        "payload": {}
+      },
+      "code": "PROTOCOL_INVALID_MESSAGE"
+    }
+  ]
+}

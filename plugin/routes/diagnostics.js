@@ -1,4 +1,5 @@
 import { PAGE_NAVIGATION_SCRIPT, PAGE_NAVIGATION_STYLE, renderPageNavigation } from './page-navigation.js';
+import { errorPayload, readJsonBody, unavailablePayload } from './route-errors.js';
 
 const DIAGNOSTICS_ERROR_MESSAGES = Object.freeze({
   DIAGNOSTICS_PAGE_API_UNAVAILABLE: '诊断中心暂时不可用。'
@@ -13,14 +14,6 @@ function escapeHtml(value) {
     .replaceAll("'", '&#39;');
 }
 
-function errorPayload(error) {
-  const code = error?.code ?? 'DIAGNOSTICS_PAGE_FAILED';
-  return {
-    code,
-    message: DIAGNOSTICS_ERROR_MESSAGES[code] ?? error?.message ?? String(error),
-    details: error?.details ?? {}
-  };
-}
 
 function readDiagnosticsApi(ctx) {
   return ctx?._notificationHubVNextRuntimeApi ?? ctx?._notificationHubVNextPlugin;
@@ -65,7 +58,7 @@ ${PAGE_NAVIGATION_STYLE}
   <section class="panel summary-panel" aria-labelledby="summary-title"><div class="summary-heading"><div><h2 id="summary-title">诊断摘要</h2><p class="panel-intro">这里只显示可用于排障的状态和错误摘要；页面不会展开内部进程输出或完整场景对象。</p></div><span id="summary-state" class="summary-state">等待状态</span></div><div class="metrics"><div class="metric"><div class="metric-label">错误</div><div id="error-count" class="metric-value">—</div></div><div class="metric"><div class="metric-label">警告</div><div id="warning-count" class="metric-value">—</div></div><div class="metric"><div class="metric-label">可恢复</div><div id="recoverable-count" class="metric-value">—</div></div><div class="metric"><div class="metric-label">记录总数</div><div id="total-count" class="metric-value">—</div></div></div></section>
   <div class="grid">
     <section class="panel runtime-panel" aria-labelledby="runtime-title"><h2 id="runtime-title">Runtime 证据</h2><p id="runtime-message" class="panel-intro">状态读取中</p><div class="detail-list"><div class="detail"><span class="detail-label">Runtime</span><strong id="runtime-state" class="detail-value">—</strong></div><div class="detail"><span class="detail-label">Named Pipe</span><strong id="pipe-state" class="detail-value">—</strong></div><div class="detail"><span class="detail-label">Pipe 名称</span><strong id="pipe-name" class="detail-value">—</strong></div><div class="detail"><span class="detail-label">客户端</span><strong id="client-state" class="detail-value">—</strong></div><div class="detail"><span class="detail-label">当前卡片</span><strong id="card-count" class="detail-value">—</strong></div><div class="detail"><span class="detail-label">SceneState</span><strong id="scene-state" class="detail-value">—</strong></div></div><div id="current-error" class="error-box" hidden></div></section>
-    <aside><section class="panel recovery-panel" aria-labelledby="recovery-title"><h2 id="recovery-title">恢复与布局</h2><p class="panel-intro">用于判断连接恢复后，桌面状态是否仍可重建。</p><div class="detail-list"><div class="detail"><span class="detail-label">布局</span><strong id="layout" class="detail-value">—</strong></div><div class="detail"><span class="detail-label">工作区</span><strong id="work-area" class="detail-value">—</strong></div><div class="detail"><span class="detail-label">快照版本</span><strong id="snapshot-version" class="detail-value">—</strong></div><div class="detail"><span class="detail-label">快照卡片</span><strong id="snapshot-cards" class="detail-value">—</strong></div></div></section><section class="panel"><div class="notice">诊断记录有数量上限，只保留最近证据。导出文件只包含结构化状态和诊断摘要，不包含原始进程输出或完整场景对象。</div><div class="actions"><button id="refresh" type="button">刷新诊断</button><button id="export" type="button">导出诊断记录</button></div><div id="feedback" class="panel-intro" role="status" aria-live="polite"></div></section></aside>
+    <aside><section class="panel recovery-panel" aria-labelledby="recovery-title"><h2 id="recovery-title">恢复与布局</h2><p class="panel-intro">用于判断连接恢复后，桌面状态是否仍可重建。</p><div class="detail-list"><div class="detail"><span class="detail-label">布局</span><strong id="layout" class="detail-value">—</strong></div><div class="detail"><span class="detail-label">工作区</span><strong id="work-area" class="detail-value">—</strong></div><div class="detail"><span class="detail-label">快照版本</span><strong id="snapshot-version" class="detail-value">—</strong></div><div class="detail"><span class="detail-label">快照卡片</span><strong id="snapshot-cards" class="detail-value">—</strong></div></div></section><section class="panel"><div class="notice">诊断记录有数量上限，只保留最近证据。导出文件只包含结构化状态和诊断摘要，不包含原始进程输出或完整场景对象。</div><div class="actions"><button id="refresh" type="button">刷新诊断</button><button id="export" type="button">导出诊断记录</button><button id="export-runtime-log" type="button">导出 Runtime 日志</button><button id="clear-runtime-log" type="button">清空 Runtime 日志</button></div><div id="feedback" class="panel-intro" role="status" aria-live="polite"></div></section></aside>
   </div>
   <section class="panel diagnostic-panel" aria-labelledby="scene-behavior-title"><h2 id="scene-behavior-title">行为通道与卡片</h2><p class="panel-intro">只显示事件身份、行为通道和几何位置，不显示通知正文。用于确认同通道堆叠与异通道隔离。</p><div id="scene-behavior-list" class="diagnostic-list"><div class="empty">行为数据读取中</div></div></section>
   <section class="panel diagnostic-panel" aria-labelledby="recent-title"><h2 id="recent-title">最近诊断</h2><p class="panel-intro">按时间倒序显示 Runtime、设置和通知链路产生的结构化诊断。</p><div id="diagnostic-list" class="diagnostic-list"><div class="empty">诊断记录读取中</div></div></section>
@@ -102,7 +95,19 @@ ${PAGE_NAVIGATION_STYLE}
       $("feedback").textContent = (error.code || "DIAGNOSTICS_EXPORT_FAILED") + " · " + error.message;
     } finally { button.disabled = false; }
   }
-  var timer = setInterval(refresh, 4000); $("refresh").addEventListener("click", refresh); $("export").addEventListener("click", exportDiagnostics); window.addEventListener("notification-hub-view-before-unload", function () { clearInterval(timer); }, { once: true }); window.parent.postMessage({ type: "ready" }, "*"); refresh();
+  async function exportRuntimeLog() {
+    var button = $("export-runtime-log"); button.disabled = true; $("feedback").textContent = "正在导出 Runtime 日志…";
+    try { var data = await request("runtime-log-export", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name: "notification-hub-runtime-log-" + new Date().toISOString().replace(/[.:]/g, "-") }) }); $("feedback").textContent = data.cancelled ? "已取消导出。" : "Runtime 日志已保存到指定位置（.json）。"; }
+    catch (error) { $("feedback").textContent = (error.code || "RUNTIME_LOG_EXPORT_FAILED") + " · " + error.message; }
+    finally { button.disabled = false; }
+  }
+  async function clearRuntimeLog() {
+    var button = $("clear-runtime-log"); button.disabled = true;
+    try { var data = await request("runtime-log-clear", { method: "POST" }); $("feedback").textContent = "Runtime 日志已清空（" + String(data.cleared || 0) + " 条）。"; }
+    catch (error) { $("feedback").textContent = (error.code || "RUNTIME_LOG_CLEAR_FAILED") + " · " + error.message; }
+    finally { button.disabled = false; }
+  }
+  var timer = setInterval(refresh, 4000); $("refresh").addEventListener("click", refresh); $("export").addEventListener("click", exportDiagnostics); $("export-runtime-log").addEventListener("click", exportRuntimeLog); $("clear-runtime-log").addEventListener("click", clearRuntimeLog); window.addEventListener("notification-hub-view-before-unload", function () { clearInterval(timer); }, { once: true }); window.parent.postMessage({ type: "ready" }, "*"); refresh();
 }());
 </script>
 ${PAGE_NAVIGATION_SCRIPT}
@@ -116,14 +121,39 @@ export default function registerDiagnosticsRoute(app, ctx) {
   app.post('/diagnostics-export', async (c) => {
     try {
       const api = getApi();
-      if (!api?.exportDiagnostics) return c.json({ ok: false, error: { code: 'DIAGNOSTICS_PAGE_API_UNAVAILABLE', message: DIAGNOSTICS_ERROR_MESSAGES.DIAGNOSTICS_PAGE_API_UNAVAILABLE, details: {} } }, 503);
-      return c.json({ ok: true, ...(await api.exportDiagnostics(await c.req.json().catch(() => ({})))) });
+      if (!api?.exportDiagnostics) return c.json(unavailablePayload('DIAGNOSTICS_PAGE_API_UNAVAILABLE', DIAGNOSTICS_ERROR_MESSAGES.DIAGNOSTICS_PAGE_API_UNAVAILABLE), 503);
+      return c.json({ ok: true, ...(await api.exportDiagnostics(await readJsonBody(c))) });
+    } catch (error) {
+      return c.json({ ok: false, error: errorPayload(error, {}, 'DIAGNOSTICS_PAGE_FAILED') }, error?.code === 'ROUTE_INVALID_JSON' ? 400 : 500);
+    }
+  });
+  app.get('/runtime-log', (c) => {
+    try {
+      const api = getApi();
+      if (!api?.getRuntimeLog) return c.json(unavailablePayload('RUNTIME_LOG_API_UNAVAILABLE', 'Runtime log API unavailable'), 503);
+      return c.json({ ok: true, entries: api.getRuntimeLog() });
+    } catch (error) { return c.json({ ok: false, error: errorPayload(error) }, 500); }
+  });
+  app.post('/runtime-log-export', async (c) => {
+    try {
+      const api = getApi();
+      if (!api?.exportRuntimeLog) return c.json(unavailablePayload('RUNTIME_LOG_API_UNAVAILABLE', 'Runtime log API unavailable'), 503);
+      return c.json({ ok: true, ...(await api.exportRuntimeLog(await readJsonBody(c))) });
+    } catch (error) {
+      return c.json({ ok: false, error: errorPayload(error, {}, 'RUNTIME_LOG_EXPORT_FAILED') }, error?.code === 'ROUTE_INVALID_JSON' ? 400 : 500);
+    }
+  });
+  app.post('/runtime-log-clear', async (c) => {
+    try {
+      const api = getApi();
+      if (!api?.clearRuntimeLog) return c.json(unavailablePayload('RUNTIME_LOG_API_UNAVAILABLE', 'Runtime log API unavailable'), 503);
+      return c.json({ ok: true, ...api.clearRuntimeLog() });
     } catch (error) { return c.json({ ok: false, error: errorPayload(error) }, 500); }
   });
   app.get('/diagnostics-status', async (c) => {
     try {
       const api = getApi();
-      if (!api?.getDiagnosticsPageStatus) return c.json({ ok: false, error: { code: 'DIAGNOSTICS_PAGE_API_UNAVAILABLE', message: DIAGNOSTICS_ERROR_MESSAGES.DIAGNOSTICS_PAGE_API_UNAVAILABLE, details: {} } }, 503);
+      if (!api?.getDiagnosticsPageStatus) return c.json(unavailablePayload('DIAGNOSTICS_PAGE_API_UNAVAILABLE', DIAGNOSTICS_ERROR_MESSAGES.DIAGNOSTICS_PAGE_API_UNAVAILABLE), 503);
       return c.json({ ok: true, status: await api.getDiagnosticsPageStatus() });
     } catch (error) { return c.json({ ok: false, error: errorPayload(error) }, 500); }
   });

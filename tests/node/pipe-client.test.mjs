@@ -79,6 +79,39 @@ test('PipeClient serializes health and scene requests so one timeout cannot reje
   assert.equal(sockets[1].destroyed, true);
 });
 
+test('PipeClient rejects a response with a mismatched traceId or requestType', async () => {
+  const sockets = [];
+  const diagnostics = [];
+  const client = new PipeClient({
+    pipeName: '\\\\.\\pipe\\pipe-client-response-correlation',
+    requestTimeoutMs: 100,
+    socketFactory: () => {
+      const socket = new FakeSocket();
+      sockets.push(socket);
+      return socket;
+    }
+  });
+  client.on('diagnostic', (diagnostic) => diagnostics.push(diagnostic));
+
+  const request = client.request('health', {}, { retryable: false });
+  sockets[0].emit('connect');
+  await new Promise((resolve) => setImmediate(resolve));
+  const response = JSON.stringify({
+    protocolVersion: 1,
+    requestId: 'req-node-1',
+    traceId: 'wrong-trace',
+    type: 'ack',
+    timestamp: '2026-08-01T00:00:00.000Z',
+    payload: { requestType: 'scene.create', accepted: true, result: {} }
+  });
+  const bytes = Buffer.from(response, 'utf8');
+  sockets[0].emit('data', Buffer.concat([Buffer.from([bytes.length, 0, 0, 0]), bytes]));
+
+  await assert.rejects(request, (error) => error.code === 'PROTOCOL_RESPONSE_MISMATCH');
+  assert.equal(diagnostics.at(-1)?.code, 'PROTOCOL_RESPONSE_MISMATCH');
+  await client.close();
+});
+
 test('PipeClient close invalidates an in-flight connection attempt', async () => {
   const socket = new FakeSocket();
   const client = new PipeClient({

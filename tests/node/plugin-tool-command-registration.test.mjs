@@ -19,10 +19,23 @@ test('notification test tool is a bounded static Hana tool and marks tool entry 
   const result = await tool.execute({ count: 1, createCards: false }, {
     bus: { request: async (type, input) => { requests.push({ type, input }); return { ok: true, entryPoint: input.entryPoint }; } }
   });
-  assert.deepEqual(requests, [{ type: 'notification-hub-vnext.run-test', input: { count: 1, createCards: false, events: ['tool_completed'], entryPoint: 'tool' } }]);
+  assert.deepEqual(requests, [{ type: 'notification-hub-vnext.run-test', input: { count: 1, createCards: false, playSound: false, events: ['tool_completed'], entryPoint: 'tool' } }]);
   assert.deepEqual(JSON.parse(result), { ok: true, entryPoint: 'tool' });
   assert.equal(tool.parameters.properties.count.maximum, 100);
   assert.equal(tool.parameters.properties.intervalMs.maximum, 5000);
+});
+
+test('notification test command defaults omitted playSound to false', async () => {
+  const requests = [];
+  await command.handler({
+    args: JSON.stringify({ count: 1 }),
+    hub: {
+      eventBus: {
+        request: async (type, input) => { requests.push({ type, input }); return { ok: true }; }
+      }
+    }
+  });
+  assert.equal(requests[0].input.playSound, false);
 });
 
 test('notification test command is a separate slash command and marks command entry point', async () => {

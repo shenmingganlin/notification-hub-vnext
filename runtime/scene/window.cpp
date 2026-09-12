@@ -14,6 +14,7 @@ namespace notification_hub::scene {
 namespace {
 
 constexpr wchar_t kWindowProperty[] = L"NotificationHubVNextSceneWindowInstance";
+constexpr UINT_PTR kDismissTimerId = 0x4E48;
 
 SceneWindow* from_hwnd(HWND hwnd) {
     return reinterpret_cast<SceneWindow*>(GetPropW(hwnd, kWindowProperty));
@@ -36,6 +37,11 @@ LRESULT CALLBACK window_proc(HWND hwnd, UINT message, WPARAM wparam, LPARAM lpar
             ? HTCLIENT
             : HTTRANSPARENT;
     }
+    case WM_TIMER:
+        if (window != nullptr && wparam == kDismissTimerId && window->close_reason().empty()) {
+            window->request_close("timeout");
+        }
+        return 0;
     case WM_LBUTTONDOWN:
         if (window != nullptr) {
             const auto client_x = static_cast<float>(GET_X_LPARAM(lparam));
@@ -110,6 +116,7 @@ LRESULT CALLBACK window_proc(HWND hwnd, UINT message, WPARAM wparam, LPARAM lpar
         DestroyWindow(hwnd);
         return 0;
     case WM_NCDESTROY:
+        KillTimer(hwnd, kDismissTimerId);
         RemovePropW(hwnd, kWindowProperty);
         if (window != nullptr) window->mark_native_destroyed();
         return DefWindowProcW(hwnd, message, wparam, lparam);
@@ -182,6 +189,7 @@ bool SceneWindow::create() {
         visible_ = false;
         return false;
     }
+    if (config_.visual.dismiss_mode == "timeout") SetTimer(static_cast<HWND>(hwnd_), kDismissTimerId, static_cast<UINT>(config_.visual.dismiss_timeout_ms), nullptr);
     return true;
 #else
     return false;
@@ -330,9 +338,9 @@ bool SceneWindow::get_window_position(int& x, int& y) const noexcept {
 
 bool SceneWindow::begin_close_button_press(float x, float y) noexcept {
 #ifdef _WIN32
-    if (hwnd_ == nullptr || close_requested_ || !point_inside_close_button(x, y, static_cast<float>(config_.width), static_cast<float>(config_.height))) {
-        return false;
-    }
+    if (hwnd_ == nullptr || close_requested_) return false;
+    const bool anywhere = config_.visual.dismiss_mode == "anywhere";
+    if (!anywhere && !point_inside_close_button(x, y, static_cast<float>(config_.width), static_cast<float>(config_.height))) return false;
     close_button_pressed_ = true;
     return true;
 #else
@@ -345,11 +353,9 @@ bool SceneWindow::begin_close_button_press(float x, float y) noexcept {
 bool SceneWindow::release_close_button_press(float x, float y) noexcept {
 #ifdef _WIN32
     if (!close_button_pressed_) return false;
-    const bool released_inside = point_inside_close_button(
-        x,
-        y,
-        static_cast<float>(config_.width),
-        static_cast<float>(config_.height));
+    const bool released_inside = config_.visual.dismiss_mode == "anywhere"
+        ? point_inside_card(x, y, static_cast<float>(config_.width), static_cast<float>(config_.height))
+        : point_inside_close_button(x, y, static_cast<float>(config_.width), static_cast<float>(config_.height));
     close_button_pressed_ = false;
     return released_inside && !close_requested_;
 #else
@@ -455,7 +461,11 @@ void* SceneWindow::native_handle() const noexcept {
 void SceneWindow::update_visual(VisualStyle visual) {
     if (valid_visual_style(visual)) config_.visual = std::move(visual);
 #ifdef _WIN32
-    if (hwnd_ != nullptr) InvalidateRect(static_cast<HWND>(hwnd_), nullptr, FALSE);
+    if (hwnd_ != nullptr) {
+        KillTimer(static_cast<HWND>(hwnd_), kDismissTimerId);
+        if (config_.visual.dismiss_mode == "timeout") SetTimer(static_cast<HWND>(hwnd_), kDismissTimerId, static_cast<UINT>(config_.visual.dismiss_timeout_ms), nullptr);
+        InvalidateRect(static_cast<HWND>(hwnd_), nullptr, FALSE);
+    }
 #endif
 }
 

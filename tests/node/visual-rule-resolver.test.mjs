@@ -6,7 +6,7 @@ import { resolveVisualRule, resolveVisualRuleSafe } from '../../plugin/domain/vi
 const card = {
   cardType: 'minimal',
   behavior: { layout: 'simple', boundary: 'work-area' },
-  appearance: { size: 'medium', aspectRatio: 'default', backgroundColor: '#0e1916', borderRadius: 16, opacity: 0.96 }
+  appearance: { size: 'medium', aspectRatio: 'default', backgroundColor: '#0e1916', backgroundFit: 'fill', backgroundPadding: 0, borderRadius: 16, opacity: 0.96 }
 };
 
 const profile = {
@@ -144,7 +144,9 @@ test('visual resolver safely falls back for invalid input or profile', () => {
     category: null,
     matchedBy: 'fallback',
     reason: 'fallback-invalid-profile',
-    ...card
+    cardType: 'minimal',
+    behavior: { layout: 'simple', boundary: 'work-area' },
+    appearance: { size: 'medium', aspectRatio: 'default', backgroundColor: '#0e1916', borderRadius: 16, opacity: 0.96 }
   });
   assert.ok(Object.isFrozen(result));
 });

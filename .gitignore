@@ -21,6 +21,10 @@ logs/
 diagnostics-output/
 *.log
 
+# Local visual registry snapshots written by runs/tests at repo root
+/visual-assets.json
+/visual-registry.json
+
 # Local configuration and secrets
 .local/
 config.local.*

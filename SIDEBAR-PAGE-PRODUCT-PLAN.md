@@ -9,7 +9,9 @@
 
 ## 1. 总体产品方向
 
-Notification Hub vNext 先完成稳定的 Windows 产品，再逐步扩展声音、视觉、模式和生态能力。
+> **2026-08-18 视觉架构更新：** 本文早期“分类 → 声音 → 视觉 → 模式 → 公共 API”的路线保留作历史背景；视觉系统的当前唯一实施入口是 `docs/superpowers/plans/2026-08-18-visual-system-master-plan.md`。
+
+Notification Hub vNext 先完成稳定的 Windows 产品，再逐步扩展声音、视觉、模式和生态能力。当前视觉产品不再以“工具/回复/错误分类通道”为核心，而以用户可命名的行为通道、可复用视觉配置包和事件绑定为核心。
 
 核心推进原则：
 
@@ -55,21 +57,35 @@ alpha.8 已经通过真实 Hana 验收：
 采用以下产品推进顺序：
 
 ```text
-阶段 0：冻结稳定基线 + 侧边栏问题测量
+基础稳定性与声音链路收口
     ↓
-阶段 1：侧边栏与页面稳定
+视觉契约与 Card Runtime 基础
     ↓
-阶段 2：通知卡片分类体系
+Stack：第一个高质量卡片行为
     ↓
-阶段 3：分类声音策略
+Visual Profile + 行为通道 + 应用于事件
     ↓
-阶段 4：分类视觉策略
+配置包导入导出 + 已自定义事件
     ↓
-阶段 5：模式制作
+视觉素材库
     ↓
-阶段 6：公共通知 API
+逐个实现 Ticker / Popup / Aggregate / Replace / Pin / Follow / Scene
     ↓
-阶段 7：稳定化与正式发布
+Skin
+    ↓
+Effects 与粒子
+    ↓
+视觉配置包管理区 + 诊断中心
+    ↓
+外部插件事件与公共 API
+    ↓
+稳定化与正式发布
+```
+
+完整视觉执行计划见：
+
+```text
+docs/superpowers/plans/2026-08-18-visual-system-master-plan.md
 ```
 
 Runtime 生命周期、Shelf 多卡片、Notification Center、侧边栏响应式布局和页面导航属于阶段 1 的稳定性基础；它们完成后才进入分类、声音和视觉能力。

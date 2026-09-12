@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <charconv>
 #include <sstream>
+#include <regex>
 #include <unordered_set>
 #include <vector>
 
@@ -37,14 +38,39 @@ void append_utf8(std::string& output, std::uint32_t code_point) {
 
 constexpr std::string_view kCommands[] = {
     "hello", "health", "capabilities", "scene.create", "scene.update",
-    "scene.dismiss", "scene.drag", "scene.set-mode", "config.update",
+    "scene.dismiss", "scene.drag", "scene.set-mode", "config.update", "visual-assets.configure",
     "diagnostic.subscribe", "shutdown", "audio.health", "audio.cue", "audio.load", "audio.play", "audio.stop", "audio.stop_all", "audio.unload", "audio.shutdown"
 };
 constexpr std::string_view kMessageTypes[] = {
     "hello", "health", "capabilities", "scene.create", "scene.update",
-    "scene.dismiss", "scene.drag", "scene.set-mode", "config.update",
+    "scene.dismiss", "scene.drag", "scene.set-mode", "config.update", "visual-assets.configure",
     "diagnostic.subscribe", "shutdown", "audio.health", "audio.cue", "audio.load", "audio.play", "audio.stop", "audio.stop_all", "audio.unload", "audio.shutdown", "ack", "error", "event"
 };
+constexpr std::string_view kEventTypes[] = { "scene.changed", "audio.voice_finished" };
+
+bool is_leap_year(int year) {
+    return year % 4 == 0 && (year % 100 != 0 || year % 400 == 0);
+}
+
+bool is_iso8601_timestamp(std::string_view value) {
+    static const std::regex pattern(R"(^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]+)?(Z|[+-][0-9]{2}:[0-9]{2})$)");
+    if (value.empty() || !std::regex_match(value.begin(), value.end(), pattern)) return false;
+    const auto number = [&](size_t offset, size_t length) { return std::stoi(std::string(value.substr(offset, length))); };
+    const int year = number(0, 4);
+    const int month = number(5, 2);
+    const int day = number(8, 2);
+    const int hour = number(11, 2);
+    const int minute = number(14, 2);
+    const int second = number(17, 2);
+    const auto days_in_month = (month == 2) ? (is_leap_year(year) ? 29 : 28)
+        : ((month == 4 || month == 6 || month == 9 || month == 11) ? 30 : 31);
+    const size_t zone_offset = value.find_first_of("Z+-", 19);
+    const int zone_hour = value[zone_offset] == 'Z' ? 0 : number(zone_offset + 1, 2);
+    const int zone_minute = value[zone_offset] == 'Z' ? 0 : number(zone_offset + 4, 2);
+    return month >= 1 && month <= 12 && day >= 1 && day <= days_in_month
+        && hour <= 23 && minute <= 59 && second <= 59
+        && zone_hour <= 23 && zone_minute <= 59;
+}
 
 class Parser {
 public:
@@ -101,13 +127,22 @@ public:
         if (result.message.request_id.empty() || result.message.trace_id.empty()) {
             return fail("PROTOCOL_INVALID_MESSAGE", "requestId and traceId must be non-empty");
         }
-        if (result.message.timestamp.empty()) return fail("PROTOCOL_INVALID_MESSAGE", "timestamp must be non-empty");
+        if (!is_iso8601_timestamp(result.message.timestamp)) return fail("PROTOCOL_INVALID_MESSAGE", "timestamp must be an ISO-8601 date-time string");
         if (!result.message.idempotency_key.empty() && result.message.idempotency_key.find_first_not_of(" \t\r\n") == std::string::npos) {
             return fail("PROTOCOL_INVALID_MESSAGE", "idempotencyKey must be non-empty");
         }
         if (!contains(kMessageTypes, result.message.type)) return fail("PROTOCOL_UNKNOWN_TYPE", "unknown message type: " + result.message.type);
         if (result.message.payload_json.empty() || result.message.payload_json.front() != '{') {
             return fail("PROTOCOL_INVALID_PAYLOAD", "payload must be an object");
+        }
+        if (result.message.type == "event") {
+            const auto event_marker = result.message.payload_json.find("\"eventType\":\"");
+            if (event_marker == std::string::npos) return fail("PROTOCOL_MISSING_FIELD", "event payload requires eventType");
+            const auto start = event_marker + 13;
+            const auto end = result.message.payload_json.find('"', start);
+            if (end == std::string::npos || !contains(kEventTypes, std::string_view(result.message.payload_json).substr(start, end - start))) {
+                return fail("PROTOCOL_UNKNOWN_TYPE", "unknown event type");
+            }
         }
 
         result.ok = true;
@@ -127,7 +162,8 @@ private:
             std::move(code),
             std::move(message),
             request_id_,
-            trace_id_
+            trace_id_,
+            result.message.type.empty() ? "unknown" : result.message.type
         };
         return result;
     }
@@ -365,8 +401,12 @@ std::string serialize_error(const ProtocolError& error) {
     std::ostringstream output;
     output << "{\"protocolVersion\":1,\"requestId\":\"" << escape_json_string(error.request_id)
            << "\",\"traceId\":\"" << escape_json_string(error.trace_id)
-           << "\",\"type\":\"error\",\"timestamp\":\"1970-01-01T00:00:00.000Z\",\"payload\":{\"accepted\":false,\"code\":\""
-           << escape_json_string(error.code) << "\",\"message\":\"" << escape_json_string(error.message) << "\"}}";
+           << "\",\"type\":\"error\",\"timestamp\":\"1970-01-01T00:00:00.000Z\",\"payload\":{\"requestType\":\""
+           << escape_json_string(error.request_type.empty() ? "unknown" : error.request_type)
+           << "\",\"accepted\":false,\"code\":\"" << escape_json_string(error.code)
+           << "\",\"message\":\"" << escape_json_string(error.message)
+           << "\",\"retryable\":" << (error.retryable ? "true" : "false")
+           << ",\"details\":" << (error.details_json.empty() ? "{}" : error.details_json) << "}}";
     return output.str();
 }
 

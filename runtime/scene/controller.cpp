@@ -6,6 +6,8 @@
 #include "../protocol/message.hpp"
 
 #include <algorithm>
+#include <array>
+#include <cctype>
 #include <chrono>
 #include <cmath>
 #include <ctime>
@@ -16,15 +18,66 @@
 #include <sstream>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
 #ifdef _WIN32
 #include <windows.h>
+#include <wincrypt.h>
 #endif
 
 namespace notification_hub::scene {
 namespace {
+
+bool is_visual_preview_card(std::string_view id) {
+    return id.rfind("nh-visual-preview-", 0) == 0;
+}
+
+bool visual_asset_file_is_trusted(std::string_view root_dir, const VisualAssetRecord& asset) {
+#ifdef _WIN32
+    const auto widen = [](std::string value) { return std::wstring(value.begin(), value.end()); };
+    const auto root = widen(std::string(root_dir));
+    std::wstring candidate = root;
+    if (!candidate.empty() && candidate.back() != L'\\') candidate += L'\\';
+    candidate += widen(asset.relative_path);
+    wchar_t root_full[32768]{}; wchar_t candidate_full[32768]{};
+    if (!GetFullPathNameW(root.c_str(), static_cast<DWORD>(std::size(root_full)), root_full, nullptr)
+        || !GetFullPathNameW(candidate.c_str(), static_cast<DWORD>(std::size(candidate_full)), candidate_full, nullptr)) return false;
+    std::wstring prefix(root_full);
+    if (!prefix.empty() && prefix.back() != L'\\') prefix += L'\\';
+    if (std::wstring(candidate_full).rfind(prefix, 0) != 0) return false;
+    const auto attributes = GetFileAttributesW(candidate_full);
+    if (attributes == INVALID_FILE_ATTRIBUTES || (attributes & FILE_ATTRIBUTE_DIRECTORY) != 0) return false;
+    const auto file = CreateFileW(candidate_full, GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (file == INVALID_HANDLE_VALUE) return false;
+    wchar_t final_path[32768]{};
+    const auto final_len = GetFinalPathNameByHandleW(file, final_path, static_cast<DWORD>(std::size(final_path)), VOLUME_NAME_DOS);
+    if (final_len == 0 || final_len >= std::size(final_path)) { CloseHandle(file); return false; }
+    std::wstring final_full(final_path);
+    static constexpr std::wstring_view long_prefix = L"\\\\?\\";
+    if (final_full.rfind(long_prefix, 0) == 0) final_full.erase(0, long_prefix.size());
+    if (final_full.size() < prefix.size() || _wcsnicmp(final_full.c_str(), prefix.c_str(), prefix.size()) != 0) { CloseHandle(file); return false; }
+    HCRYPTPROV provider{}; HCRYPTHASH hash{}; bool valid = false;
+    if (CryptAcquireContextW(&provider, nullptr, nullptr, PROV_RSA_AES, CRYPT_VERIFYCONTEXT)
+        && CryptCreateHash(provider, CALG_SHA_256, 0, 0, &hash)) {
+        std::array<std::uint8_t, 8192> buffer{}; DWORD read = 0; bool read_ok = true;
+        while (ReadFile(file, buffer.data(), static_cast<DWORD>(buffer.size()), &read, nullptr) && read > 0) if (!CryptHashData(hash, buffer.data(), read, 0)) { read_ok = false; break; }
+        DWORD size = 32; std::array<std::uint8_t, 32> digest{};
+        if (read_ok && CryptGetHashParam(hash, HP_HASHVAL, digest.data(), &size, 0)) {
+            static constexpr char hex[] = "0123456789abcdef"; std::string actual;
+            for (const auto byte : digest) { actual.push_back(hex[byte >> 4]); actual.push_back(hex[byte & 15]); }
+            auto expected = asset.sha256; std::transform(expected.begin(), expected.end(), expected.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+            valid = actual == expected;
+        }
+        CryptDestroyHash(hash);
+    }
+    if (provider) CryptReleaseContext(provider, 0);
+    CloseHandle(file); return valid;
+#else
+    static_cast<void>(root_dir); static_cast<void>(asset); return false;
+#endif
+}
 
 std::wstring widen(std::string_view value) {
 #ifdef _WIN32
@@ -76,7 +129,20 @@ std::string card_json(const SceneCardState& card) {
             ? std::string(",\"visual\":{\"enabled\":") + (card.visual.enabled ? "true" : "false")
                 + ",\"preset\":" + json_string(card.visual.preset)
                 + ",\"intensity\":" + json_string(card.visual.intensity)
-                + ",\"category\":" + json_string(card.visual.category) + "}"
+                + ",\"category\":" + (card.visual.category.empty() ? std::string("null") : json_string(card.visual.category))
+                + ",\"cardType\":" + json_string(card.visual.card_type)
+                + ",\"behavior\":{\"layout\":" + json_string(card.visual.layout)
+                + ",\"boundary\":" + json_string(card.visual.boundary) + "}"
+                + ",\"interaction\":{\"dismissMode\":" + json_string(card.visual.dismiss_mode)
+                + ",\"closeButtonPosition\":" + json_string(card.visual.close_button_position)
+                + ",\"timeoutMs\":" + std::to_string(card.visual.dismiss_timeout_ms) + "}"
+                + ",\"appearance\":{\"size\":" + json_string(card.visual.size)
+                + ",\"aspectRatio\":" + json_string(card.visual.aspect_ratio)
+                + ",\"backgroundColor\":" + json_string(card.visual.background_color)
+                + (card.visual.background_asset_id.empty() ? std::string() : ",\"backgroundAssetId\":" + json_string(card.visual.background_asset_id))
+                + ",\"backgroundFit\":" + json_string(card.visual.background_fit)
+                + ",\"backgroundPadding\":" + std::to_string(card.visual.background_padding) + ",\"borderRadius\":" + std::to_string(card.visual.border_radius)
+                + ",\"opacity\":" + std::to_string(card.visual.opacity) + "}}"
             : std::string())
         + (card.presentation_specified
             ? std::string(",\"presentation\":{\"eventId\":") + json_string(card.event_id)
@@ -157,6 +223,24 @@ public:
             [](const std::string& channel_id) { return channel_id != "__legacy__"; });
     }
 
+    VisualStyle resolve_visual(const VisualStyle& visual) const {
+        auto resolved = visual;
+        if (resolved.background_asset_id.empty()) return resolved;
+        const auto asset_it = visual_assets.find(resolved.background_asset_id);
+        if (asset_it == visual_assets.end() || !asset_it->second.enabled
+            || (asset_it->second.format != "png" && asset_it->second.format != "webp" && asset_it->second.format != "jpg")
+            || !visual_asset_file_is_trusted(visual_asset_root_dir, asset_it->second)) {
+            resolved.background_asset_id.clear();
+            resolved.background_asset_path.clear();
+        } else {
+            resolved.background_asset_path = visual_asset_root_dir;
+            if (!resolved.background_asset_path.empty() && resolved.background_asset_path.back() != '\\') resolved.background_asset_path += '\\';
+            resolved.background_asset_path += asset_it->second.relative_path;
+            resolved.background_asset_sha256 = asset_it->second.sha256;
+        }
+        return resolved;
+    }
+
     void rebuild_behavior_channels() {
         behavior_channels.clear();
         behavior_channel_order.clear();
@@ -187,7 +271,26 @@ public:
     WorkAreaSnapshot provider_work_area{};
     WorkAreaSnapshot active_work_area{};
     std::string pending_change_metadata_json;
+    std::unordered_map<std::string, VisualAssetRecord> visual_assets;
+    std::string visual_asset_root_dir;
 };
+
+void RuntimeSceneController::configure_visual_assets(const std::vector<VisualAssetRecord>& assets, std::string_view root_dir) {
+    if (impl_ == nullptr) impl_ = new Impl();
+    impl_->visual_assets.clear();
+    impl_->visual_asset_root_dir = std::string(root_dir);
+    for (const auto& asset : assets) impl_->visual_assets.emplace(asset.asset_id, asset);
+}
+
+bool RuntimeSceneController::has_visual_asset(std::string_view asset_id) const noexcept {
+    if (impl_ == nullptr) return false;
+    const auto it = impl_->visual_assets.find(std::string(asset_id));
+    return it != impl_->visual_assets.end() && it->second.enabled;
+}
+
+std::size_t RuntimeSceneController::visual_asset_count() const noexcept {
+    return impl_ == nullptr ? 0 : impl_->visual_assets.size();
+}
 
 RuntimeSceneController::~RuntimeSceneController() {
     if (impl_ == nullptr) return;
@@ -279,7 +382,8 @@ bool RuntimeSceneController::create_card(
         card.window.x,
         card.window.y,
         true});
-    window->update_visual(card.visual);
+    const auto resolved_visual = impl_->resolve_visual(card.visual);
+    window->update_visual(resolved_visual);
     if (!window->create()) {
         error_code = "RUNTIME_SCENE_WINDOW_APPLY_FAILED";
         error_message = "scene.create could not create the card window";
@@ -312,6 +416,7 @@ bool RuntimeSceneController::create_card(
         return false;
     }
     auto stored_card = card;
+    stored_card.visual = resolved_visual;
     stored_card.layout_width = card.layout_width > 0 ? card.layout_width : card.window.width;
     stored_card.layout_height = card.layout_height > 0 ? card.layout_height : card.window.height;
     impl_->cards.emplace(card.id, stored_card);
@@ -376,7 +481,8 @@ bool RuntimeSceneController::update_card(
     }
     auto& window = window_it->second;
     window->update_content(widen(card.title), widen(card.body));
-    window->update_visual(card.visual);
+    const auto resolved_visual = impl_->resolve_visual(card.visual);
+    window->update_visual(resolved_visual);
 #ifdef _WIN32
     const auto hwnd = static_cast<HWND>(window->native_handle());
     if (hwnd == nullptr || SetWindowPos(
@@ -403,6 +509,7 @@ bool RuntimeSceneController::update_card(
         return false;
     }
     auto stored_card = card;
+    stored_card.visual = resolved_visual;
     const auto previous = impl_->cards.find(card.id);
     const auto previous_state = previous != impl_->cards.end()
         ? std::optional<SceneCardState>(previous->second)
@@ -573,6 +680,7 @@ bool RuntimeSceneController::apply_channel_layout(
             }
 
             auto channel_options = options;
+            const auto profile_id = channel_it->second.profile_id;
             channel_options.work_area_width = lane_width;
             channel_options.work_area_height = effective_work_area.rect.height;
             channel_options.work_area_left = lane_left;
@@ -580,10 +688,18 @@ bool RuntimeSceneController::apply_channel_layout(
             channel_options.mode = options.mode;
             channel_options.direction = options.direction;
             channel_options.anchor = options.anchor;
-            if (channel_it->second.profile_id == "ticker") {
+            if (profile_id == "ticker" || profile_id == "danmaku") {
                 channel_options.mode = LayoutMode::Shelf;
                 channel_options.direction = StackDirection::Right;
                 channel_options.anchor = StackAnchor::TopLeft;
+            } else if (profile_id == "popup") {
+                channel_options.mode = LayoutMode::Stack;
+                channel_options.direction = StackDirection::Down;
+                channel_options.anchor = StackAnchor::TopLeft;
+            } else if (profile_id == "minimal") {
+                channel_options.mode = LayoutMode::Stack;
+                channel_options.direction = StackDirection::Up;
+                channel_options.anchor = StackAnchor::BottomRight;
             }
 
             std::vector<StackCardInput> channel_inputs;
@@ -620,31 +736,34 @@ bool RuntimeSceneController::apply_channel_layout(
                 return false;
             }
             for (const auto& placement : layout.placements) {
-                auto card_it = impl_->cards.find(placement.id);
-                auto window_it = impl_->card_windows.find(placement.id);
+                auto adjusted_placement = placement;
+                if (profile_id == "popup") adjusted_placement.x = lane_left + (lane_width - placement.width) / 2;
+                if (profile_id == "popup") adjusted_placement.y = effective_work_area.rect.top + effective_work_area.rect.height / 6 + (placement.y - effective_work_area.rect.top);
+                auto card_it = impl_->cards.find(adjusted_placement.id);
+                auto window_it = impl_->card_windows.find(adjusted_placement.id);
                 if (card_it == impl_->cards.end() || window_it == impl_->card_windows.end() || window_it->second == nullptr) {
                     error_code = "RUNTIME_SCENE_CARD_NOT_FOUND";
                     error_message = "Behavior channel layout card window is unavailable";
                     return false;
                 }
-                card_it->second.window = SceneWindowState{placement.x, placement.y, placement.width, placement.height};
+                card_it->second.window = SceneWindowState{adjusted_placement.x, adjusted_placement.y, adjusted_placement.width, adjusted_placement.height};
                 auto& window = window_it->second;
 #ifdef _WIN32
                 const auto hwnd = static_cast<HWND>(window->native_handle());
                 if (hwnd == nullptr || SetWindowPos(
                     hwnd,
                     HWND_TOPMOST,
-                    placement.x,
-                    placement.y,
-                    placement.width,
-                    placement.height,
+                    adjusted_placement.x,
+                    adjusted_placement.y,
+                    adjusted_placement.width,
+                    adjusted_placement.height,
                     SWP_NOACTIVATE) == FALSE) {
                     error_code = "RUNTIME_SCENE_WINDOW_APPLY_FAILED";
                     error_message = "Behavior channel layout could not apply card geometry";
                     return false;
                 }
 #endif
-                if (!window->resize_render_target(placement.width, placement.height) || !window->paint()) {
+                if (!window->resize_render_target(adjusted_placement.width, adjusted_placement.height) || !window->paint()) {
                     error_code = "RUNTIME_SCENE_WINDOW_APPLY_FAILED";
                     error_message = "Behavior channel layout could not redraw the card surface";
                     return false;
@@ -683,6 +802,7 @@ bool RuntimeSceneController::apply_channel_layout(
 
     inputs.reserve(impl_->card_order.size());
     for (const auto& id : impl_->card_order) {
+        if (is_visual_preview_card(id)) continue;
         const auto card_it = impl_->cards.find(id);
         if (card_it == impl_->cards.end()) continue;
         inputs.push_back(StackCardInput{
@@ -918,6 +1038,22 @@ std::string RuntimeSceneController::consume_change_metadata_json() {
     auto result = std::move(impl_->pending_change_metadata_json);
     impl_->pending_change_metadata_json.clear();
     return result;
+}
+
+std::string RuntimeSceneController::change_metadata_json() const {
+    if (impl_ == nullptr || impl_->pending_change_metadata_json.empty()) return "null";
+    return impl_->pending_change_metadata_json;
+}
+
+std::string RuntimeSceneController::dismiss_result_json(bool deduplicated, std::string_view card_id) const {
+    return std::string("{\"status\":\"accepted\",\"deduplicated\":")
+        + (deduplicated ? "true" : "false")
+        + ",\"removed\":true,\"targetId\":" + json_string(card_id)
+        + ",\"sceneCards\":" + cards_json()
+        + ",\"sceneStateSnapshot\":" + scene_state_snapshot_json()
+        + ",\"change\":" + change_metadata_json()
+        + ",\"layout\":" + layout_json()
+        + ",\"workArea\":" + work_area_json() + "}";
 }
 
 std::string RuntimeSceneController::state_result_json(bool deduplicated) const {

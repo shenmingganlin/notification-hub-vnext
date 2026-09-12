@@ -1,3 +1,5 @@
+import { errorPayload, readJsonBody, unavailablePayload } from './route-errors.js';
+
 const MAX_TEXT_LENGTH = 2000;
 
 function escapeHtml(value) {
@@ -15,16 +17,9 @@ const RUNTIME_ERROR_MESSAGES = Object.freeze({
   RUNTIME_TEST_LAYOUT_INVALID: '请先选择停靠位置，并使用该位置对应的正常排列方向；卡片间距必须是 0 到 200 的整数。'
 });
 
-function errorMessage(error) {
-  const code = error?.code ?? 'RUNTIME_TEST_API_FAILED';
-  return {
-    code,
-    message: RUNTIME_ERROR_MESSAGES[code] ?? error?.message ?? String(error)
-  };
-}
 
-function readJsonBody(c) {
-  return c.req.json().catch(() => ({}));
+function runtimeErrorStatus(error) {
+  return ['ROUTE_INVALID_JSON', 'RUNTIME_TEST_LAYOUT_INVALID', 'LAYOUT_SHELF_OUT_OF_BOUNDS', 'LAYOUT_SHELF_DIRECTION_INVALID'].includes(error?.code) ? 400 : 500;
 }
 
 function renderWidget() {
@@ -265,19 +260,19 @@ export default function (app, ctx) {
   app.get('/sidebar-display-settings', async (c) => {
     try {
       const plugin = getPlugin();
-      if (!plugin?.getSidebarDisplaySettings) return c.json({ ok: false, error: { code: 'SIDEBAR_DISPLAY_SETTINGS_API_UNAVAILABLE', message: 'Sidebar display settings API unavailable' } }, 503);
+      if (!plugin?.getSidebarDisplaySettings) return c.json(unavailablePayload('SIDEBAR_DISPLAY_SETTINGS_API_UNAVAILABLE', 'Sidebar display settings API unavailable'), 503);
       return c.json({ ok: true, ...plugin.getSidebarDisplaySettings() });
-    } catch (error) { return c.json({ ok: false, error: { code: error?.code ?? 'SIDEBAR_DISPLAY_SETTINGS_READ_FAILED', message: error?.message ?? String(error) } }, 500); }
+    } catch (error) { return c.json({ ok: false, error: errorPayload(error, {}, 'SIDEBAR_DISPLAY_SETTINGS_READ_FAILED') }, 500); }
   });
 
   app.post('/sidebar-display-settings', async (c) => {
     try {
       const plugin = getPlugin();
-      if (!plugin?.updateSidebarDisplaySettings) return c.json({ ok: false, error: { code: 'SIDEBAR_DISPLAY_SETTINGS_API_UNAVAILABLE', message: 'Sidebar display settings API unavailable' } }, 503);
+      if (!plugin?.updateSidebarDisplaySettings) return c.json(unavailablePayload('SIDEBAR_DISPLAY_SETTINGS_API_UNAVAILABLE', 'Sidebar display settings API unavailable'), 503);
       return c.json({ ok: true, ...await plugin.updateSidebarDisplaySettings(await readJsonBody(c)) });
     } catch (error) {
-      const status = String(error?.code ?? '').startsWith('SIDEBAR_DISPLAY_SETTINGS_') ? 400 : 503;
-      return c.json({ ok: false, error: { code: error?.code ?? 'SIDEBAR_DISPLAY_SETTINGS_UPDATE_FAILED', message: error?.message ?? String(error) } }, status);
+      const status = String(error?.code ?? '').startsWith('SIDEBAR_DISPLAY_SETTINGS_') || error?.code === 'ROUTE_INVALID_JSON' ? 400 : 500;
+      return c.json({ ok: false, error: errorPayload(error, {}, 'SIDEBAR_DISPLAY_SETTINGS_UPDATE_FAILED') }, status);
     }
   });
 
@@ -285,40 +280,28 @@ export default function (app, ctx) {
     try {
       const plugin = getPlugin();
       if (!plugin?.getNotificationWidgetStatus) {
-        return c.json({
-          ok: false,
-          error: {
-            code: 'NOTIFICATION_WIDGET_API_UNAVAILABLE',
-            message: 'Notification Widget API unavailable'
-          }
-        }, 503);
+        return c.json(unavailablePayload('NOTIFICATION_WIDGET_API_UNAVAILABLE', 'Notification Widget API unavailable'), 503);
       }
       return c.json({ ok: true, widget: await plugin.getNotificationWidgetStatus() });
     } catch (error) {
-      return c.json({
-        ok: false,
-        error: {
-          code: 'NOTIFICATION_WIDGET_STATUS_FAILED',
-          message: error?.message ?? String(error)
-        }
-      }, 500);
+      return c.json({ ok: false, error: errorPayload(error, {}, 'NOTIFICATION_WIDGET_STATUS_FAILED') }, 500);
     }
   });
 
   app.get('/runtime-test-status', async (c) => {
     try {
       const plugin = getPlugin();
-      if (!plugin?.getRuntimeTestStatus) return c.json({ ok: false, error: 'vNext plugin API unavailable' }, 503);
+      if (!plugin?.getRuntimeTestStatus) return c.json(unavailablePayload('RUNTIME_TEST_API_UNAVAILABLE', 'Runtime test API unavailable'), 503);
       return c.json(await plugin.getRuntimeTestStatus());
     } catch (error) {
-      return c.json({ ok: false, error: errorMessage(error) }, 500);
+      return c.json({ ok: false, error: errorPayload(error, RUNTIME_ERROR_MESSAGES, 'RUNTIME_TEST_API_FAILED') }, runtimeErrorStatus(error));
     }
   });
 
   app.post('/runtime-test-card', async (c) => {
     try {
       const plugin = getPlugin();
-      if (!plugin?.createRuntimeTestCard) return c.json({ ok: false, error: 'vNext plugin API unavailable' }, 503);
+      if (!plugin?.createRuntimeTestCard) return c.json(unavailablePayload('RUNTIME_TEST_API_UNAVAILABLE', 'Runtime test API unavailable'), 503);
       const body = await readJsonBody(c);
       const result = await plugin.createRuntimeTestCard({
         title: typeof body?.title === 'string' ? body.title.slice(0, 120) : '',
@@ -326,25 +309,25 @@ export default function (app, ctx) {
       });
       return c.json({ ok: true, ...result, status: await plugin.getRuntimeTestStatus() });
     } catch (error) {
-      return c.json({ ok: false, error: errorMessage(error) }, 503);
+      return c.json({ ok: false, error: errorPayload(error, RUNTIME_ERROR_MESSAGES, 'RUNTIME_TEST_API_FAILED') }, runtimeErrorStatus(error));
     }
   });
 
   app.post('/runtime-test-cards/clear', async (c) => {
     try {
       const plugin = getPlugin();
-      if (!plugin?.clearRuntimeTestCards) return c.json({ ok: false, error: 'vNext plugin API unavailable' }, 503);
+      if (!plugin?.clearRuntimeTestCards) return c.json(unavailablePayload('RUNTIME_TEST_API_UNAVAILABLE', 'Runtime test API unavailable'), 503);
       const result = await plugin.clearRuntimeTestCards();
       return c.json({ ok: true, ...result });
     } catch (error) {
-      return c.json({ ok: false, error: errorMessage(error) }, 503);
+      return c.json({ ok: false, error: errorPayload(error, RUNTIME_ERROR_MESSAGES, 'RUNTIME_TEST_API_FAILED') }, runtimeErrorStatus(error));
     }
   });
 
   app.post('/runtime-test-layout', async (c) => {
     try {
       const plugin = getPlugin();
-      if (!plugin?.applyRuntimeTestLayout) return c.json({ ok: false, error: 'vNext plugin API unavailable' }, 503);
+      if (!plugin?.applyRuntimeTestLayout) return c.json(unavailablePayload('RUNTIME_TEST_API_UNAVAILABLE', 'Runtime test API unavailable'), 503);
       const body = await readJsonBody(c);
       const result = await plugin.applyRuntimeTestLayout({
         direction: body?.direction,
@@ -353,7 +336,7 @@ export default function (app, ctx) {
       });
       return c.json({ ok: true, ...result });
     } catch (error) {
-      return c.json({ ok: false, error: errorMessage(error) }, 503);
+      return c.json({ ok: false, error: errorPayload(error, RUNTIME_ERROR_MESSAGES, 'RUNTIME_TEST_API_FAILED') }, runtimeErrorStatus(error));
     }
   });
 }

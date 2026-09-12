@@ -261,6 +261,7 @@ export class NotificationApi {
     profileId = 'default',
     contentPolicy,
     presentationProfile = this.#presentationProfile,
+    soundEnabled = true,
     beforeCreate = null
   } = {}) {
     let history = [];
@@ -302,7 +303,7 @@ export class NotificationApi {
     return {
       ...result,
       deduplication,
-      sound: this.#prepareSound({ ...result, deduplication })
+      sound: this.#prepareSound({ ...result, deduplication, soundEnabled })
     };
   }
 
@@ -338,7 +339,7 @@ export class NotificationApi {
     }
   }
 
-  #prepareSound({ record, profile, classification, canonicalEvent, deduplication }) {
+  #prepareSound({ record, profile, classification, canonicalEvent, deduplication, soundEnabled = true }) {
     const usesSoundProfile = this.#soundProfile !== null;
     let decision;
     let presentation = null;
@@ -407,6 +408,16 @@ export class NotificationApi {
       channel: record?.channel ?? null,
       stableKey: record?.notificationId ?? null
     });
+    if (!soundEnabled) {
+      const disabledDecision = Object.freeze({ ...decision, play: false, reason: 'test-sound-disabled' });
+      return Object.freeze({
+        decision: disabledDecision,
+        scheduled: false,
+        playback: null,
+        global: this.#soundConfig,
+        ...(usesSoundProfile ? { matchedRuleId: decision.matchedRuleId, presentation } : {})
+      });
+    }
     if (!this.#soundPlayer && !this.#soundScheduler) {
       const noPlayerDecision = decision.play
         ? Object.freeze({ ...decision, play: false, reason: 'no-player' })

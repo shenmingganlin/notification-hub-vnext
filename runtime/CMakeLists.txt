@@ -7,6 +7,16 @@ function(notification_hub_enable_size_optimization target)
   endif()
 endfunction()
 
+# Native tests must keep evaluating assert expressions in every configuration.
+# This is deliberately target-scoped so production Release builds retain NDEBUG.
+function(notification_hub_enable_test_assertions target)
+  if (MSVC)
+    target_compile_options(${target} PRIVATE /UNDEBUG)
+  else()
+    target_compile_options(${target} PRIVATE -UNDEBUG)
+  endif()
+endfunction()
+
 add_executable(notification-hub-audio-engine-asset-cache-test
   ../tests/native/audio-engine-asset-cache.test.cpp
   audio-engine/asset-cache.cpp
@@ -14,6 +24,7 @@ add_executable(notification-hub-audio-engine-asset-cache-test
 )
 target_include_directories(notification-hub-audio-engine-asset-cache-test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_SOURCE_DIR})
 target_compile_features(notification-hub-audio-engine-asset-cache-test PRIVATE cxx_std_20)
+notification_hub_enable_test_assertions(notification-hub-audio-engine-asset-cache-test)
 add_test(NAME audio_engine_asset_cache COMMAND notification-hub-audio-engine-asset-cache-test)
 
 add_executable(notification-hub-audio-engine-mixer-test
@@ -22,6 +33,7 @@ add_executable(notification-hub-audio-engine-mixer-test
 )
 target_include_directories(notification-hub-audio-engine-mixer-test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_SOURCE_DIR})
 target_compile_features(notification-hub-audio-engine-mixer-test PRIVATE cxx_std_20)
+notification_hub_enable_test_assertions(notification-hub-audio-engine-mixer-test)
 add_test(NAME audio_engine_mixer COMMAND notification-hub-audio-engine-mixer-test)
 
 add_executable(notification-hub-audio-engine-device-output-test
@@ -31,10 +43,12 @@ add_executable(notification-hub-audio-engine-device-output-test
 )
 target_include_directories(notification-hub-audio-engine-device-output-test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_SOURCE_DIR})
 target_compile_features(notification-hub-audio-engine-device-output-test PRIVATE cxx_std_20)
+notification_hub_enable_test_assertions(notification-hub-audio-engine-device-output-test)
 if (WIN32)
   target_link_libraries(notification-hub-audio-engine-device-output-test PRIVATE ole32 mmdevapi avrt)
 endif()
 add_test(NAME audio_engine_device_output COMMAND notification-hub-audio-engine-device-output-test)
+set_tests_properties(audio_engine_device_output PROPERTIES SKIP_RETURN_CODE 77)
 
 add_executable(notification-hub-audio-engine
   audio-engine/main.cpp
@@ -76,7 +90,7 @@ target_include_directories(notification-hub-runtime PRIVATE
 target_compile_features(notification-hub-runtime PRIVATE cxx_std_20)
 
 target_compile_definitions(notification-hub-runtime PRIVATE
-  NOTIFICATION_HUB_VERSION="0.1.0"
+  NOTIFICATION_HUB_VERSION="${PROJECT_VERSION}"
 )
 
 if (WIN32)

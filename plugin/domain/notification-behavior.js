@@ -1,4 +1,4 @@
-export const BEHAVIOR_MODES = Object.freeze(['stack', 'ticker', 'popup']);
+export const BEHAVIOR_MODES = Object.freeze(['stack', 'danmaku', 'ticker', 'popup']);
 
 function behaviorError(code, message, field, details = {}) {
   const error = new Error(message);

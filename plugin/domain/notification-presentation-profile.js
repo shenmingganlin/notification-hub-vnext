@@ -2,7 +2,7 @@ import { createEffectRules, resolveEffectRule } from './effect-rules.js';
 import { createCardChannelPolicies } from './card-runtime-policy.js';
 import { createBehaviorChannels, resolveBehaviorChannel } from './behavior-channel.js';
 
-export const BEHAVIOR_PROFILE_IDS = Object.freeze(['stack', 'ticker', 'popup']);
+export const BEHAVIOR_PROFILE_IDS = Object.freeze(['stack', 'danmaku', 'ticker', 'popup']);
 
 function presentationProfileError(code, message, field, details = {}) {
   const error = new Error(message);

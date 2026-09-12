@@ -1,0 +1,126 @@
+const CARD_TYPES = new Set(['minimal', 'danmaku', 'popup']);
+
+function nativeVisualError(code, message, field) {
+  return Object.assign(new Error(message), { code, details: field ? { field } : {} });
+}
+
+const DEFAULT_VISUAL = Object.freeze({
+  enabled: true,
+  preset: 'minimal',
+  intensity: 'balanced',
+  category: null,
+  cardType: 'minimal'
+});
+
+const DEFAULT_BEHAVIOR = Object.freeze({
+  layout: 'simple',
+  boundary: 'work-area'
+});
+
+const NATIVE_VISUAL_CATEGORIES = new Set(['chat', 'channel', 'tool', 'error', 'plugin', 'model_service']);
+const NATIVE_DISMISS_MODES = new Set(['closeButton', 'anywhere', 'timeout', 'buttonOnly']);
+
+const DEFAULT_APPEARANCE = Object.freeze({
+  size: 'medium',
+  aspectRatio: 'default',
+  backgroundColor: '#0e1916',
+  backgroundFit: 'fill',
+  backgroundPadding: 0,
+  borderRadius: 16,
+  opacity: 0.96
+});
+
+function stringOr(value, fallback) {
+  return typeof value === 'string' && value.length > 0 ? value : fallback;
+}
+
+/**
+ * Project the richer Plugin visual model into the strict scene.create contract.
+ * Geometry-only fields stay on the card root; Native does not parse them inside visual.
+ */
+export function resolveVisualDraftPayload(visual = {}, cardType = {}) {
+  const behavior = { ...(visual.behavior ?? {}) };
+  const appearance = { ...(visual.appearance ?? {}) };
+  const propertiesSpace = cardType.properties?.space ?? {};
+  const propertiesShape = cardType.properties?.shape ?? {};
+  const propertiesInteraction = cardType.properties?.interaction ?? {};
+  const skinBackground = cardType.skin?.background ?? {};
+  const skinDecoration = cardType.skin?.decoration ?? {};
+  const rawAppearance = cardType.appearance ?? {};
+
+  for (const field of ['layout', 'boundary']) {
+    if (behavior[field] === undefined && propertiesSpace[field] !== undefined) behavior[field] = propertiesSpace[field];
+  }
+  for (const field of ['gap', 'margin', 'marginLeft', 'marginRight', 'marginTop', 'marginBottom']) {
+    if (behavior[field] === undefined && propertiesSpace[field] !== undefined) behavior[field] = propertiesSpace[field];
+  }
+  const legacyMargin = behavior.margin ?? 18;
+  for (const field of ['marginLeft', 'marginRight', 'marginTop', 'marginBottom']) {
+    if (behavior[field] === undefined) behavior[field] = legacyMargin;
+  }
+  if (behavior.dismissMode === undefined && propertiesInteraction.dismissMode !== undefined) behavior.dismissMode = propertiesInteraction.dismissMode;
+  if (behavior.closeButtonPosition === undefined && propertiesInteraction.closeButtonPosition !== undefined) behavior.closeButtonPosition = propertiesInteraction.closeButtonPosition;
+  if (!('size' in rawAppearance) && propertiesSpace.size !== undefined) appearance.size = propertiesSpace.size;
+  if (!('aspectRatio' in rawAppearance) && propertiesSpace.aspectRatio !== undefined) appearance.aspectRatio = propertiesSpace.aspectRatio;
+  if (!('backgroundColor' in rawAppearance) && skinBackground.color !== undefined) appearance.backgroundColor = skinBackground.color;
+  if (!('backgroundAssetId' in rawAppearance) && skinBackground.assetId !== undefined) appearance.backgroundAssetId = skinBackground.assetId;
+  if (!('backgroundFit' in rawAppearance) && skinBackground.fit !== undefined) appearance.backgroundFit = skinBackground.fit;
+  if (!('backgroundPadding' in rawAppearance) && skinBackground.padding !== undefined) appearance.backgroundPadding = skinBackground.padding;
+  if (!('borderRadius' in rawAppearance) && propertiesShape.borderRadius !== undefined) appearance.borderRadius = propertiesShape.borderRadius;
+  if (!('borderRadius' in rawAppearance) && skinDecoration.borderRadius !== undefined) appearance.borderRadius = skinDecoration.borderRadius;
+  if (!('opacity' in rawAppearance) && propertiesShape.opacity !== undefined) appearance.opacity = propertiesShape.opacity;
+  if (!('opacity' in rawAppearance) && skinDecoration.opacity !== undefined) appearance.opacity = skinDecoration.opacity;
+
+  const effects = cardType.effects?.slots;
+  if (effects) {
+    const activeEffects = Object.values(effects).filter((slot) => slot?.enabled && slot.effectId && slot.effectId !== 'none');
+    visual = { ...visual, intensity: activeEffects.length > 0 ? 'expressive' : 'reduced' };
+  }
+  return {
+    ...visual,
+    behavior,
+    appearance,
+    interaction: {
+      ...(visual.interaction ?? {}),
+      dismissMode: visual.interaction?.dismissMode ?? propertiesInteraction.dismissMode ?? 'closeButton',
+      closeButtonPosition: visual.interaction?.closeButtonPosition ?? propertiesInteraction.closeButtonPosition ?? 'top-right',
+      timeoutMs: visual.interaction?.timeoutMs ?? propertiesInteraction.timeoutMs ?? propertiesInteraction.durationMs ?? 30000
+    }
+  };
+}
+
+export function projectNativeVisualPayload(visual = {}) {
+  const behavior = visual.behavior ?? {};
+  const appearance = visual.appearance ?? {};
+  const projected = {
+    enabled: typeof visual.enabled === 'boolean' ? visual.enabled : DEFAULT_VISUAL.enabled,
+    preset: stringOr(visual.preset, DEFAULT_VISUAL.preset),
+    intensity: stringOr(visual.intensity, DEFAULT_VISUAL.intensity),
+    category: NATIVE_VISUAL_CATEGORIES.has(visual.category) ? visual.category : DEFAULT_VISUAL.category,
+    cardType: visual.cardType === undefined
+      ? DEFAULT_VISUAL.cardType
+      : (CARD_TYPES.has(visual.cardType) ? visual.cardType : (() => { throw nativeVisualError('NATIVE_VISUAL_CARD_TYPE_INVALID', 'cardType is unsupported', 'cardType'); })()),
+    behavior: {
+      layout: stringOr(behavior.layout, DEFAULT_BEHAVIOR.layout),
+      boundary: stringOr(behavior.boundary, DEFAULT_BEHAVIOR.boundary)
+    },
+    interaction: {
+      dismissMode: NATIVE_DISMISS_MODES.has(visual.interaction?.dismissMode) ? visual.interaction.dismissMode : 'closeButton',
+      closeButtonPosition: typeof visual.interaction?.closeButtonPosition === 'string' ? visual.interaction.closeButtonPosition : 'top-right',
+      timeoutMs: Number.isInteger(visual.interaction?.timeoutMs) ? Math.max(1000, Math.min(60000, visual.interaction.timeoutMs)) : 30000
+    },
+    appearance: {
+      size: stringOr(appearance.size, DEFAULT_APPEARANCE.size),
+      aspectRatio: stringOr(appearance.aspectRatio, DEFAULT_APPEARANCE.aspectRatio),
+      backgroundColor: stringOr(appearance.backgroundColor, DEFAULT_APPEARANCE.backgroundColor),
+      backgroundFit: stringOr(appearance.backgroundFit, DEFAULT_APPEARANCE.backgroundFit),
+      backgroundPadding: typeof appearance.backgroundPadding === 'number' ? appearance.backgroundPadding : DEFAULT_APPEARANCE.backgroundPadding,
+      borderRadius: Number.isInteger(appearance.borderRadius) ? appearance.borderRadius : DEFAULT_APPEARANCE.borderRadius,
+      opacity: typeof appearance.opacity === 'number' ? appearance.opacity : DEFAULT_APPEARANCE.opacity
+    }
+  };
+  if (typeof appearance.backgroundAssetId === 'string' && appearance.backgroundAssetId.length > 0) {
+    projected.appearance.backgroundAssetId = appearance.backgroundAssetId;
+  }
+  return projected;
+}

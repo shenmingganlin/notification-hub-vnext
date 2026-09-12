@@ -66,12 +66,15 @@ export class NotificationStorePersistenceCoordinator extends EventEmitter {
     this.pendingSnapshot = null;
     this.flushPromise = null;
     this.restoring = false;
+    this.applyingRestore = false;
+    this.localRevision = 0;
   }
 
   observe() {
     if (!this.unsubscribe) {
       this.unsubscribe = this.store.subscribe(() => {
-        if (!this.restoring) this.queueCurrentSnapshot();
+        if (!this.applyingRestore) this.localRevision += 1;
+        if (!this.applyingRestore) this.queueCurrentSnapshot();
       });
     }
     return this.unsubscribe;
@@ -85,11 +88,22 @@ export class NotificationStorePersistenceCoordinator extends EventEmitter {
   }
 
   async restore() {
+    const revisionBeforeLoad = this.localRevision;
     let snapshot;
+    this.restoring = true;
     try {
       snapshot = await this.load(this.filePath);
-      this.restoring = true;
-      this.store.replaceAll(snapshot?.records ?? []);
+      if (this.localRevision === revisionBeforeLoad) {
+        this.applyingRestore = true;
+        try {
+          this.store.replaceAll(snapshot?.records ?? []);
+        } finally {
+          this.applyingRestore = false;
+        }
+      } else {
+        // A local mutation won the race with disk restore. Preserve it and persist it.
+        this.queueCurrentSnapshot();
+      }
       return snapshot;
     } catch (error) {
       const wrapped = error.code?.startsWith('NOTIFICATION_STORE_')
@@ -99,6 +113,7 @@ export class NotificationStorePersistenceCoordinator extends EventEmitter {
           'Failed to restore Notification Store',
           { path: this.filePath, cause: error.code ?? error.message }
         );
+      if (this.localRevision !== revisionBeforeLoad) this.queueCurrentSnapshot();
       this.reportFailure(wrapped);
       throw wrapped;
     } finally {

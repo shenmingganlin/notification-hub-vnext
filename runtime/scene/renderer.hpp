@@ -34,6 +34,7 @@ public:
 private:
     struct Impl;
     bool capture_offscreen(std::wstring_view title, std::wstring_view body, const VisualStyle& visual);
+    bool load_background_bitmap(const VisualStyle& visual);
     bool update_layered_window();
     std::unique_ptr<Impl> impl_;
 };

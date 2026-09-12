@@ -109,6 +109,26 @@ test('notification center settings entry injects sound and visual initial state'
   assert.deepEqual(calls, ['sound', 'visual']);
 });
 
+test('notification center mutation routes reject invalid JSON before the domain API', async () => {
+  const harness = createRouteHarness();
+  let called = false;
+  registerNotificationCenterRoute(harness.app, {
+    _notificationHubVNextSettingsApi: {
+      async updateNotificationDisplaySettings() { called = true; }
+    }
+  });
+  const response = await harness.routes.get('POST /notification-center-display-settings')({
+    ...harness.contextFor(),
+    req: { ...harness.contextFor().req, json: async () => { throw new SyntaxError('Unexpected token'); } }
+  });
+  assert.equal(response.status, 400);
+  assert.deepEqual(response.value, {
+    ok: false,
+    error: { code: 'ROUTE_INVALID_JSON', message: '请求体必须是合法 JSON。', details: { field: 'body' } }
+  });
+  assert.equal(called, false);
+});
+
 test('notification center owns a direct display settings read and write route', async () => {
   const harness = createRouteHarness();
   let saved;
@@ -230,19 +250,19 @@ test('notification center lists unread notifications when requested', async () =
     hasMore: false,
     unreadCount: 2
   });
-  assert.deepEqual(calls, [{ limit: 100, unread: true }]);
+  assert.deepEqual(calls, [{ limit: 101, unread: true }]);
 
   const importantResponse = await harness.routes.get('GET /notification-status')(harness.contextFor({ query: { important: 'true' } }));
   assert.equal(importantResponse.status, 200);
-  assert.deepEqual(calls, [{ limit: 100, unread: true }, { limit: 100, important: true }]);
+  assert.deepEqual(calls, [{ limit: 101, unread: true }, { limit: 101, important: true }]);
 
   const conversationResponse = await harness.routes.get('GET /notification-status')(harness.contextFor({ query: { conversation: 'true' } }));
   assert.equal(conversationResponse.status, 200);
-  assert.deepEqual(calls.at(-1), { limit: 100, conversation: true });
+  assert.deepEqual(calls.at(-1), { limit: 101, conversation: true });
 
   const producerResponse = await harness.routes.get('GET /notification-status')(harness.contextFor({ query: { producerKind: 'api' } }));
   assert.equal(producerResponse.status, 200);
-  assert.deepEqual(calls.at(-1), { limit: 100, producerKind: 'api' });
+  assert.deepEqual(calls.at(-1), { limit: 101, producerKind: 'api' });
 
   const categoryResponse = await harness.routes.get('GET /notification-status')(harness.contextFor({ query: { category: 'error,plugin', includeClassification: 'true' } }));
   assert.equal(categoryResponse.status, 200);
@@ -263,27 +283,27 @@ test('notification center lists unread notifications when requested', async () =
 
   const sourceResponse = await harness.routes.get('GET /notification-status')(harness.contextFor({ query: { source: 'hana.session' } }));
   assert.equal(sourceResponse.status, 200);
-  assert.deepEqual(calls.at(-1), { limit: 100, source: 'hana.session' });
+  assert.deepEqual(calls.at(-1), { limit: 101, source: 'hana.session' });
 
   const channelResponse = await harness.routes.get('GET /notification-status')(harness.contextFor({ query: { channelKind: 'chat' } }));
   assert.equal(channelResponse.status, 200);
-  assert.deepEqual(calls.at(-1), { limit: 100, channelKind: 'chat' });
+  assert.deepEqual(calls.at(-1), { limit: 101, channelKind: 'chat' });
 
   const channelFilterResponse = await harness.routes.get('GET /notification-status')(harness.contextFor({ query: { channel: 'true' } }));
   assert.equal(channelFilterResponse.status, 200);
-  assert.deepEqual(calls.at(-1), { limit: 100, channel: true });
+  assert.deepEqual(calls.at(-1), { limit: 101, channel: true });
 
   const channelPathResponse = await harness.routes.get('GET /notification-channel')(harness.contextFor());
   assert.equal(channelPathResponse.status, 200);
-  assert.deepEqual(calls.at(-1), { limit: 100, channel: true });
+  assert.deepEqual(calls.at(-1), { limit: 101, channel: true });
 
   const toolResponse = await harness.routes.get('GET /notification-status')(harness.contextFor({ query: { tool: 'true' } }));
   assert.equal(toolResponse.status, 200);
-  assert.deepEqual(calls.at(-1), { limit: 100, tool: true });
+  assert.deepEqual(calls.at(-1), { limit: 101, tool: true });
 
   const toolPathResponse = await harness.routes.get('GET /notification-tools')(harness.contextFor());
   assert.equal(toolPathResponse.status, 200);
-  assert.deepEqual(calls.at(-1), { limit: 100, tool: true });
+  assert.deepEqual(calls.at(-1), { limit: 101, tool: true });
 
   const modelServiceResponse = await harness.routes.get('GET /notification-status')(harness.contextFor({ query: { category: 'model_service', includeClassification: 'true' } }));
   assert.equal(modelServiceResponse.status, 200);
@@ -291,11 +311,11 @@ test('notification center lists unread notifications when requested', async () =
 
   const systemResponse = await harness.routes.get('GET /notification-status')(harness.contextFor({ query: { system: 'true' } }));
   assert.equal(systemResponse.status, 200);
-  assert.deepEqual(calls.at(-1), { limit: 100, system: true });
+  assert.deepEqual(calls.at(-1), { limit: 101, system: true });
 
   const systemPathResponse = await harness.routes.get('GET /notification-system')(harness.contextFor());
   assert.equal(systemPathResponse.status, 200);
-  assert.deepEqual(calls.at(-1), { limit: 100, system: true });
+  assert.deepEqual(calls.at(-1), { limit: 101, system: true });
 
   const invalidToolResponse = await harness.routes.get('GET /notification-status')(harness.contextFor({ query: { tool: 'maybe' } }));
   assert.equal(invalidToolResponse.status, 400);
@@ -344,31 +364,31 @@ test('notification center lists unread notifications when requested', async () =
   const errorResponse = await harness.routes.get('GET /notification-status')(harness.contextFor({ query: { error: 'true' } }));
   assert.equal(errorResponse.status, 200);
   assert.deepEqual(calls, [
-    { limit: 100, unread: true },
-    { limit: 100, important: true },
-    { limit: 100, conversation: true },
-    { limit: 100, producerKind: 'api' },
+    { limit: 101, unread: true },
+    { limit: 101, important: true },
+    { limit: 101, conversation: true },
+    { limit: 101, producerKind: 'api' },
     {},
     {},
-    { limit: 100, source: 'hana.session' },
-    { limit: 100, channelKind: 'chat' },
-    { limit: 100, channel: true },
-    { limit: 100, channel: true },
-    { limit: 100, tool: true },
-    { limit: 100, tool: true },
+    { limit: 101, source: 'hana.session' },
+    { limit: 101, channelKind: 'chat' },
+    { limit: 101, channel: true },
+    { limit: 101, channel: true },
+    { limit: 101, tool: true },
+    { limit: 101, tool: true },
     {},
-    { limit: 100, system: true },
-    { limit: 100, system: true },
-    { limit: 100, error: true }
+    { limit: 101, system: true },
+    { limit: 101, system: true },
+    { limit: 101, error: true }
   ]);
 
   const errorPathResponse = await harness.routes.get('GET /notification-status/error')(harness.contextFor());
   assert.equal(errorPathResponse.status, 200);
-  assert.deepEqual(calls.at(-1), { limit: 100, error: true });
+  assert.deepEqual(calls.at(-1), { limit: 101, error: true });
 
   const errorHeaderResponse = await harness.routes.get('GET /notification-status')(harness.contextFor({ headers: { 'x-notification-error': 'true' } }));
   assert.equal(errorHeaderResponse.status, 200);
-  assert.deepEqual(calls.at(-1), { limit: 100, error: true });
+  assert.deepEqual(calls.at(-1), { limit: 101, error: true });
 
   const invalidConversationResponse = await harness.routes.get('GET /notification-status')(harness.contextFor({ query: { conversation: 'maybe' } }));
   assert.equal(invalidConversationResponse.status, 400);
@@ -396,13 +416,13 @@ test('notification center lists unread notifications when requested', async () =
     harness.contextFor({ url: '/notification-status?error=true' })
   );
   assert.equal(urlQueryResponse.status, 200);
-  assert.deepEqual(calls.at(-1), { limit: 100, error: true });
+  assert.deepEqual(calls.at(-1), { limit: 101, error: true });
 
   const nativeRequestResponse = await harness.routes.get('GET /notification-status')(
     harness.contextFor({ url: '/notification-status?error=true', nativeRequest: true })
   );
   assert.equal(nativeRequestResponse.status, 200);
-  assert.deepEqual(calls.at(-1), { limit: 100, error: true });
+  assert.deepEqual(calls.at(-1), { limit: 101, error: true });
 });
 
 test('notification center fixed tool and system routes never return unrelated records', async () => {
@@ -425,13 +445,13 @@ test('notification center fixed tool and system routes never return unrelated re
   assert.equal(toolResponse.status, 200);
   assert.deepEqual(toolResponse.value.notifications.map((record) => record.source), ['hana.tool']);
   assert.equal(toolResponse.value.totalCount, 1);
-  assert.deepEqual(calls.at(-1), { limit: 100, tool: true });
+  assert.deepEqual(calls.at(-1), { limit: 101, tool: true });
 
   const systemResponse = await harness.routes.get('GET /notification-system')(harness.contextFor());
   assert.equal(systemResponse.status, 200);
   assert.deepEqual(systemResponse.value.notifications.map((record) => record.source), ['hana.system']);
   assert.equal(systemResponse.value.totalCount, 1);
-  assert.deepEqual(calls.at(-1), { limit: 100, system: true });
+  assert.deepEqual(calls.at(-1), { limit: 101, system: true });
 });
 
 test('notification center marks one notification as read', async () => {
@@ -609,6 +629,24 @@ test('notification center returns empty state without mutating the API result', 
   });
 });
 
+test('notification center reports hasMore only when the probe exceeds the configured limit', async () => {
+  for (const [count, expectedDisplayed, expectedHasMore] of [[0, 0, false], [2, 2, false], [3, 3, false], [4, 3, true]]) {
+    const harness = createRouteHarness();
+    const api = { listNotifications: () => Array.from({ length: count }, (_, index) => ({ ...records[0], notificationId: `boundary-${count}-${index}` })) };
+    registerNotificationCenterRoute(harness.app, {
+      _notificationHubVNextNotificationApi: api,
+      _notificationHubVNextSettingsApi: { getNotificationDisplaySettings: () => ({ limit: 3 }) }
+    });
+    const response = await harness.routes.get('GET /notification-status')(harness.contextFor());
+    assert.equal(response.status, 200);
+    assert.equal(response.value.notifications.length, expectedDisplayed);
+    assert.equal(response.value.totalCount, expectedDisplayed);
+    assert.equal(response.value.displayedCount, expectedDisplayed);
+    assert.equal(response.value.displayLimit, 3);
+    assert.equal(response.value.hasMore, expectedHasMore);
+  }
+});
+
 test('notification center returns a structured error when the API is unavailable', async () => {
   const harness = createRouteHarness();
   registerNotificationCenterRoute(harness.app, {});
@@ -619,7 +657,8 @@ test('notification center returns a structured error when the API is unavailable
     ok: false,
     error: {
       code: 'NOTIFICATION_CENTER_API_UNAVAILABLE',
-      message: 'Notification API unavailable'
+      message: 'Notification API unavailable',
+      details: {}
     }
   });
 });
@@ -669,8 +708,10 @@ test('notification center requests the complete list and compresses only each ca
 
   const response = await harness.routes.get('GET /notification-status')(harness.contextFor());
   assert.equal(response.status, 200);
-  assert.equal(response.value.notifications.length, 101);
-  assert.deepEqual(calls, [{ limit: 100 }]);
+  assert.equal(response.value.notifications.length, 100);
+  assert.equal(response.value.totalCount, 100);
+  assert.equal(response.value.hasMore, true);
+  assert.deepEqual(calls, [{ limit: 101 }]);
 
   const html = renderNotificationCenterPage();
   assert.match(html, /\.notification-card h2[^}]*-webkit-line-clamp:\s*1/);
@@ -706,11 +747,11 @@ test('notification center applies configured and explicit display limits without
 
   const configured = await harness.routes.get('GET /notification-status')(harness.contextFor());
   assert.equal(configured.value.displayLimit, 30);
-  assert.deepEqual(calls.at(-1), { limit: 30 });
+  assert.deepEqual(calls.at(-1), { limit: 31 });
 
   const custom = await harness.routes.get('GET /notification-status')(harness.contextFor({ url: '/notification-status?limit=500' }));
   assert.equal(custom.value.displayLimit, 500);
-  assert.deepEqual(calls.at(-1), { limit: 500 });
+  assert.deepEqual(calls.at(-1), { limit: 501 });
 
   const unlimited = await harness.routes.get('GET /notification-status')(harness.contextFor({ query: { limit: 'unlimited' } }));
   assert.equal(unlimited.value.displayLimit, null);
@@ -719,6 +760,67 @@ test('notification center applies configured and explicit display limits without
   const invalid = await harness.routes.get('GET /notification-status')(harness.contextFor({ query: { limit: '10001' } }));
   assert.equal(invalid.status, 400);
   assert.equal(invalid.value.error.code, 'NOTIFICATION_DISPLAY_LIMIT_INVALID');
+});
+
+test('notification center routes use the explicit service key for list, mutations, and display settings', async () => {
+  const harness = createRouteHarness();
+  const calls = [];
+  const service = {
+    listNotifications(options) { calls.push(['list', options]); return records; },
+    getNotification(notificationId) { calls.push(['get', notificationId]); return records.find((record) => record.notificationId === notificationId); },
+    setNotificationStatus(notificationId, status) { calls.push(['read', notificationId, status]); return { ...records[0], notificationId, status }; },
+    setNotificationsStatus(notificationIds, status) { calls.push(['batch-read', notificationIds, status]); return { updated: notificationIds.map((notificationId) => ({ notificationId, status })), missing: [] }; },
+    removeNotification(notificationId) { calls.push(['remove', notificationId]); return true; },
+    removeNotifications(notificationIds) { calls.push(['batch-remove', notificationIds]); return { removed: notificationIds, missing: [] }; },
+    getNotificationDisplaySettings() { calls.push(['display-read']); return { limit: 30, cardLifetimeSeconds: 120 }; },
+    async updateNotificationDisplaySettings(patch) { calls.push(['display-write', patch]); return { limit: patch.limit, cardLifetimeSeconds: patch.cardLifetimeSeconds }; }
+  };
+  registerNotificationCenterRoute(harness.app, {
+    _notificationHubVNextNotificationCenterServices: service,
+    _notificationHubVNextPlugin: {
+      listNotifications() { throw new Error('plugin must not be called'); },
+      getNotification() { throw new Error('plugin must not be called'); }
+    }
+  });
+
+  const list = await harness.routes.get('GET /notification-status')(harness.contextFor());
+  const detail = await harness.routes.get('GET /notification-detail/:notificationId')(harness.contextFor({ params: { notificationId: 'notification-latest' } }));
+  const read = await harness.routes.get('POST /notification-status/:notificationId/read')(harness.contextFor({ params: { notificationId: 'notification-latest' } }));
+  const batchRead = await harness.routes.get('POST /notification-status/batch')(harness.contextFor({ body: { notificationIds: ['notification-latest'], status: 'read' } }));
+  const remove = await harness.routes.get('POST /notification-remove/:notificationId')(harness.contextFor({ params: { notificationId: 'notification-latest' } }));
+  const batchRemove = await harness.routes.get('POST /notification-remove/batch')(harness.contextFor({ body: { notificationIds: ['notification-latest'] } }));
+  const settings = await harness.routes.get('GET /notification-center-display-settings')(harness.contextFor());
+  const saved = await harness.routes.get('POST /notification-center-display-settings')(harness.contextFor({ body: { limit: 50, cardLifetimeSeconds: 0 } }));
+
+  assert.equal(list.status, 200);
+  assert.equal(detail.status, 200);
+  assert.equal(read.status, 200);
+  assert.equal(batchRead.status, 200);
+  assert.equal(remove.status, 200);
+  assert.equal(batchRemove.status, 200);
+  assert.equal(settings.status, 200);
+  assert.equal(saved.status, 200);
+  assert.deepEqual(calls.map(([name]) => name), ['display-read', 'list', 'get', 'read', 'batch-read', 'remove', 'batch-remove', 'display-read', 'display-write']);
+});
+
+test('notification center does not use the legacy plugin fallback when the explicit service is unavailable', async () => {
+  const harness = createRouteHarness();
+  let pluginCalled = false;
+  registerNotificationCenterRoute(harness.app, {
+    _notificationHubVNextPlugin: {
+      listNotifications() { pluginCalled = true; return records; },
+      getNotification() { pluginCalled = true; return records[0]; },
+      getNotificationDisplaySettings() { pluginCalled = true; return { limit: 30 }; }
+    }
+  });
+
+  const list = await harness.routes.get('GET /notification-status')(harness.contextFor());
+  const settings = await harness.routes.get('GET /notification-center-display-settings')(harness.contextFor());
+  assert.equal(list.status, 503);
+  assert.equal(settings.status, 503);
+  assert.equal(list.value.error.code, 'NOTIFICATION_CENTER_API_UNAVAILABLE');
+  assert.equal(settings.value.error.code, 'NOTIFICATION_CENTER_SETTINGS_UNAVAILABLE');
+  assert.equal(pluginCalled, false);
 });
 
 test('notification center page clears its refresh timer before an internal view switch', () => {

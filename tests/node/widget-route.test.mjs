@@ -148,6 +148,36 @@ test('temporary Runtime widget registers its page and API endpoints', async () =
   assert.deepEqual(calls.map((call) => Array.isArray(call) ? call[0] : call), ['sidebar-get', 'sidebar-update', 'widget', 'status', 'create', 'status', 'clear', 'layout']);
 });
 
+test('widget mutation routes reject invalid JSON and return structured errors', async () => {
+  const harness = createRouteHarness();
+  let called = false;
+  registerWidgetRoute(harness.app, {
+    _notificationHubVNextPlugin: {
+      async applyRuntimeTestLayout() { called = true; }
+    }
+  });
+  const response = await harness.routes.get('POST /runtime-test-layout')({
+    ...harness.contextFor(),
+    req: { json: async () => { throw new SyntaxError('Unexpected token'); } }
+  });
+  assert.equal(response.status, 400);
+  assert.deepEqual(response.value, {
+    ok: false,
+    error: { code: 'ROUTE_INVALID_JSON', message: '请求体必须是合法 JSON。', details: { field: 'body' } }
+  });
+  assert.equal(called, false);
+
+  const internal = createRouteHarness();
+  registerWidgetRoute(internal.app, {
+    _notificationHubVNextPlugin: {
+      async applyRuntimeTestLayout() { throw Object.assign(new Error('runtime failed'), { code: 'RUNTIME_TEST_INTERNAL_FAILED' }); }
+    }
+  });
+  const internalResponse = await internal.routes.get('POST /runtime-test-layout')(internal.contextFor({}));
+  assert.equal(internalResponse.status, 500);
+  assert.equal(internalResponse.value.error.code, 'RUNTIME_TEST_INTERNAL_FAILED');
+});
+
 test('widget status route reports a stable unavailable error', async () => {
   const harness = createRouteHarness();
   registerWidgetRoute(harness.app, { _notificationHubVNextPlugin: {} });
@@ -159,7 +189,8 @@ test('widget status route reports a stable unavailable error', async () => {
     ok: false,
     error: {
       code: 'NOTIFICATION_WIDGET_API_UNAVAILABLE',
-      message: 'Notification Widget API unavailable'
+      message: 'Notification Widget API unavailable',
+      details: {}
     }
   });
 });

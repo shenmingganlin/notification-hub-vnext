@@ -6,6 +6,7 @@ import {
   parseMessage,
   serializeMessage
 } from '../protocol/index.js';
+import { RequestSessionDispatcher } from './request-session-dispatcher.js';
 
 const HEADER_BYTES = 4;
 const MAX_FRAME_PAYLOAD_BYTES = 1024 * 1024;
@@ -58,7 +59,17 @@ export class PipeClient extends EventEmitter {
     this.socketFactory = socketFactory;
     this.socket = null;
     this.buffer = Buffer.alloc(0);
-    this.pending = new Map();
+    this.session = new RequestSessionDispatcher({
+      onTimeout: (error, requestId, pending) => {
+        if (pending?.session && this.socket === pending.session) {
+          this.handleDisconnect(pending.session, error);
+          pending.session.destroy();
+          return;
+        }
+        this.session.reject(requestId, error);
+        this.emitDiagnostic(error.code, error.message, error.details);
+      }
+    });
     this.requestQueue = [];
     this.requestDrainPromise = null;
     this.nextRequestNumber = 1;
@@ -219,27 +230,21 @@ export class PipeClient extends EventEmitter {
 
     return await new Promise((resolve, reject) => {
       const socket = this.socket;
-      const timer = setTimeout(() => {
-        const timeoutError = transportError('TRANSPORT_ACK_TIMEOUT', `ACK timed out for ${request.requestId}`, {
-          requestId: request.requestId,
-          traceId: request.traceId,
-          type: request.type
-        });
-        if (this.socket === socket) {
-          this.handleDisconnect(socket, timeoutError);
-          socket.destroy();
-          return;
-        }
-        this.pending.delete(request.requestId);
-        this.emitDiagnostic(timeoutError.code, timeoutError.message, timeoutError.details);
-        reject(timeoutError);
-      }, timeoutMs);
-      this.pending.set(request.requestId, { resolve, reject, timer });
+      this.session.track({
+        requestId: request.requestId,
+        traceId: request.traceId,
+        requestType: request.type,
+        session: socket,
+        resolve,
+        reject,
+        timeoutMs
+      });
       socket.write(frame, (error) => {
         if (!error) return;
-        clearTimeout(timer);
-        this.pending.delete(request.requestId);
-        reject(transportError('TRANSPORT_PIPE_WRITE_FAILED', error.message));
+        this.session.reject(
+          request.requestId,
+          transportError('TRANSPORT_PIPE_WRITE_FAILED', error.message)
+        );
       });
     });
   }
@@ -249,7 +254,7 @@ export class PipeClient extends EventEmitter {
     this.intentionalClose = true;
     this.setState('closed', 'client-close');
     const closedError = transportError('TRANSPORT_CLIENT_CLOSED', 'Named Pipe client closed');
-    this.rejectPending(closedError);
+    this.session.rejectAll(closedError);
     while (this.requestQueue.length > 0) this.requestQueue.shift()?.reject(closedError);
     const socket = this.socket ?? this.connectingSocket;
     const pendingConnect = this.connectPromise;
@@ -294,7 +299,7 @@ export class PipeClient extends EventEmitter {
     if (this.socket !== socket) return;
     this.socket = null;
     this.buffer = Buffer.alloc(0);
-    this.rejectPending(error);
+    this.session.rejectAll(error);
     if (!this.intentionalClose && this.state !== 'closed') {
       this.setState('disconnected', error.code);
       this.emitDiagnostic(error.code, error.message, error.details);
@@ -309,7 +314,7 @@ export class PipeClient extends EventEmitter {
           length === 0 ? 'TRANSPORT_FRAME_EMPTY' : 'TRANSPORT_FRAME_TOO_LARGE',
           'Received invalid frame length'
         );
-        this.rejectPending(error);
+        this.session.rejectAll(error);
         this.emitDiagnostic(error.code, error.message);
         this.socket?.destroy();
         return;
@@ -328,7 +333,7 @@ export class PipeClient extends EventEmitter {
       message = parseMessage(payload);
     } catch (error) {
       const wrapped = transportError('PROTOCOL_INVALID_MESSAGE', error.message, { cause: error.code });
-      this.rejectPending(wrapped);
+      this.session.rejectAll(wrapped);
       this.emitDiagnostic(wrapped.code, wrapped.message, wrapped.details);
       return;
     }
@@ -345,16 +350,13 @@ export class PipeClient extends EventEmitter {
       this.emit('event', message);
       return;
     }
-    this.emit('response', message);
-    const pending = this.pending.get(message.requestId);
-    if (!pending) return;
-    this.pending.delete(message.requestId);
-    clearTimeout(pending.timer);
-    if (message.type === 'error') {
-      pending.reject(transportError(message.payload.code, message.payload.message, message.payload.details));
+    const result = this.session.settleResponse(message);
+    if (!result.matched) return;
+    if (!result.accepted) {
+      this.emitDiagnostic(result.error.code, result.error.message, result.error.details);
       return;
     }
-    pending.resolve(message);
+    this.emit('response', message);
   }
 
   setState(nextState, reason) {
@@ -372,13 +374,6 @@ export class PipeClient extends EventEmitter {
     return new Promise((resolve) => setTimeout(resolve, milliseconds));
   }
 
-  rejectPending(error) {
-    for (const [requestId, pending] of this.pending) {
-      clearTimeout(pending.timer);
-      pending.reject(error);
-      this.pending.delete(requestId);
-    }
-  }
 }
 
 export { encodeFrame, MAX_FRAME_PAYLOAD_BYTES, RETRYABLE_TYPES };

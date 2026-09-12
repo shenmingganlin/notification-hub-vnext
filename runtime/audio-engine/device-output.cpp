@@ -43,6 +43,10 @@ struct DeviceOutput::Impl {
     std::size_t buffer_frames{};
     mutable std::mutex error_mutex;
     std::string error;
+    std::mutex startup_mutex;
+    std::condition_variable startup_condition;
+    bool startup_complete{false};
+    bool startup_succeeded{false};
     std::thread render_thread;
 #ifdef _WIN32
     Microsoft::WRL::ComPtr<IAudioClient> client;
@@ -91,9 +95,23 @@ bool DeviceOutput::start(Mixer& mixer, std::string& error) {
         std::vector<float> mix_buffer(state->buffer_frames * channels);
         HRESULT local_hr = state->client->Start();
         if (FAILED(local_hr)) {
-            std::lock_guard lock(state->error_mutex);
-            state->error = hresult_error("IAudioClient::Start", local_hr);
+            {
+                std::lock_guard lock(state->error_mutex);
+                state->error = hresult_error("IAudioClient::Start", local_hr);
+            }
             state->available = false;
+            {
+                std::lock_guard lock(state->startup_mutex);
+                state->startup_complete = true;
+            }
+            state->startup_condition.notify_one();
+        } else {
+            {
+                std::lock_guard lock(state->startup_mutex);
+                state->startup_succeeded = true;
+                state->startup_complete = true;
+            }
+            state->startup_condition.notify_one();
         }
         while (!state->stop_requested && state->available) {
             UINT32 padding = 0;
@@ -168,6 +186,19 @@ bool DeviceOutput::start(Mixer& mixer, std::string& error) {
         if (avrt_handle) AvRevertMmThreadCharacteristics(avrt_handle);
         state->running = false;
     });
+    {
+        std::unique_lock lock(impl_->startup_mutex);
+        const auto started = impl_->startup_condition.wait_for(lock, std::chrono::milliseconds(1000), [this] {
+            return impl_->startup_complete;
+        });
+        if (!started || !impl_->startup_succeeded) {
+            if (error.empty()) error = last_error();
+            if (error.empty()) error = "WASAPI render thread did not become ready";
+            lock.unlock();
+            stop();
+            return false;
+        }
+    }
     return true;
 #else
     error = "WASAPI is only available on Windows";

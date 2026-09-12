@@ -1,13 +1,13 @@
-import { createCardVisualSettings, cardVisualDefaults } from './card-visual-settings.js';
+import { createCardVisualSettings, cardVisualDefaults, createCardProperties, createCardSkin, createCardEffect } from './card-visual-settings.js';
 
 export const VISUAL_PROFILE_VERSION = 1;
-export { createCardVisualSettings, cardVisualDefaults } from './card-visual-settings.js';
+export { createCardVisualSettings, cardVisualDefaults, createCardProperties, createCardSkin, createCardEffect } from './card-visual-settings.js';
 export const VISUAL_CATEGORIES = Object.freeze(['chat', 'channel', 'tool', 'error', 'plugin', 'model_service']);
 export const VISUAL_PRESETS = Object.freeze(['minimal', 'soft', 'accent', 'warning', 'critical']);
 export const VISUAL_INTENSITIES = Object.freeze(['reduced', 'balanced', 'expressive']);
 
-const PROFILE_FIELDS = Object.freeze(['version', 'global', 'categories', 'visualProfiles', 'rules', 'card']);
-const POLICY_FIELDS = Object.freeze(['enabled', 'preset', 'intensity']);
+const PROFILE_FIELDS = Object.freeze(['version', 'global', 'categories', 'visualProfiles', 'rules', 'card', 'propertiesId', 'skinId', 'effectConfigId']);
+const POLICY_FIELDS = Object.freeze(['enabled', 'preset', 'intensity', 'defaultMode']);
 const VISUAL_PROFILE_ID_PATTERN = /^[a-z0-9][a-z0-9._-]{0,79}$/i;
 const CATEGORY_DEFAULTS = Object.freeze({
   chat: 'minimal',
@@ -17,7 +17,7 @@ const CATEGORY_DEFAULTS = Object.freeze({
   plugin: 'soft',
   model_service: 'warning'
 });
-const DEFAULT_GLOBAL = Object.freeze({ enabled: true, preset: 'minimal', intensity: 'balanced' });
+const DEFAULT_GLOBAL = Object.freeze({ enabled: true, preset: 'minimal', intensity: 'balanced', defaultMode: 'off' });
 
 function fail(code, message, details = {}) {
   return Object.assign(new Error(message), { code, details });
@@ -82,7 +82,14 @@ export function createVisualProfile(input = {}) {
   }
   const visualProfiles = 'visualProfiles' in input ? validateVisualProfiles(input.visualProfiles) : {};
   if ('rules' in input && (!Array.isArray(input.rules) || input.rules.some((rule) => !plain(rule)))) throw fail('VISUAL_PROFILE_RULE_INVALID', 'rules must be an array of plain objects', { field: 'rules' });
+  if ('propertiesId' in input && input.propertiesId !== null && typeof input.propertiesId !== 'string') throw fail('VISUAL_PROFILE_FIELD_INVALID', 'propertiesId must be a string or null', { field: 'propertiesId' });
+  if ('skinId' in input && input.skinId !== null && typeof input.skinId !== 'string') throw fail('VISUAL_PROFILE_FIELD_INVALID', 'skinId must be a string or null', { field: 'skinId' });
+  if ('effectConfigId' in input && input.effectConfigId !== null && typeof input.effectConfigId !== 'string') throw fail('VISUAL_PROFILE_FIELD_INVALID', 'effectConfigId must be a string or null', { field: 'effectConfigId' });
   const global = { ...DEFAULT_GLOBAL, ...clone(input.global ?? {}) };
+  const VALID_DEFAULT_MODES = ['off', 'minimal'];
+  if (global.defaultMode && !VALID_DEFAULT_MODES.includes(global.defaultMode)) {
+    throw fail('VISUAL_PROFILE_FIELD_INVALID', 'global.defaultMode must be "off" or "minimal"', { field: 'global.defaultMode' });
+  }
   const categories = Object.fromEntries(VISUAL_CATEGORIES.map((category) => [category, {
     enabled: true,
     preset: CATEGORY_DEFAULTS[category],
@@ -95,7 +102,10 @@ export function createVisualProfile(input = {}) {
     categories,
     visualProfiles: freeze(visualProfiles),
     rules: clone(input.rules ?? []),
-    card: createCardVisualSettings(input.card ?? {})
+    card: createCardVisualSettings(input.card ?? {}),
+    propertiesId: input.propertiesId ?? null,
+    skinId: input.skinId ?? null,
+    effectConfigId: input.effectConfigId ?? null
   });
 }
 

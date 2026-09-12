@@ -6,6 +6,8 @@
  * protocol semantics transport-independent.
  */
 
+import { PLUGIN_VERSION } from '../version.js';
+
 export const PROTOCOL_VERSION = 1;
 
 export const COMMAND_TYPES = Object.freeze([
@@ -18,6 +20,7 @@ export const COMMAND_TYPES = Object.freeze([
   'scene.drag',
   'scene.set-mode',
   'config.update',
+  'visual-assets.configure',
   'diagnostic.subscribe',
   'shutdown',
   'audio.health',
@@ -55,6 +58,23 @@ const ENVELOPE_FIELDS = new Set([
 
 const isRecord = (value) => value !== null && typeof value === 'object' && !Array.isArray(value);
 const isNonEmptyString = (value) => typeof value === 'string' && value.trim().length > 0;
+const ISO_8601_DATE_TIME = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d+)?(Z|[+-](\d{2}):(\d{2}))$/;
+const isIso8601DateTime = (value) => {
+  if (!isNonEmptyString(value)) return false;
+  const match = ISO_8601_DATE_TIME.exec(value);
+  if (!match || Number.isNaN(Date.parse(value))) return false;
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const daysInMonth = month === 2
+    ? ((year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0)) ? 29 : 28)
+    : ([4, 6, 9, 11].includes(month) ? 30 : 31);
+  const zoneHour = match[7] === 'Z' ? 0 : Number(match[8]);
+  const zoneMinute = match[7] === 'Z' ? 0 : Number(match[9]);
+  return month >= 1 && month <= 12 && day >= 1 && day <= daysInMonth
+    && Number(match[4]) <= 23 && Number(match[5]) <= 59 && Number(match[6]) <= 59
+    && zoneHour <= 23 && zoneMinute <= 59;
+};
 
 function protocolError(code, message, details = {}) {
   return Object.assign(new Error(message), { code, details });
@@ -111,7 +131,7 @@ export function createHello(options = {}) {
   return createRequest({
     type: 'hello',
     payload: {
-      clientVersion: options.clientVersion ?? '0.1.0-alpha.2',
+      clientVersion: options.clientVersion ?? PLUGIN_VERSION,
       supportedProtocolVersions: options.supportedProtocolVersions ?? [PROTOCOL_VERSION]
     },
     requestId: options.requestId,
@@ -223,11 +243,23 @@ export function validateMessage(message, { allowUnknownFields = false } = {}) {
   if (!isNonEmptyString(message.type) || !MESSAGE_TYPES.includes(message.type)) {
     throw protocolError(PROTOCOL_ERROR_CODES.UNKNOWN_TYPE, `Unknown message type: ${String(message.type)}`, { type: message.type });
   }
-  if (!isNonEmptyString(message.timestamp) || Number.isNaN(Date.parse(message.timestamp))) {
+  if (!isIso8601DateTime(message.timestamp)) {
     throw protocolError(PROTOCOL_ERROR_CODES.INVALID_MESSAGE, 'timestamp must be an ISO-8601 date-time string');
   }
   if (!isRecord(message.payload)) {
     throw protocolError(PROTOCOL_ERROR_CODES.INVALID_PAYLOAD, 'payload must be an object');
+  }
+  if (message.type === 'error') {
+    const { requestType, accepted, code, message: errorMessage, retryable, details } = message.payload;
+    if (!isNonEmptyString(requestType) || accepted !== false || !isNonEmptyString(code)
+      || !isNonEmptyString(errorMessage) || typeof retryable !== 'boolean' || !isRecord(details)) {
+      throw protocolError(PROTOCOL_ERROR_CODES.INVALID_PAYLOAD, 'error payload requires requestType, accepted=false, code, message, retryable, and details');
+    }
+    const errorFields = ['requestType', 'accepted', 'code', 'message', 'retryable', 'details'];
+    const unknownFields = Object.keys(message.payload).filter((field) => !errorFields.includes(field));
+    if (unknownFields.length > 0) {
+      throw protocolError(PROTOCOL_ERROR_CODES.UNKNOWN_FIELD, `Unknown error payload field(s): ${unknownFields.join(', ')}`, { fields: unknownFields });
+    }
   }
   if (message.type === 'event') {
     if (!isNonEmptyString(message.payload.eventType) || !EVENT_TYPES.includes(message.payload.eventType)) {

@@ -49,12 +49,12 @@ test('notification test tool suppresses repeated physical Windows resources whil
     playSound: true
   });
   await new Promise((resolve) => setImmediate(resolve));
-  assert.equal(calls.length, 3);
+  assert.equal(calls.length, 4);
   while (pending.length) pending.shift()({ played: true });
   const result = await run;
   assert.equal(result.generated, 12);
-  assert.equal(result.results.filter((entry) => entry.scheduling?.status === 'merged').length, 9);
-  assert.equal(result.results.filter((entry) => entry.scheduling?.status === 'played').length, 3);
+  assert.equal(result.results.filter((entry) => entry.scheduling?.status === 'merged').length, 8);
+  assert.equal(result.results.filter((entry) => entry.scheduling?.status === 'played').length, 4);
 });
 
 test('notification test wait drains every channel queue after the channel queue refactor', async () => {

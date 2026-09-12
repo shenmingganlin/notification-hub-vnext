@@ -5,7 +5,7 @@ import test from 'node:test';
 
 import { PipeClient } from '../../plugin/runtime/pipe-client.js';
 
-const runtimePath = process.argv[2];
+const runtimePath = process.env.NOTIFICATION_HUB_RUNTIME_PATH || process.argv[2];
 
 function waitForSnapshot(client, history, predicate, timeoutMs = 3000) {
   const find = () => {

@@ -41,6 +41,7 @@ test('protocol exports the planned command set', () => {
     'scene.drag',
     'scene.set-mode',
     'config.update',
+    'visual-assets.configure',
     'diagnostic.subscribe',
     'shutdown',
     'audio.health',

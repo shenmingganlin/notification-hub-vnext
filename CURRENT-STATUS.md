@@ -1,5 +1,343 @@
 # 当前状态快照（2026-08-15，Windows）
 
+## 2026-09-11 视觉页收敛（Round 2 · IA 收缩）
+
+目标：把通知视觉页从“配置表单”收敛为“看得见的都是能用的”。规格与验收见 `docs\superpowers\plans\2026-09-11-visual-page-convergence.md`。
+
+- 移除 24 个未实现或静默失效的控件：外形（模糊/阴影/边框）、排版、入场退场时长、关闭按钮位置、资源边界、特效全区、语义颜色 5 色、悬停/展开/点击开关。
+- 解锁 `关闭方式`（`dismissMode`）：Native `window.cpp` 对 `timeout`/`anywhere` 有真实分支，此前误标“后续加入”锁死。
+- `properties.shape` 成为外形属性唯一来源；`skin.decoration` 的 `borderRadius`/`opacity` 改为派生，去除双轨。
+- 主操作层级：常规流程仅保留 1 个实心按钮（`保存视觉设置`）；模式卡选中态改为描边 + 左侧色条。
+- 清理死代码：`if(false&&previewStage…)` 分支、被注释的 `profileCard`/`renderProfileList`、`visibility:hidden` 占位；移除“第 1 阶段 · 基本能力”“已接通”等工程文案；模式卡首字改英文（消除“极极简”）。
+- 数据模型全部保留（`skin.semanticColors`、`effects.slots`、`properties.typography/interaction/resource`），只移除 UI 入口，Profile 导入导出不受影响。
+
+渲染实测：disabled 24→0，coming 角标 24→0，实心按钮 7→1，编辑器 1530→928px，页面 3249→2647px。
+
+验证：`settings-visual-route.test.mjs` 19/19；`plugin-lifecycle.test.mjs` 74/74；`npm run check` 336 文件；全量 `npm test` **1012 项，985 通过，0 失败，27 跳过**；`git diff --check` 退出码 0。
+
+### 附带结清：既有失败测试（3 条）
+
+- 两条视觉断言过期（`interaction` 字段缺失、显式宽度与宽高比矛盾），已修正。
+- 其中一条存在**测试隔离缺陷**：夹具 `dataDir` 指向真实安装目录 `C:\Hana\data\notification-hub-vnext`，事件绑定持久化默认开启，测试会读本机状态——这是它“时好时坏”的根因，已显式关闭。
+- 一条淘汰测试夹具缺通道身份，按“通道作用域淘汰”语义修正。
+
+本轮未修改 Native 协议、声音、通知记录与插件生命周期；未执行 Git commit。
+
+## 2026-08-20 第四轮现场修复：通知视觉 / 通知行为信息架构
+
+- 设置导航将“事件表现”更名为“通知行为”，描述收敛为卡片行为、行为通道、重要性与事件绑定。
+- “通知视觉”现在只负责卡片设计、实时预览、保存视觉方案、导出视觉包和打开素材库；事件应用与逐事件测试已移出。
+- “通知行为”新增视觉方案应用、行为通道、事件绑定编辑、重要性关键词和六类真实通知测试；继续复用既有 Visual Profile、Event Presentation 和通知测试 API。
+- 声音页“最近声音状态”显式跨高级工具两列铺满，避免诊断列表被压在半宽卡片中。
+- 修复并验证动态行为页脚本转义，避免模板字符串中的换行正则破坏浏览器脚本解析。
+
+当前轮次继续完成 focused、全量 Node、Native Named Pipe 和 0.1.4 打包验证。
+
+- focused 设置与生命周期测试：75 通过、0 失败。
+- 全量 Node 测试：868 个测试中 841 通过、0 失败、27 跳过。
+- `npm run check`：311 个 JavaScript 文件通过；`git diff --check` 通过。
+- Native Named Pipe：3 项全部通过。
+- 最新 `0.1.4` ZIP：179 个文件，SHA256 `17A039131B69AF3C4D4669D5AE555D9FE8CA5D1E52585E18F6F59CD205EFA3E5`。
+
+## 2026-08-20 第三轮现场修复：协议闭环与页面收敛
+
+- 修复 Native Scene Card 根节点字段泄漏：`gap`、`margin` 仍用于 Plugin 侧布局计算，但不再发送给 Native 严格 `scene.create` 解析器。
+- 修复异步 `scene.changed` SceneState 校验：Plugin 现在接受 Native 返回的完整受控 `visual.cardType`、`visual.behavior` 和 `visual.appearance`，同时继续拒绝未知字段和越界值。
+- 真实 Named Pipe `named-pipe-behavior-channel`、`named-pipe-scene-event`、`named-pipe-smoke` 通过；Node 全量测试 `841` 通过、`0` 失败、`27` 跳过。
+- 视觉页删除四步工作流条、重复步骤编号、重复素材入口和视觉页导入包按钮；保留单一“打开素材库”按钮，导航保留 `pluginIframeTicket`、`pluginSurfaceSession`、`token`。
+- 声音页将音频库移出“高级工具与诊断”，置于自定义声音之后独立占满一行；高级区只保留实验台、规则解释和诊断。
+- 设置壳层固定导航按钮字重，并隐藏声音/视觉 fragment 内重复的壳层标题，避免动态 fragment 的全局 `button` 样式污染导航。
+- 新计划：`docs\\superpowers\\plans\\2026-08-20-visual-workbench-acceptance-repair.md`。
+- 本轮 0.1.4 修复包：`dist\\notification-hub-vnext-0.1.4.zip`，179 个文件，SHA256 `17FBB64DFB9DD42011D35D9B571F7708CBC8D253E69AD9B313E51CF1BCFF647B`。
+
+
+## 最新追加：Phase 4 配置包导入导出 — Plugin API/UI 闭环
+
+- 新增 `visual-package-io.js`：`exportVisualPackage()` 将 Profile/Binding/Asset 序列化为 ZIP；`previewImportVisualPackage()` 预览导入结果；`importVisualPackage()` 支持 copy/skip/overwrite 三种冲突策略。
+- 配置包新增 `settings/assets.json`，保留素材名称、种类和标签等元数据。
+- 导入时按 SHA256 复用相同素材，并自动改写 Profile 内的 `backgroundAssetId`；补充跨机器 ID 映射测试。
+- Plugin 新增配置包 API：导出到 Windows 保存对话框、multipart/JSON base64 预览、按明确策略导入。
+- 视觉素材库页面新增导出视觉包、冲突策略选择和导入视觉包入口。
+- manifest 校验器补齐 `format` 字段闭环，导出后可重新导入。
+- `adm-zip` 作为纯 JS ZIP 依赖加入项目。
+- `visual-package-io.test.mjs` 20 个测试，路由测试 5 个；全量 `npm test` 820 通过、0 失败、27 跳过。
+
+Phase 4 原子导入与失败恢复已完成：导入前保存 Profile、Binding、Asset 快照；素材、Profile 或 Binding 阶段失败时恢复完整状态，并清理本次写入的素材文件；失败报告包含 `failed`、`rolledBack`、`failedStage`、`error` 和 `rollbackReason`。
+
+Phase 4 详细导入报告已完成：导入报告新增 `issues[]` 和 `issueSummary`，区分缺失素材依赖、无效/不可用事件绑定、Profile 冲突跳过、素材冲突复用和被跳过的绑定；设置页会显示问题数量及回滚失败阶段，不再把事务失败显示为成功。
+
+Phase 4 导入诊断导出已完成：新增纯 JSON 诊断文档 `notification-hub-visual-package-import-diagnostics`，保存最近一次导入报告，不携带素材二进制；新增 `POST /visual-package-diagnostics-export` 和视觉素材库“导出导入诊断”入口；无导入记录时返回稳定的 `VISUAL_PACKAGE_DIAGNOSTIC_NOT_FOUND`。
+
+Phase 4 已完成。后续进入卡片种类、更多行为、Skin 或 Effects 系统前，建议先做一次真实 Plugin 页面验收。
+
+发布修复：`0.1.0` 安装包遗漏生产依赖 `adm-zip`，会导致 Plugin 加载时报 `Cannot find package 'adm-zip'`。已修正正式打包脚本，将唯一生产依赖完整纳入 ZIP，并发布 `0.1.1`。
+
+页面修复：`0.1.1` 视觉设置页因遗留元素监听异常停在“读取中”，且素材库入口只存在于独立页面。已修复初始化错误、重复标题和状态节点，设置页新增素材库入口、单条测试通知和 4 条堆叠测试，素材库工具栏支持窄窗口换行；发布 `0.1.2`。
+
+体验修复：`0.1.2` 声音实验台一次试听会同时写入启动态和最终态两条诊断，已改为只保留最终结果；视觉素材 Windows 文件选择器启用 Per-Monitor DPI；声音设置页改为双栏信息布局，小窗口自动单栏回退；发布 `0.1.3`。
+
+视觉工作台第一轮重构：视觉页从内部“视觉规则/分类预设”面板改为“设计方案 → 应用到事件 → 逐个测试 → 导出视觉包”的主流程。新实例自动拥有可导出的“默认视觉方案”；新增视觉方案保存/替换、方案列表、应用预览、正式事件选择和行为通道入口；视觉测试默认一次覆盖聊天、频道、工具完成、工具失败、超时、系统警告六类事件。测试关闭声音时仍经过正式通知 ingest 链路，不再绕过视觉卡片创建。全量 Node 测试 `836` 通过、`0` 失败、`27` 跳过；`npm run check` 覆盖 `309` 个 JavaScript 文件通过。
+
+当前待真实 Hana 页面验收：确认新视觉页布局、方案保存后导出、选择事件后应用行为通道、六类逐事件测试，以及 Native 卡片关闭后的状态回收。Skin、Effects 和更多卡片种类暂不进入，先完成这条页面闭环。
+
+2026-08-20 诊断修复：用户导出的诊断标记插件版本为旧 `0.1.0`，20 次 `scene-create` 均返回 `RUNTIME_SCENE_CARD_INVALID`，卡片数为 0；此前同类 alpha.16 现场已确认根因是 Plugin 将行为身份混入严格 Native presentation。当前源码已保持 `presentation` 与独立 `behavior` 分离。另补上 Plugin→Native 视觉协议边界投影：视觉设置允许的 `anchor/gap/margin/width/height` 不再进入 Native 严格解析的嵌套 visual，宽高继续映射到卡片根节点；空背景素材不发送 null。新增回归覆盖 rich visual settings、Native payload 投影和当前 Release Runtime Named Pipe 创建。`pluginVersion` 与包版本统一为 `0.1.4`。
+
+修复验证：`npm run check` 通过，覆盖 `311` 个 JavaScript 文件；全量 Node 测试 `840` 通过、`0` 失败、`27` 跳过；`git diff --check` 通过。待重新安装修复包后再做真实 Hana 现场验收。
+
+2026-08-20 第二轮现场反馈修复：
+- BUG1：视觉页素材库链接由普通相对链接改为保留 `pluginSurfaceSession/token` 的受保护 surface URL，避免从设置 fragment 跳转时丢失凭据而返回 `forbidden / missing_credential`。
+- BUG2：应用事件区新增持续的“已选择 N 个事件”和“预览将影响 N 个事件”摘要；应用结果把 unchanged 也计入总数，不再在重复应用时显示误导性的 `0 个事件`。事件/测试序号继续统一从 1 开始。
+- BUG3：测试生成器现在为六类测试事件传递稳定的 canonical eventId，不再让工具完成/失败和超时被误判为聊天事件；实际应用到事件的 Registry Profile 会在 legacy Runtime Scene 路径中生效。新增当前 Release Native Runtime 的真实验证：自定义工具视觉方案 + `applied.main` 行为通道成功创建卡片，`failed=0`、`cardsCreated=1`、`sceneFailures=[]`。
+- 测试反馈补充生成数量、卡片创建数量、失败数量和事件标签；Scene 创建失败现在会回填到测试结果，而不是只写诊断后仍显示“发送成功”。
+- 六类测试事件改为使用稳定 canonical `eventId`，因此测试声音调度的物理播放分组从旧的 3 组恢复为按真实事件语义计算的 4 组；这是测试语义修正，不改变正式通知的声音/视觉独立边界。
+
+页面结构按计划收缩：视觉页移除重复的“保存当前设计”按钮，增加实时本地预览、停靠位置真实读取、方案 ID 自动生成/只读显示，并扩大留白与卡片间距；声音页将音频库、实验台、规则解释和诊断归入“高级工具与诊断”折叠区，主区只保留全局声音和自定义绑定。视觉页面与声音页面继续复用同一 fragment/full-page 代码路径。
+
+本轮交付包：`dist\\notification-hub-vnext-0.1.4.zip`，SHA256 `AE7162B037B16D96D0E690917D7A712BF8488D0A516D0FDBB62C22DE9C7DBE01`，包内 `179` 个文件，manifest `0.1.4`。
+
+## 最新追加：Plugin focused tests — 裁剪方式与图片内边距 domain 验证 + 测试
+
+- 更新 `card-visual-settings.js`：新增 `CARD_FITS` 常量（fill/contain/cover），`backgroundFit` 和 `backgroundPadding` 加入 `APPEARANCE_FIELDS` 和 `MINIMAL_CARD_DEFAULTS`，新增对应验证逻辑。
+- 更新 `card-visual-settings.test.mjs`：7 个测试全部通过，覆盖新字段默认值、接受有效值、拒绝无效值、`CARD_FITS` 导出。
+- 关联测试（visual-stack、plugin-visual-api、event-presentation-settings 等）全部通过，无回归。
+
+## 最新追加：Plugin 设置页 UI 集成 — 裁剪方式与内边距控件
+
+- 卡片外观设置页新增「裁剪方式」下拉选择（拉伸填满/完整显示/裁剪填满），对应 `backgroundFit` 字段。
+- 新增「图片内边距」数字输入（0-40px），对应 `backgroundPadding` 字段。
+- `render()` 函数读取新字段，`collect()` 函数保存新字段，预览更新监听器覆盖新字段。
+- 所有已有测试通过，前端语法检查通过。
+
+## 最新追加：B 方向全部完成 — 图片绘制区域配置
+
+- 新增 `VisualStyle::background_padding` 字段（float，0~40px），控制图片绘制区域与卡片边缘的间距。
+- Validator 检查 padding 范围 0~40。
+- Named Pipe parser 新增 `backgroundPadding` 解析。
+- Controller `card_json` 序列化新增 `backgroundPadding`。
+- Renderer 绘制图片时从卡片 bound 中减去 padding 得到绘制区域，`contain`/`cover` 计算时使用 padding 后的区域。
+- 所有 9 个 visual-focused 测试通过。
+
+## 最新追加：B 方向第三步 — 透明 PNG 与 opacity 组合
+
+- 新增 `visual-asset-semi.png` 半透明红色 PNG fixture（alpha=128）。
+- 新增 CLI 自测 `--visual-asset-opacity-self-test`，使用半透明 PNG + opacity=0.5，采样验证像素值在正确范围内。
+- WIC 解码为 32bppPBGRA 保留 alpha 通道，Direct2D DrawBitmap 的 opacity 参数应用在已有 alpha 之上，有效 alpha = bitmap_alpha × opacity。
+- 半透明 PNG 正确与背景色混合，opacity 0.5 进一步降低整体透明度。
+- 所有 visual-focused 测试通过。
+
+## 最新追加：B 方向第二步 — 图片裁剪模式（contain/cover）
+
+- 新增 `VisualStyle::background_fit` 字段，支持 `fill`（默认，拉伸填满）、`contain`（保持比例，完整显示，居中）、`cover`（保持比例，填满区域，裁剪多余）。
+- Validator 检查 `background_fit` 只能是 `fill`/`contain`/`cover` 三者之一。
+- Named Pipe parser 新增 `backgroundFit` 解析。
+- Controller `card_json` 序列化新增 `backgroundFit` 字段。
+- Renderer `capture_offscreen()` 根据 `background_fit` 计算图片绘制目标矩形，使用 `GetSize()` 获取 bitmap 实际尺寸。
+- 新增 `visual-asset-wide.png` fixture（100x50 红色矩形，非正方形）。
+- 所有已有测试通过，未新增单独测试。
+
+## 最新追加：B 方向第一步 — WEBP/JPG Native 解码支持
+
+- 控制器 `resolve_visual()` 从仅允许 `png` 扩展到允许 `png`、`webp`、`jpg` 三种格式。
+- WIC 在 Windows 10/11 上原生支持 WEBP 和 JPEG 解码，Render 无需额外代码。
+- 新增 `visual-asset-red.jpg` 和 `visual-asset-red.webp` 真实 fixture。
+- CLI 自测 `--visual-asset-self-test` 新增 SHA256 参数，兼容多格式。
+- 新增测试覆盖：
+  - `native-visual-asset-render.test.mjs`：PNG 1/1、JPEG 1/1、WEBP 1/1 像素渲染
+  - `named-pipe-visual-multi-format.test.mjs`：JPEG 和 WEBP 通过 manifest → scene.create 完整链路
+- Native Release 0 警告、0 错误。
+
+## 最新追加：文件替换竞态窗口关闭
+
+- 将 SHA256 验证从控制器（`resolve_visual` 时验证）**移到渲染器**（`load_background_bitmap` 时验证，紧邻 `CreateDecoderFromFilename`）。
+- 新增 `VisualStyle::background_asset_sha256` 承载 manifest 中的 SHA256，由控制器在 resolve 时设置。
+- 渲染器在打开文件调用 WIC 解码前，先计算文件 SHA256 并与 manifest 记录比对，不匹配则立即回退 backgroundColor。
+- 验证和文件读取在同一个函数体、同一帧内完成，竞态窗口不复存在。
+- 所有 visual-focused smoke 和 manifest-focused test 全部通过。
+
+## 最新追加：大小写与 canonical path 一致性修复
+
+- `visual_asset_file_is_trusted()` 中 `GetFinalPathNameByHandleW` 返回真实磁盘大小写，而前缀来自 `GetFullPathNameW`（保持输入大小写）。
+- 将 `std::wstring::rfind` 大小写敏感比较改为 `_wcsnicmp` 大小写不敏感比较，避免有效文件因大小写不一致被误判为越界。
+- 不影响安全边界：大小写不同不会让路径跳出 root 目录，只会导致误报。
+
+## 剩余风险：文件替换竞态窗口
+
+- 从 `visual_asset_file_is_trusted()` 验证文件到 Renderer 实际读取文件之间，存在一个 TOCTOU 窗口。
+- 这不是安全绕过：替换后的文件路径仍然受 rootDir 边界约束（路径在 configure 时固定），Renderer 的 WIC 解码失败也会回退 backgroundColor。
+- 因此这是一个 **时效性缺口**，不是安全漏洞：最坏情况是看到旧图片或回退背景色。
+- 当前不作代码缓解，作为已接受风险记录。
+
+## 最新追加：Manifest 重复 assetId / SHA256 Native 级拒绝
+
+- `parse_visual_assets_config_payload` 在解析完所有 asset 记录后，使用 `std::unordered_set` 检查重复的 assetId 和 SHA256（大小写归一化）。
+- 发现重复时返回 `VISUAL_ASSET_MANIFEST_DUPLICATE` 错误，拒绝整个配置请求。
+- 新增 Native Named Pipe 测试覆盖 duplicate assetId 和 duplicate SHA256 两种拒绝场景。
+- Native Release 0 警告、0 错误；manifest smoke 1/1、card fallback smoke 1/1、manifest focused 2/2 全部通过。
+
+## 最新追加：Reparse Point / Junction 安全防护
+
+- `visual_asset_file_is_trusted()` 在 SHA256 校验前增加 `GetFinalPathNameByHandleW` + `VOLUME_NAME_DOS` 调用，获取文件真实最终路径。
+- 过滤 `\\?\` 前缀后，将最终路径与 `rootDir` 前缀比对，拒绝所有通过 junction/symlink/mount point 重解析到素材根目录外的文件。
+- 现有 manifest trust smoke、PNG render smoke、fallback smoke 和 manifest focused 全部通过。
+- Native Release 0 警告、0 错误。
+
+## 最新追加：Configure 后文件篡改重新验证
+
+- SceneController 在每次解析 `backgroundAssetId` 时重新执行 root 边界、文件存在性和 SHA256 校验，不再永久信任 configure 时的结果。
+- 因此 manifest 配置后文件被替换/篡改，下一次 scene.create/update 会立即清除资源引用并回退 backgroundColor。
+- 校验逻辑已放入 SceneController 引用解析路径，覆盖创建和更新，而不是只在 transport ACK 阶段判断。
+- Native manifest trust / scene card fallback smoke 1/1、有效 PNG render smoke 1/1 通过；Native Release 0 警告、0 错误。
+
+## 最新追加：Manifest Trust → Scene Card 回归
+
+- 新增真实 Named Pipe smoke：`tests/node/named-pipe-visual-asset-card-fallback.test.mjs`。
+- 使用真实 PNG 和实际 SHA256，验证有效 manifest + `backgroundAssetId` 时 SceneState 保留资源引用。
+- 使用错误 SHA256 重新 configure 后，资源被降级为不可用；scene.create 仍返回 ACK，SceneState 不回传 `backgroundAssetId`。
+- 使用 `enabled: false` 的 manifest 记录时，scene.create 同样成功并回退 backgroundColor。
+- Native manifest trust / scene card fallback smoke 1/1 通过。
+
+## 最新追加：Native WIC PNG 失败回退回归
+
+- 新增损坏 PNG fixture：`tests/fixtures/visual-asset-corrupt.png`。
+- 新增 `--visual-asset-fallback-self-test <pngPath>`，验证 WIC 解码失败时卡片仍完成绘制，并回退到指定 `backgroundColor`。
+- 新增 Node wrapper：`tests/node/native-visual-asset-fallback.test.mjs`。
+- 实际损坏 PNG fallback smoke 1/1 通过；有效 PNG render smoke 1/1 通过。
+- 本轮尚未把 SHA256 篡改/disabled manifest 通过 Named Pipe 创建卡片做成独立回归。
+
+## 最新追加：Native WIC PNG 真实渲染回归
+
+- 新增真实 1x1 红色 PNG fixture：`tests/fixtures/visual-asset-red.png`。
+- 新增 `--visual-asset-self-test <pngPath>`，通过 SceneWindow、WIC、Direct2D 和 CPU pixel capture 验证图片颜色确实进入卡片背景区域。
+- 新增 Node wrapper：`tests/node/native-visual-asset-render.test.mjs`。
+- 修复 Renderer 的 COM 初始化，使 WIC Imaging Factory 在独立 Native self-test 中可用。
+- Native WIC PNG 渲染 smoke 1/1 通过；manifest focused 2/2 通过；Native Release 0 警告、0 错误。
+
+## 最新追加：Native WIC PNG 解码与 Direct2D 绘制
+
+- Renderer 初始化 WIC Imaging Factory。
+- 已验证的 PNG manifest 记录会通过 rootDir + relativePath 生成受控路径，并在 renderer 中由 WIC 解码为 `32bppPBGRA`。
+- 解码成功后创建 Direct2D bitmap，并绘制到 Minimal 卡片背景区域；失败时保留已有纯色背景绘制。
+- bitmap 按路径缓存，resize/reset 时释放，避免设备尺寸变化后复用失效资源。
+- Native Release 0 警告、0 错误；manifest focused 2/2、Named Pipe smoke 1/1 通过。
+- 尚未完成带真实图片文件的窗口像素级 smoke，下一步补充真实 PNG fixture 和渲染回归。
+
+## 最新追加：Native Visual Asset 文件安全校验
+
+- Plugin 发送给 Native 的 manifest 使用固定 `dataDir/visual-assets` 作为 `rootDir`，素材 `relativePath` 改为 root 内的文件名，避免目录重复。
+- Native 在配置 manifest 时组合 `rootDir + relativePath`，使用 Windows full path 做 root 边界检查，拒绝目录、越界路径和无法读取的文件。
+- Native 使用 CryptoAPI 计算文件 SHA256；文件不存在、读取失败或 hash 不匹配时将 enabled 记录降级为不可用，仍不阻塞 Runtime。
+- 本轮仍未接入 WIC 解码或 Direct2D 绘制。
+- Native Release 0 警告、0 错误；Named Pipe manifest smoke 1/1 通过。
+
+## 最新追加：Native Visual Asset Root 绑定
+
+- Plugin manifest 现在携带受控 `rootDir`，值来自既有固定素材目录 `dataDir/visual-assets`。
+- Native `visual-assets.configure` 要求 rootDir 为安全的绝对 Windows 路径，并将其保存到 SceneController；素材仍只能通过 manifest 的 relativePath 引用。
+- 本轮只完成 root 绑定，不执行文件存在性、canonical path、SHA256、WIC 或 Direct2D。
+- Native Release 0 警告、0 错误；Named Pipe manifest smoke 1/1 通过。
+
+## 最新追加：Native backgroundAssetId 安全解析
+
+- SceneController 创建/更新卡片时解析 `backgroundAssetId`，只保留 manifest 中存在、enabled 且 `format === png` 的引用。
+- 未注册、disabled 或非 PNG 素材不会阻塞卡片创建；Native 清空有效图片引用，继续使用 `backgroundColor`。
+- SceneState 保持旧兼容：回退时不回传空的 `backgroundAssetId`。
+- Native Release 0 警告、0 错误；Named Pipe manifest smoke 1/1 通过。
+- 当前仍未执行文件读取、SHA256 比对、WIC 解码或 Direct2D 绘制。
+
+## 最新追加：Native Visual Asset Manifest 完整记录
+
+- Native `visual-assets.configure` 现在解析并保存 `assetId`、`format`、`relativePath`、`sha256`、`enabled` 五项受控记录。
+- 校验 assetId 格式、format 白名单、SHA256 64 位十六进制、相对路径安全性及路径末尾与 assetId/format 的一致性。
+- `has_visual_asset()` 只对 enabled 记录返回 true；disabled 记录保留在索引中但不可作为有效视觉资源。
+- 本轮仍不执行文件读取、SHA256 文件比对、WIC 解码或 Direct2D 绘制。
+- Native Release 0 警告、0 错误；Named Pipe manifest smoke 1/1 通过。
+
+## 最新追加：Native Visual Asset Manifest 索引
+
+- Native `visual-assets.configure` 不再只统计 assetCount：现在会提取并保存受控 assetId 索引，支持 `has_visual_asset()` 与数量查询。
+- 配置成功后 Native SceneController 持有当前 manifest 的 assetId 集合；重复 idempotency 请求不会重建索引。
+- 当前仍只建立 assetId 索引，未把文件路径、格式和 SHA256 用于图片 I/O；卡片创建失败回退语义和 WIC 解码留到下一阶段。
+- Native Release 构建 0 警告、0 错误；真实 Named Pipe manifest smoke 1/1 通过。
+
+## 最新追加：Native Visual Asset Manifest 通道
+
+- Native protocol 新增 `visual-assets.configure`，与音频 `config.update` 分离。
+- Native 接收声明式 manifest，校验 version、素材数组、路径穿越/反斜杠/URL、素材数量上限，并返回 `applied` 与 `assetCount` ACK；支持 idempotency 去重。
+- Plugin 新增 `applyVisualAssetManifest()`；默认不自动启用，只有 `visualAssetManifestEnabled === true` 才在 Runtime 启动/重试后发送，失败只记录 Notification Diagnostic。
+- 新增 Named Pipe manifest smoke：正常配置、重复请求、非法路径拒绝通过。
+- Native Release 构建 0 警告、0 错误；Plugin lifecycle 单独复跑 58/58 通过。一次全量 lifecycle 并行回归出现 1 个既有声音时序波动，单测复跑通过。
+- 当前仍未接入 WIC 图片解码和 Direct2D DrawBitmap。
+
+## 最新追加：Visual Asset Manifest 契约
+
+- 新增 `visual-asset-manifest.js`：从已注册素材生成声明式 manifest，包含 `assetId`、`format`、`relativePath`、`sha256`、`enabled`。
+- manifest 校验拒绝绝对路径、路径穿越、反斜杠路径、扩展名不匹配、重复 assetId/SHA256 和未支持格式。
+- Plugin runtime API 新增 `getVisualAssetManifest()`；当前先完成契约与生成，尚未发送到 Native config.update，避免把音频配置通道强行扩大。
+- Native 已支持受控 `backgroundAssetId` 解析/SceneState 回传；实际 WIC 解码和图片绘制仍待 manifest 通道接入后实现。
+- manifest、Minimal 视觉和素材 focused 测试 19/19 通过，JS 语法与 `git diff --check` 通过。
+
+## 最新追加：Minimal 背景素材引用闭环
+
+- Minimal appearance 新增受控 `backgroundAssetId` 字段，只接受安全 assetId，不接受路径、URL、CSS 或 Renderer 配置。
+- 视觉设置页从素材库读取已注册素材，增加“背景素材”选择；保存时 Plugin 校验素材存在，并同步 `profile / card.minimal.background` 结构化引用。
+- 替换素材会先建立新引用、成功保存配置后解除旧引用；配置更新失败会回滚新引用。被 Minimal 引用的素材删除仍返回 409。
+- Native visual parser/SceneState 回传支持 `backgroundAssetId`；未绑定素材时不新增空字段，保持旧 SceneState JSON 兼容。
+- 当前已完成“assetId 配置—页面选择—Plugin 引用保护—Native 受控回传”，Native 尚未按 assetId 解码/绘制图片。
+- focused 视觉、素材、页面和 Native smoke 通过；Native Release 构建 0 警告、0 错误。
+
+## 最新追加：Visual Asset Library 安全导入
+
+- 新增 Windows 视觉素材文件选择器，只显示 PNG/WEBP/JPG/JPEG；取消、失败和超时均有独立错误边界。
+- `importVisualAssetFromPicker()` 只把选择结果作为一次性读取来源，元数据不保存原始路径；文件内容仍由素材库解析、SHA256 去重和固定 rootDir 存储。
+- 素材库页面新增“导入素材”按钮，导入成功后立即加入列表；不开放外部 URL、SVG、任意路径或 multipart 上传。
+- 新增 `POST /visual-assets/import` 受控入口；素材、页面、Plugin lifecycle focused 测试 71/71 通过，JS 语法与 `git diff --check` 通过。
+
+## 最新追加：Visual Asset Library 页面
+
+- 新增 `visual-assets-page` 页面：素材列表、名称/标签搜索、kind 筛选、尺寸/格式/透明度/文件大小/SHA256 摘要/引用数量展示。
+- 页面明确展示当前导入边界：暂不开放任意本地路径、外部 URL 或 multipart 上传；导入仍使用受控 Plugin API。
+- 被引用素材显示“正在使用”并禁用删除；未引用素材使用二次点击确认删除，删除失败展示 API 错误。
+- 通知视觉页面新增“素材库”入口，manifest 注册素材 API 与素材库页面 route。
+- 页面脚本语法、页面结构、API、Plugin lifecycle 与素材 focused 测试 15/15 通过。
+
+## 最新追加：Visual Asset Library Plugin API 接入
+
+- Plugin 构造时创建独立视觉素材库，素材目录为 `dataDir/visual-assets`，快照为 `dataDir/visual-assets.json`。
+- onload best-effort 恢复素材快照；onunload 保存快照；恢复/保存失败只进入 Notification Diagnostic，不阻塞通知、声音、Runtime 或插件生命周期。
+- 新增受保护 API：`GET /visual-assets`、`GET /visual-assets/:assetId`、`DELETE /visual-assets/:assetId`；删除被引用素材返回 409 和引用清单，未知素材返回 404。
+- 导入能力暂通过受控 Plugin API `importVisualAsset()` 提供，尚未开放 multipart 或任意文件路径上传。
+- API 与 Plugin 生命周期 focused 测试 69/69 通过；manifest JSON、JS 语法和 `git diff --check` 通过。
+
+## 最新追加：Visual Asset Library 文件存储与恢复
+
+- 新增受控 `visual-asset-storage.js`：素材文件只能写入固定 rootDir，assetId/format 白名单校验，导入使用临时文件与 rename，拒绝路径穿越。
+- 新增独立版本 `visual-asset-persistence.js`：素材快照原子保存、缺失文件返回空、损坏快照返回明确错误。
+- 素材库新增 `restoreSnapshot()`，恢复时校验 assetId、format、SHA256、重复记录和结构化引用，并重新建立去重索引与引用计数。
+- 素材领域、存储与恢复 focused 测试 9/9 通过；新增 JS `node --check` 与 `git diff --check` 通过。
+
+## 最新追加：Visual Asset Library 最小领域切片
+
+- 新增 `visual-asset-format.js`：受控解析 PNG、WEBP、JPG/JPEG 图片头，提取尺寸与 alpha 信息，拒绝坏头、扩展名伪装、未支持格式和超限尺寸。
+- 新增 `visual-asset-library.js`：支持素材导入、SHA256 内容去重、元数据冻结、标签/种类搜索、结构化引用跟踪和被引用删除保护。
+- 当前仍未接入配置包、Skin、Effect 或页面上传；素材库先作为独立领域基础设施存在。
+- 素材格式与领域 focused 测试 6/6 通过，新增 JS `node --check` 与 `git diff --check` 通过。
+
+## 最新追加：Minimal 卡片视觉事实闭环
+
+- Minimal 卡片属性编辑器原本已经存在，本轮没有重复造表单；补齐页面预览对这些属性的实时反映：尺寸、宽高、背景色、圆角和透明度修改后，页面内预览同步变化。
+- 视觉设置路由保留受控字段、保存接口和服务端校验；未开放 CSS、脚本或任意样式输入。
+
+- Native Runtime 已补齐 SceneState/health 中的完整受控 visual 回传：`cardType`、`behavior`、`appearance` 不再在回传时丢失。
+- 真实 Named Pipe smoke 使用大尺寸、wide 比例、自定义背景色、圆角和透明度字段往返验证通过；Native Release Runtime 经 MSBuild 构建 0 警告、0 错误。
+- 相关 Native smoke 3/3、视觉/生命周期/容量 focused 67/67 通过；`node --check` 与 `git diff --check` 通过。
+
+## 最新追加：Runtime restart promotion 恢复验证
+
+- 真实验证同一 Plugin 实例的 Runtime restart：promotion pending 在 `stopRuntimeAfterFailure → retryRuntime` 后仍可自动/显式 retry，Native scene.create 成功，queue 清空。
+- 第二张卡的 `scene.create.request` lifecycle trace 恰好为 1，确认没有重复提交。
+- 本轮真实 Native 生命周期与基础/容量矩阵 7/7、Node focused 回归 68/68 通过；`node --check` 与 `git diff --check` 通过。
+
+
 ## 2026-08-16：声音设置收敛为事件绑定模型
 
 - 按用户确认删除旧声音绑定模型：页面不再显示独立“声音规则”编辑器，原“自定义声音”区域成为唯一声音绑定入口。
@@ -1756,4 +2094,109 @@ Runtime 生命周期、Shelf 多卡片、Notification Center、响应式侧边�
 - 新增回归覆盖实际 NotificationApi 音量决策传递、vNext 重复声音抑制、调度器关闭合并、系统声音音量脚本和新页面字段。
 - 进一步修复已保存组合试听链路：组合列表的试听按钮不再把页面上的四舍五入音量作为临时试听参数发送，服务端现在以已保存的 `soundOverrides[].volume` 为唯一来源；自定义音频 MCI 命令改为 `setaudio ... volume to ...`，避免 Windows 忽略音量设置。
 - 已通过固定复现确认：保存 25% 后，省略客户端 volume 进行试听，服务端 decision 和播放器入参仍为 `0.25`。
+
+## 2026-08-19：视觉系统 Phase 0 第一刀启动
+
+- 正式按 `docs/superpowers/plans/2026-08-18-visual-system-master-plan.md` 开始实现，当前阶段为 Phase 0：契约冻结和文档。
+- 新增 Behavior Contract：`plugin/domain/visual-behavior-contract.js`，明确行为 ID、生命周期槽位、行为属性边界和已有行为白名单；禁止 Renderer、JavaScript 等可执行字段。
+- 新增 Channel Runtime Contract：`plugin/domain/visual-channel-contract.js`，明确 channel owner、visibility、behavior/card/properties/skin/effect 引用，以及 `maxVisible`、`maxActive`、`maxParticles`、`maxAnimationInstances` 和 overflow 资源边界。
+- 新增 Card Composition Contract：`plugin/domain/card-composition-contract.js`，明确 Card Type 内容插槽、文本布局、交互插槽，以及 Properties/Skin/Effects 引用；禁止任意 CSS、Renderer 和执行代码。
+- 新增 `tests/node/visual-contracts.test.mjs`，6/6 通过；兼容回归（行为通道、Card Runtime policy、行为管理器、卡片视觉设置）15/15 通过；语法检查和 `git diff --check` 通过。
+- 本轮尚未修改旧 `behavior-channel.js` 与 `card-runtime-policy.js` 的现有 API，先以独立契约模块冻结新边界，避免破坏 alpha.16 兼容链路。
+- Phase 0 剩余两项已完成：新增 `visual-package-manifest.js`，拒绝路径穿越、可执行扩展名、脚本目录和 shell command；新增 `visual-diagnostic-contract.js`，冻结视觉阶段、稳定错误码、来源、影响、修复建议和 traceId，并拒绝未脱敏路径等字段。
+- Phase 0 focused 回归最终为 26/26 通过；新增模块语法检查通过，`git diff --check` 通过。
+- Phase 1 第一刀已启动并完成：新增 `plugin/runtime/card-runtime.js`，提供 created → active → exiting → reclaimed 生命周期；新增 `plugin/runtime/channel-runtime.js`，提供同通道卡片集合、队列、容量、布局重算接口和 active/visible/queued/suppressed 指标。
+- 新 Runtime 第一刀暂不接入 Native Runtime，也不替换旧 `notification-behavior-manager.js`；布局适配器故障只写入通道诊断，不影响其他通道。
+- Phase 1 focused 回归（含 Phase 0 与旧视觉兼容回归）第一刀为 31/31 通过；语法检查和 `git diff --check` 通过。
+- Phase 1 第二刀已完成：新增 `runtime-registry.js` 统一管理独立 channel，新增 `runtime-clock.js` 通过显式 `tick(now)` 处理 active 卡片过期，新增 `scene-state-projection.js` 将 Runtime 快照投影为严格可校验的 SceneState；过期只作用于 active 卡片，queued 卡片保持队列语义。
+- 第二刀 focused 回归覆盖 45 项，全部通过；包含旧 SceneState 验证，未修改 Native Runtime、SceneState schema 或生产通知入口。
+- 下一步是接入真实 Stack 布局前的 Runtime 适配边界：补齐生命周期事件/诊断投影和可替换布局策略，然后进入 Phase 2 Stack 行为。
+- Stack 前置边界已完成：新增 `plugin/runtime/stack-layout.js`，按实际卡片宽高、anchor、margin、spacing 计算堆叠位置；无法容纳时返回 `VISUAL_BEHAVIOR_LAYOUT_FAILED`，不自动缩小或静默丢弃。
+- `channel-runtime.js` 已增加冻结生命周期事件：`card.enqueued`、`card.started`、`card.closing`、`card.reclaimed` 和 `channel.reflow`；事件回调失败只记录诊断，不阻塞卡片生命周期。
+- Stack 已正式接入 Channel Runtime：卡片支持 width/height，通道支持 layoutStrategy/workArea，snapshot 暴露当前布局；关闭后卡片立即从布局移除并重排。
+- Stack 集成 focused 回归与此前回归合计 50/50 通过；语法检查和 `git diff --check` 通过。当前仍未接入 Native Runtime 或真实通知生产入口，下一步进入 Stack 压力、容量和 overflow 验收。
+- Stack 容量验收已完成：`queue` 按插入顺序保留并晋升，`drop-oldest` 明确回收旧卡、发出 reclaimed 事件并增加 `suppressedCardCount`，`allow` 保持不抑制语义；新增双通道 100 卡片混合压力回归。
+- Phase 2 Stack focused 回归最终为 53/53 通过；语法检查和 `git diff --check` 通过。Stack 领域行为可以收口，下一步再讨论接入现有通知入口或进入 Visual Profile/Event Binding，而不是开始第二种行为。
+- Phase 3 配置模型第一刀已完成：新增 `visual-profile-registry.js` 和 `event-binding-registry.js`。Profile 注册复用 `createVisualProfile()`，绑定只保存 `eventId → visualProfileId / behaviorChannelId` 引用，不携带声音字段；支持单事件、类别应用、预览、共享引用、复制保护和恢复默认。
+- 配置模型 focused 回归与此前回归合计 58/58 通过；新模块语法检查和 `git diff --check` 通过。当前 registry 尚未接入持久化 Store 或设置页面，下一步是做持久化适配和“已自定义事件”只读列表。
+- 持久化适配第一刀已完成：新增 `visual-registry-persistence.js`，提供带 version/revision/updatedAt 的 registry snapshot、恢复校验和旧 `EventPresentationSettings` 兼容投影；投影只更新视觉 Profile/行为通道引用，保留既有声音字段。
+- 新增持久化回归后，配置模型与此前所有 focused 测试合计 61/61 通过；新模块语法检查和 `git diff --check` 通过。当前尚未修改 Store、index.js 或设置页面，下一步是将 snapshot 接入现有 EventPresentationSettingsStore，并提供“已自定义事件”只读 API。
+- Store/API 适配第一刀已完成：`event-presentation-settings-store.js` 现在保留 `channelPolicies`、`channels`、`visualRules` 的更新 patch；新增 `visual-event-settings-api.js`，通过现有 Store 提交视觉投影，提供预览、应用、恢复默认和已自定义事件列表。
+- 恢复默认保留事件原有 `soundProfileId`、声音及其他非视觉字段；视觉 API 不携带声音字段。
+- Store/API focused 回归与此前所有回归合计 66/66 通过；新模块语法检查和 `git diff --check` 通过。下一步是接入 `index.js` 只读/写 API，再接设置页面。
+- `plugin/index.js` 已接入视觉 Registry 实例和只读/写 API：`getVisualRegistrySnapshot()`、`listCustomVisualEvents()`、`previewApplyVisualProfile()`、`applyVisualProfileToEvents()`、`restoreVisualEventDefault()`；API 通过现有 EventPresentationSettingsStore 和 NotificationApi 更新表现 Profile。
+- 插件 API 回归确认视觉应用/恢复不会破坏事件原有声音字段；Store、Registry、Persistence、Runtime、Stack、SceneState 与插件 API focused 回归共 46/46 通过，`plugin/index.js` 语法检查和 `git diff --check` 通过。当前尚未接入 Registry 独立持久化或设置页面，下一步是接“已自定义事件”只读 UI。
+- 设置事件页已接入“已自定义视觉事件”只读区域：显示事件、Profile、Behavior Channel、来源，并提供恢复默认按钮；新增 `/custom-visual-events` 查询和 `/custom-visual-events/restore-default` 操作路由。页面回归与视觉设置、Store、Persistence、Plugin API focused 合计 23/23 通过；两个设置路由语法检查和 `git diff --check` 通过。
+- Registry 独立持久化第一刀已完成：新增 `visual-registry-persistence-store.js`（带临时文件、备份和原子替换）与 `visual-registry-persistence-coordinator.js`（debounce、pending、失败诊断、自动重试、恢复）。`plugin/index.js` 已在 onload/onunload 接入恢复和 flush，视觉应用/恢复默认会排队 Registry 快照。
+- Registry 恢复先在隔离 Registry 中完整校验，再写入目标 Registry，避免坏快照导致部分恢复；视觉持久化、插件 API、事件设置页和旧事件持久化 focused 合计 21/21 通过，相关模块语法检查和 `git diff --check` 通过。当前仍需补充真实临时目录下的跨重启插件生命周期回归和页面持久化状态展示。
+- 已补充真实临时目录下的跨重启插件生命周期回归：第一实例应用 Profile、onunload flush，第二实例 onload 恢复 Profile/Binding，并验证 Registry revision/status；测试通过。
+- 事件设置页新增视觉持久化状态徽标；新增 `/visual-registry-persistence-status` 脱敏状态接口，仅暴露 enabled/pending/revision/status，不返回本地绝对路径。Registry 恢复成功后会同步投影到 EventPresentationSettingsStore 和 NotificationApi，避免内存 Registry 与旧 selector 脱节。
+- 本轮插件生命周期、设置事件页和 Registry persistence 回归 8/8 通过；相关语法检查和 `git diff --check` 通过。下一步是补坏快照/恢复失败回归，再评估 Profile 编辑与真实通知入口迁移。
+- 已补坏快照恢复回归：覆盖 malformed JSON、错误 version、非法 Profile、非法 Binding；隔离校验失败时目标 Registry 保持不变，插件仍能启动，原有 soundProfileId 保留。
+- Registry persistence coordinator 新增脱敏状态 `error` 和错误码摘要；设置页仍只显示状态，不暴露本地路径。Registry、Plugin API、页面、旧 EventPresentationSettings persistence 相关回归合计 31/31 通过，相关模块语法检查和 `git diff --check` 通过。视觉 Registry 的持久化安全边界已收口，下一步进入真实通知入口的最小 Stack 接入前勘察。
+- 已确认真实通知生产入口为 `NotificationStore.add → enqueueNotificationScene → showNotificationScene`；selector 在 `createNotificationPresentationInput()` 中生成，Native payload 在 `showNotificationScene()` 最终组装。旧 `notificationBehaviorManager` 仍是当前生产行为事实源。
+- 新增默认关闭的 Visual Runtime shadow bridge：配置 `visualRuntimeShadowEnabled: true` 时，生产 `showNotificationScene()` 会把同一 selector/通道/策略旁路投影到新 `RuntimeRegistry/ChannelRuntime`，但不改变 Native `scene.create` payload，不接管 dismiss 或布局；shadow 卡片在 Native dismiss 时清理。
+- 新增 `getVisualRuntimeShadowStatus()` 诊断摘要和 2 项 shadow focused 测试；`plugin-lifecycle.test.mjs` 与 shadow 回归合计 59/59 通过，相关语法检查和 `git diff --check` 通过。当前 shadow 仅用于对照验证，下一步应补多通道/overflow 对照指标，再决定是否让新 Stack 接管生产行为。
+- Shadow parity 已补充：状态新增 observations/comparable/incomparable/legacyAccepted/shadowAccepted/mismatches；多通道真实通知分别进入 `tool.main` 与 `chat.main`，Native payload 不变，shadow channel 隔离。
+- 对照规则明确：allow/queue/drop-oldest 且非 aggressive suppression 才计入 comparable；aggregate、replace 或 aggressive suppression 标记 incomparable，不伪装成等价通过。
+- `visual-runtime-shadow.test.mjs`、`plugin-lifecycle.test.mjs`、Runtime/Stack、Registry 坏快照及设置页相关回归合计 87/87 通过；语法检查和 `git diff --check` 通过。下一步是补真实 overflow 压力对照，再决定是否开放受控接管开关。
+- Shadow overflow 压力对照已完成：新 ChannelRuntime 的 `allow` 保留 3 张 active 卡片，`queue` 保留 2 visible + 1 queued，`drop-oldest` 保留 2 visible 并计数 1 次 suppressed；Native request 数量保持为 0，证明该对照不接触真实渲染链路。
+- `visual-runtime-shadow.test.mjs`、`plugin-lifecycle.test.mjs`、Notification test tool、Runtime/Stack focused 回归合计 77/77 通过；语法检查和 `git diff --check` 通过。当前仍不开放生产接管：真实 Native Shelf eviction 与 shadow overflow 仍是两套事实源，下一步应先输出接管前决策报告/开关契约，再决定是否实现 shadow→takeover 的受控路径。
+- 已冻结 `visual-runtime-mode-contract.js`：模式为 `legacy`、`shadow`、`takeover`；默认 `legacy`，进入 takeover 必须带显式 declaration，rollback 会回到 legacy 并记录脱敏 code/declaration/time。
+- 新增 bounded metrics contract：只允许 legacy/shadow/native 卡片计数、queued/suppressed、生命周期差异、通道隔离、声音链路和通知状态健康字段，拒绝路径等敏感字段。插件新增只读 `getVisualRuntimeModeStatus()`，当前不改变生产模式。
+- Contract、Plugin API、Shadow、Plugin lifecycle、Runtime/Stack、Registry 和设置页 focused 回归合计 89/89 通过；相关模块语法检查和 `git diff --check` 通过。下一步仍需定义 takeover 的真实切换/回滚接缝，不能仅凭 contract 宣称已接管。
+- 已新增 `visual-runtime-takeover-adapter.js`：第一版只允许 Stack + allow/queue/drop-oldest + 非 aggressive suppression；不支持 ticker/aggregate/replace/aggressive，遇到不支持策略返回 rollback decision。
+- `showNotificationScene()` 已接入受控 takeover 分支：mode 为 takeover 时先通过 adapter 创建 Native card，失败自动记录 rollback 并回落到 legacy scene.create；不重播声音、不重新入库、不改变通知状态。默认仍为 legacy，shadow 不受影响。
+- Takeover adapter、Contract、Plugin lifecycle、Shadow、Runtime/Stack、Registry 和设置页 focused 回归合计 93/93 通过；相关模块语法检查和 `git diff --check` 通过。当前 takeover 仍是实验性受控路径，尚未开放设置页面或默认配置。
+- 已补真实 `showNotificationScene()` 回滚回归：Native takeover 首次失败后自动回到 legacy 并完成一次最终 scene.create，通知状态为 shown；不支持 ticker 策略时不走 takeover Native 请求，legacy 只创建一次。
+- 已补声音—视觉解耦回归：takeover 成功、Native failure fallback、不支持策略 fallback 三条路径均只调用一次 sound scheduler；scene fallback 不会重播声音。
+- 已新增 `visual-runtime-mode-config.js` 安全配置解析：默认 legacy；shadow 必须显式 `visualRuntimeShadowEnabled`；takeover 必须同时满足 `visualRuntimeTakeoverEnabled=true` 与 `visualRuntimeTakeoverDeclaration=operator-approved`，否则自动解析为 legacy。诊断只暴露 requestedMode/mode/enabled/declarationPresent/reason 等 bounded facts，不暴露声明原文。
+- Plugin mode controller 已消费安全解析结果，普通配置无法绕过 takeover 门禁；legacy/shadow selector 行为保持不变。
+- 已新增 `docs/superpowers/plans/2026-08-19-visual-runtime-acceptance-matrix.md`，区分 Node/Runtime 已验证项与必须在真实 Native/Hana 环境验证的项；新增 acceptance 回归覆盖 queue promote、drop-oldest、dismiss/reclaim、多通道隔离和 rollback reclaim。
+- 配置门禁、Takeover adapter、声音回归、生命周期 acceptance、Plugin lifecycle、Shadow、Runtime/Stack、Registry 和设置页 focused 回归合计 103/103 通过；相关模块语法检查和 `git diff --check` 通过。当前未宣称真实 Native/Hana 视觉验收完成。
+- 已找到并运行 Native Runtime：旧 Debug 二进制的 `named-pipe-behavior-channel` 曾因 `LAYOUT_SHELF_OUT_OF_BOUNDS` 失败；静态源码已有 ticker Shelf → vertical Stack fallback，但旧 Debug 构建未包含/未使用该路径。改用现有 Release 二进制后，`--self-test`、`--visual-self-test`、`--desktop-visual-self-test`、`named-pipe-smoke`、`named-pipe-scene-event`、`named-pipe-behavior-channel` 全部通过。旧 Debug 构建不作为验收依据，Native behavior-channel layout 阻塞已解除。
+- 已新增 `visual-runtime-takeover-native-e2e.test.mjs`：真实启动 Release Native Runtime，使用完整 takeover 双门禁配置，不通过内部 `setMode()` 绕过；验证缺少 experiment gate 时保持 legacy，显式门禁后 Plugin → Native scene.create 成功，Native card 携带 stack/stack.main 行为身份，通知状态为 shown，Native scene.dismiss 成功。该 E2E 与 acceptance/config focused 回归 8/8 通过。
+- 已补真实容量 E2E：takeover queue 在 channel maxVisible=1 时保持 Native 可见数量为 1，第二张进入行为队列，PASS。修正 E2E canonical event 后确认 drop-oldest 确实命中配置 channel，但 Native 仍保留旧卡，随后新卡 scene.create 造成 `RUNTIME_SCENE_CARD_EXISTS`/Native 可见数量超界，FAIL；尚未宣称容量接管完成。
+- 已修复 `notification-behavior-manager` 中 overflow 与 suppression 的错误耦合：`suppression=off` 时 queue/drop-oldest 仍执行容量策略；新增两条 manager 回归。
+- 已修复 drop-oldest 的 Native 原子淘汰顺序：在 behavior manager enqueue 前先完成旧卡 `scene.dismiss`，Native dismiss 成功后才提交新卡；Native 失败会阻止新卡创建，避免双事实源继续扩大。
+- Release Native 真实容量 E2E：queue 与 drop-oldest 均通过，Native 可见数量保持 maxVisible=1；相关 takeover、manager、shadow、Plugin lifecycle 和 fallback focused 回归合计 69/69 通过，语法检查和 `git diff --check` 通过。
+- 新增 Native 主动 dismiss + queue promote E2E 后发现：通过 Named Pipe `scene.dismiss` 删除卡片时，Release Runtime 未向 Plugin 转发 `scene.changed`，Plugin 通知仍为 shown，queued card 未自动 promote。该测试当前 FAIL/BLOCKED，不能宣称 Native → Plugin 生命周期闭环完成；需区分程序化 dismiss ACK 与用户/窗口自主 dismiss event，并补请求型 dismiss 后 reconcile 或 Native event 转发。
+- 本轮补 Native `scene.dismiss` 协议契约：ACK 结果新增 `removed`、`targetId`、`change`、`sceneStateSnapshot`、`sceneCards` 等事实字段；已通过 VS2022 BuildTools 重新编译 Release Runtime。Named Pipe smoke、scene-event、behavior-channel 三项真实 Native 回归均通过（3/3），dismiss ACK 新字段断言已生效。
+- 基于新 ACK 尝试接入 Plugin reconcile 后，真实容量 queue/drop-oldest 回归保持通过，但 Native dismiss 生命周期测试仍失败：程序化 ACK 能删除 Native 卡片，却没有完成 Plugin status 与 queued promotion 的一致闭环。该尝试未宣称完成，下一步应先把 promotion 设计成独立的 Native ACK adapter/行为 manager adapter，而不是在 `showNotificationScene` 内用标志位绕过 enqueue。
+- 已先完成领域层最小前置：`notification-behavior-manager` 新增 `removeWithPromotion()`，显式返回 `{ removed, promoted }`，不改变现有 `remove()` 兼容行为；新增回归通过。
+- 已新增 `visual-runtime-promotion-adapter`：Native create 成功后才 commit Plugin 状态；Native create 失败不 commit；同一 notificationId commit 后幂等跳过。promotion adapter 三条契约回归通过，尚未接入生产 `index.js`。
+- 尝试将 promotion adapter 接入 `performNotificationSceneDismiss` 后，真实 queue/drop-oldest 容量回归仍通过，但 Native dismiss 生命周期测试仍失败；已撤回生产接入，保留 adapter 和领域契约。根因进一步确认：Plugin 的卡片提交必须拆成“构建 payload”和“提交状态”两个阶段，不能让 promotion 通过 `showNotificationScene` 重新进入完整首次展示流程。
+- 已新增 `visual-runtime-card-builder` 契约：明确 builder 必须接收 `record + health + layout`，并在构建前校验上下文；新增 builder、promotion、Behavior Manager 组合回归 7/7 通过。
+- 已将生产 `showNotificationScene` 的 Native payload 构造迁移到 `buildNotificationScenePayload()`，并抽出 `createNotificationSceneNative()` 与 `commitNotificationSceneShown()` 两个阶段；takeover、queue、drop-oldest、Plugin lifecycle focused 回归 61/61 通过，语法检查和 `git diff --check` 通过。
+- 已实现 `promoteNotificationScene()`，复用 builder/create/commit 阶段；但尝试接入真实 dismiss promotion 后，Native dismiss E2E 仍失败，且 adapter 接入会让 promotion 路径重入部分状态逻辑。该接入已撤回，当前保留阶段拆分，未宣称生命周期闭环。
+- 已新增 `visual-runtime-promotion-queue`：按 notificationId 去重，Native promotion 失败时保留 pending，支持显式 retry，unload/close 会拒绝并清理 pending；新增 retry、dedup、close 回归通过。尝试接入 Plugin dismiss 路径后，Native dismiss 生命周期仍失败，因此已撤回 Plugin 接线；队列契约保留，当前 63/63 focused 回归通过。
+- 之前尝试将 ACK reconcile 和 promotion 直接接入 `performNotificationSceneDismiss`，因真实回归会破坏已通过的 drop-oldest 时序，已撤回；Plugin 生命周期阻塞仍保留，等待 Native 新协议构建后再接入幂等 reconcile。
+- 已新增 bounded `notificationLifecycleTrace` 与只读 `getNotificationLifecycleTrace(notificationId?)`，记录 `scene.create.request`、`scene.commit.shown`、`scene.dismiss.request`、`scene.dismiss.reconciled`、`scene.changed.received/reconciled`，不包含原始 payload。真实失败 E2E 的 trace 已确认：直接调用 Native `scene.dismiss` 时 Plugin 只记录 create 两步，未收到 dismiss request/event；这不是 Store 更新问题，而是测试绕过 Plugin 和 Native 自主事件缺失的边界。
+- 已新增显式 `reconcileNativeSceneDismissAck()`，Plugin 发起的 dismiss ACK 现在能更新 status、清理 timer/visible state，并记录 `scene.dismiss.reconciled`；Plugin lifecycle 57/57 通过。
+- 真实 Native 自主关闭已确认能到达 Plugin：trace 出现 `scene.changed.received(reason=user-close)` 与 `scene.changed.reconciled`。尝试在该事件内直接 `removeWithPromotion → promoteNotificationScene` 仍未闭环，已撤回；当前剩余问题明确为行为卡映射/状态提交与 promotion 的协调，不再是 Native 事件转发缺失。
+- 已在 Behavior Manager 增加正式 `removeByNotificationId()`，内部完成 notificationId → cardId 映射并原子复用 `removeWithPromotion()`；补充未知通知幂等测试。
+- Plugin `removeNotificationBehaviorCard()` 已改为只消费该领域 API 返回的 `{ removed, promoted }`。
+- 修正自主 dismiss E2E 的重复驱动问题：测试同时调用 `notificationApi.ingestEvent()` 与 `showNotificationScene()` 时，Store subscriber 会再次入队同一通知，造成旧卡被第二次 `shown` 提交。测试现显式关闭场景 subscriber，真实自主关闭与 queued promotion 已通过。
+- 本轮 focused 回归 67/67 通过；`node --check` 与 `git diff --check` 通过。
+- 真实 Native 全链路矩阵重新通过 6/6：Named Pipe smoke、scene-event、behavior-channel、queue、drop-oldest、Native autonomous dismiss + promotion。容量上限与 queued promotion 均已验证。
+- 增加 `notificationSceneReconciledIds` 幂等门禁：Native 重复 `scene.changed` 不会重复 reconcile、重复移除或重复 promotion；dismiss ACK 也会共享该门禁，异常时释放标记以允许安全重试。
+- 幂等门禁后的 focused Node 回归 63/63、真实 Native 矩阵 6/6 通过；`node --check` 与 `git diff --check` 通过。
+- 正式接入 `visual-runtime-promotion-queue`：按 notificationId 去重，Native create 失败保留 pending，支持显式 `retryNotificationPromotions()`，Runtime 启动后自动 retry，unload 时关闭并拒绝未完成任务。
+- 接入后的 focused Node 回归 64/64 通过；本轮补充真实 Native promotion failure-injection E2E：首次 promotion 被注入失败时 pending 保留、Native sceneCards 保持为空，显式 `retryNotificationPromotions()` 后成功创建并清空 pending。
+- 该 E2E 与自主 dismiss E2E 均通过；完整 Node focused 回归 67/67 通过（Native 测试在未设置 Runtime 环境变量的组合命令中被跳过），真实 Native 基础/容量矩阵 5/5 通过；`node --check` 与 `git diff --check` 通过。
+- 增加 unload 边界测试：插件卸载会关闭 promotion queue、拒绝 pending Promise 并清空队列；该生命周期 focused 回归 60/60 通过。
+- 重新运行真实 Native promotion/dismiss 与基础容量矩阵 7/7 通过；当前没有让旧 Plugin 实例在 unload 后复用 queue，避免 closed queue 被误用。
+
+## 2026-08-18：视觉系统主计划同步与工作台整理
+
+- 新增当前视觉系统唯一主计划：`docs/superpowers/plans/2026-08-18-visual-system-master-plan.md`。
+- 新增工作台计划索引：`docs/superpowers/plans/README.md`；历史计划继续保留用于追溯，但后续视觉实现以主计划为唯一入口。
+- 主计划已冻结新的视觉架构：事件 → 事件绑定 → Visual Profile → Behavior Channel → Card Runtime；通道是独立并行的行为舞台，不按工具、回复、错误硬编码。
+- 主计划明确先底层、再逐个高质量实现行为；第一种行为为 Stack，后续依次规划 Ticker/Danmaku、Popup、Aggregate、Replace、Pin、Follow、Scene。
+- 主计划明确配置包只允许已有运行时能力的声明式配置、组合关系、事件绑定模板和 PNG/WEBP 等视觉素材；禁止导入 JavaScript、Renderer、DLL、EXE 或新的行为算法。
+- 主计划明确“导入配置包”与“应用于事件”分离：导入默认只注册本地视觉方案，不自动覆盖事件；用户通过“应用于”选择单个、多个、类别或外部插件事件。
+- 主计划加入视觉配置包管理区、Visual Asset Library、已自定义事件、分类/完整配置导入导出、完整恢复和冲突/事务策略。
+- 主计划加入诊断基础设施：稳定错误码、错误阶段、来源链、影响范围、修复建议、回退记录、脱敏诊断报告；视觉故障不得阻塞声音、通知记录或插件生命周期。
+- `SIDEBAR-PAGE-PRODUCT-PLAN.md` 已同步新的视觉推进顺序，并链接视觉系统主计划；旧“分类→视觉→模式”的路线保留为历史背景，不再作为当前视觉实现入口。
+- 当前文档同步验证：计划占位符扫描通过，`git diff --check` 通过；本轮仅修改计划和状态文档，未修改运行时代码。
 

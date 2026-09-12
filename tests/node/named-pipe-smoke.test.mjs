@@ -6,7 +6,7 @@ import test from 'node:test';
 import { PipeClient } from '../../plugin/runtime/pipe-client.js';
 import { validateSceneState } from '../../plugin/runtime/scene-state.js';
 
-const runtimePath = process.argv[2];
+const runtimePath = process.env.NOTIFICATION_HUB_RUNTIME_PATH || process.argv[2];
 
 test('Node client completes hello, health, and shutdown over Named Pipe', async (t) => {
   if (!runtimePath) {
@@ -128,7 +128,15 @@ test('Node client completes hello, health, and shutdown over Named Pipe', async 
     y: 90,
     width: 320,
     height: 160,
-    visual: { enabled: true, preset: 'warning', intensity: 'expressive', category: 'error' }
+    visual: {
+      enabled: true,
+      preset: 'warning',
+      intensity: 'expressive',
+      category: 'error',
+      cardType: 'minimal',
+      behavior: { layout: 'simple', boundary: 'work-area' },
+      appearance: { size: 'large', aspectRatio: 'wide', backgroundColor: '#123456', backgroundFit: 'fill', backgroundPadding: 0, borderRadius: 24, opacity: 0.82 }
+    }
   }, { retryable: false, idempotencyKey: 'card-a-create' });
   assert.equal(firstCard.type, 'ack');
   assert.equal(firstCard.payload.result.sceneCards.length, 1);
@@ -136,7 +144,10 @@ test('Node client completes hello, health, and shutdown over Named Pipe', async 
     enabled: true,
     preset: 'warning',
     intensity: 'expressive',
-    category: 'error'
+    category: 'error',
+    cardType: 'minimal',
+    behavior: { layout: 'simple', boundary: 'work-area' },
+    appearance: { size: 'large', aspectRatio: 'wide', backgroundColor: '#123456', backgroundFit: 'fill', backgroundPadding: 0, borderRadius: 24, opacity: 0.82 }
   });
   assert.deepEqual(firstCard.payload.result.workArea, initialWorkArea);
 
@@ -190,6 +201,10 @@ test('Node client completes hello, health, and shutdown over Named Pipe', async 
   const dismissedCard = await client.request('scene.dismiss', {
     id: 'card-b'
   }, { retryable: false, idempotencyKey: 'card-b-dismiss' });
+  assert.equal(dismissedCard.payload.result.removed, true);
+  assert.equal(dismissedCard.payload.result.targetId, 'card-b');
+  assert.equal(dismissedCard.payload.result.change.targetId, 'card-b');
+  assert.equal(dismissedCard.payload.result.change.reason, 'scene.dismiss');
   assert.deepEqual(dismissedCard.payload.result.sceneCards.map((card) => card.id), ['card-a', 'card-unicode-中文-🚀', 'card-control-character']);
   await new Promise((resolve) => setTimeout(resolve, 20));
   const dismissedEvent = eventHistory.find((message) => {

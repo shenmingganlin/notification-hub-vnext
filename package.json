@@ -1,6 +1,6 @@
 {
   "name": "notification-hub-vnext",
-  "version": "0.1.0",
+  "version": "0.1.4",
   "private": true,
   "description": "Notification Hub vNext: a Windows notification scene system for HanaAgent.",
   "type": "module",
@@ -11,6 +11,12 @@
   "scripts": {
     "check": "node scripts/check-syntax.mjs",
     "test": "node --test tests/node/*.test.mjs",
+    "test:unit": "node --test tests/node/*.test.mjs",
+    "test:integration": "node scripts/run-runtime-integration.mjs",
+    "test:all": "npm run test:unit && npm run test:integration",
     "pressure": "node scripts/run-sound-pressure.mjs"
+  },
+  "dependencies": {
+    "adm-zip": "^0.6.0"
   }
 }

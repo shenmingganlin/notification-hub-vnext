@@ -1,8 +1,12 @@
 import assert from 'node:assert/strict';
+import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
 import { EventEmitter } from 'node:events';
+import os from 'node:os';
+import path from 'node:path';
 import test from 'node:test';
 
 import NotificationHubVNextPlugin, { pluginName, pluginVersion } from '../../plugin/index.js';
+import { createAudioEngineBackend } from '../../plugin/domain/audio-engine-backend.js';
 import { createEventPresentationSettingsStoreSnapshot } from '../../plugin/domain/event-presentation-settings-store.js';
 
 class FakePersistence {
@@ -155,6 +159,306 @@ function createBusHarness() {
   };
 }
 
+function deferred() {
+  let resolve;
+  let reject;
+  const promise = new Promise((res, rej) => { resolve = res; reject = rej; });
+  return { promise, resolve, reject };
+}
+
+test('concurrent onload calls share one lifecycle promise and one runtime host', async () => {
+  let created = 0;
+  const plugin = new NotificationHubVNextPlugin(context({ notificationPersistenceEnabled: false }), {
+    adapterFactory: () => { created += 1; return new FakeAdapter(); }
+  });
+  const first = plugin.onload();
+  const second = plugin.onload();
+  assert.strictEqual(first, second);
+  await first;
+  assert.equal(created, 1);
+  await plugin.onunload();
+});
+
+test('onunload waits for an in-flight onload and cleans the completed startup', async () => {
+  const gate = deferred();
+  let stopped = 0;
+  const adapter = new FakeAdapter();
+  adapter.stop = async () => { stopped += 1; adapter.state = 'stopped'; };
+  const plugin = new NotificationHubVNextPlugin(context({ notificationPersistenceEnabled: false }), {
+    adapterFactory: () => adapter
+  });
+  plugin.startAudioEngineHost = async () => {
+    await gate.promise;
+    plugin.audioEngineStatus = { state: 'disabled', reason: 'test' };
+    return plugin.audioEngineStatus;
+  };
+  const loading = plugin.onload();
+  const unloading = plugin.onunload();
+  gate.resolve();
+  await loading;
+  await unloading;
+  assert.equal(stopped, 1);
+  assert.equal(plugin.runtimeHost, null);
+});
+
+test('failed startup rolls back completed resources in reverse order', async () => {
+  const cleanup = [];
+  const plugin = new NotificationHubVNextPlugin(context({ notificationPersistenceEnabled: false }), {
+    adapterFactory: () => {
+      cleanup.push('runtime-create');
+      return {
+        async start() { cleanup.push('runtime-start'); },
+        async stop() { cleanup.push('runtime-stop'); },
+        getRuntimeStatus() { return { state: 'running', connected: true, clientState: 'connected' }; },
+        on() {}
+      };
+    }
+  });
+  plugin.startAudioEngineHost = async () => {
+    cleanup.push('audio-start');
+    plugin.audioEngineStatus = { state: 'disabled', reason: 'test' };
+    return plugin.audioEngineStatus;
+  };
+  plugin.stopAudioEngineHost = async () => { cleanup.push('audio-stop'); };
+  plugin.restoreSoundAssets = async () => { cleanup.push('restore-sound-assets'); throw Object.assign(new Error('restore failed'), { code: 'SOUND_ASSET_RESTORE_FAILED' }); };
+  await assert.rejects(plugin.onload(), { code: 'SOUND_ASSET_RESTORE_FAILED' });
+  assert.deepEqual(cleanup, ['audio-start', 'restore-sound-assets', 'audio-stop']);
+  await plugin.onunload();
+});
+
+test('audio host and backend activation failures do not block plugin startup and remain diagnosable', async () => {
+  const hostFailure = new NotificationHubVNextPlugin(context({ notificationPersistenceEnabled: false }), { adapterFactory: () => new FakeAdapter() });
+  hostFailure.startAudioEngineHost = async () => {
+    hostFailure.audioEngineStatus = { state: 'failed', code: 'AUDIO_ENGINE_START_FAILED', message: 'spawn failed' };
+    hostFailure.recordSoundDiagnostic(Object.assign(new Error('spawn failed'), { code: 'AUDIO_ENGINE_START_FAILED' }), 'audio-engine-start');
+    return hostFailure.audioEngineStatus;
+  };
+  await hostFailure.onload();
+  assert.equal(hostFailure.runtimeHost.state, 'running');
+  assert.equal(hostFailure.getAudioEngineStatus().state, 'failed');
+  await hostFailure.onunload();
+
+  const activationFailure = new NotificationHubVNextPlugin(context({ notificationPersistenceEnabled: false }), { adapterFactory: () => new FakeAdapter() });
+  activationFailure.startAudioEngineHost = async () => {
+    activationFailure.audioEngineHost = { client: {}, dispose: async () => {}, getStatus: () => ({ state: 'ready', health: { ready: true } }) };
+    activationFailure.audioEngineStatus = { state: 'ready' };
+    return activationFailure.audioEngineStatus;
+  };
+  activationFailure.activateAudioEngineBackend = async () => { throw Object.assign(new Error('backend rejected'), { code: 'AUDIO_ENGINE_BACKEND_ACTIVATION_FAILED' }); };
+  await activationFailure.onload();
+  assert.equal(activationFailure.runtimeHost.state, 'running');
+  assert.equal(activationFailure.getAudioEngineStatus().state, 'degraded');
+  assert.equal(activationFailure.getSoundSettingsStatus().diagnostics.some((entry) => entry.code === 'AUDIO_ENGINE_BACKEND_ACTIVATION_FAILED'), true);
+  await activationFailure.onunload();
+});
+
+test('audio engine activation preloads the default built-in cue before first playback', async () => {
+  const ctx = context({ notificationPersistenceEnabled: false, soundSettingsPersistenceEnabled: false });
+  const preloadCalls = [];
+  const requests = [];
+  const client = {
+    async request(type, payload) {
+      requests.push({ type, payload });
+      return type === 'audio.load' ? { loaded: true } : {};
+    }
+  };
+  const plugin = new NotificationHubVNextPlugin(ctx, {
+    adapterFactory: () => new FakeAdapter(),
+    soundBackendFactory: () => ({
+      playCue: async () => ({ played: true }),
+      playFile: async () => ({ played: true }),
+      dispose() {}
+    }),
+    audioEngineBackendFactory: (options) => {
+      preloadCalls.push(options.preload);
+      return createAudioEngineBackend(options);
+    }
+  });
+  plugin.audioEngineHost = { client, getStatus: () => ({ state: 'ready' }) };
+
+  await plugin.activateAudioEngineBackend();
+  await plugin.soundBackend.warmup();
+
+  assert.deepEqual(preloadCalls, [[{
+    soundId: 'builtin.chat-incoming',
+    path: `${process.env.WINDIR}\\Media\\chimes.wav`,
+    fingerprint: `${process.env.WINDIR}\\Media\\chimes.wav`
+  }]]);
+  assert.deepEqual(requests, [{
+    type: 'audio.load',
+    payload: { soundId: 'builtin.chat-incoming', path: 'C:/Windows/Media/chimes.wav' }
+  }]);
+});
+
+test('restored builtin sound cue is the only cue selected for audio engine preload', async () => {
+  const ctx = context({ notificationPersistenceEnabled: false });
+  const events = [];
+  const requests = [];
+  const soundSnapshot = {
+    version: 1,
+    revision: 2,
+    settings: {
+      globalSoundEnabled: true,
+      profile: { global: { enabled: true, cue: 'critical-error' } }
+    },
+    updatedAt: '2026-08-23T00:00:00.000Z'
+  };
+  const persistence = {
+    on() {},
+    observe() { events.push('observe'); return () => {}; },
+    async restore() { events.push('restore'); plugin.soundSettingsStore.restoreSnapshot(soundSnapshot); },
+    async flush() {},
+    dispose() {}
+  };
+  const plugin = new NotificationHubVNextPlugin(ctx, {
+    adapterFactory: () => new FakeAdapter(),
+    soundSettingsPersistenceFactory: () => persistence,
+    audioEngineHostFactory: () => ({
+      client: { async request(type, payload) { requests.push({ type, payload }); return { loaded: true }; } },
+      async start() {},
+      async dispose() {},
+      getStatus: () => ({ state: 'ready', health: { ready: true } })
+    }),
+    audioEngineBackendFactory: (options) => createAudioEngineBackend(options)
+  });
+  plugin.startAudioEngineHost = async () => {
+    plugin.audioEngineHost = {
+      client: { async request(type, payload) { requests.push({ type, payload }); return { loaded: true }; } },
+      getStatus: () => ({ state: 'ready', health: { ready: true } }),
+      async dispose() {}
+    };
+    plugin.audioEngineStatus = { state: 'ready' };
+    return plugin.audioEngineStatus;
+  };
+
+  await plugin.onload();
+  await new Promise((resolve) => setImmediate(resolve));
+  try {
+    assert.deepEqual(events.slice(0, 2), ['restore', 'observe']);
+    assert.deepEqual(requests.filter(({ type }) => type === 'audio.load').map(({ payload }) => payload.soundId), ['builtin.critical-error']);
+  } finally {
+    await plugin.onunload();
+  }
+});
+
+test('warmup delay or rejection never blocks onload and remains diagnosable', async () => {
+  const warmupGate = deferred();
+  const plugin = new NotificationHubVNextPlugin(context({ notificationPersistenceEnabled: false }), {
+    adapterFactory: () => new FakeAdapter(),
+    audioEngineHostFactory: () => ({
+      client: {},
+      async start() {},
+      async dispose() {},
+      getStatus: () => ({ state: 'ready', health: { ready: true } })
+    }),
+    audioEngineBackendFactory: () => ({
+      warmup: () => warmupGate.promise,
+      playCue: async () => ({ played: true }),
+      playFile: async () => ({ played: true }),
+      load: async () => {},
+      unload: async () => {},
+      dispose: async () => {}
+    })
+  });
+  plugin.startAudioEngineHost = async () => {
+    plugin.audioEngineHost = { client: {}, getStatus: () => ({ state: 'ready', health: { ready: true } }), async dispose() {} };
+    plugin.audioEngineStatus = { state: 'ready' };
+    return plugin.audioEngineStatus;
+  };
+
+  const loading = plugin.onload();
+  await Promise.race([loading, new Promise((_, reject) => setTimeout(() => reject(new Error('onload waited for warmup')), 100))]);
+  assert.equal(plugin.runtimeHost.state, 'running');
+  warmupGate.reject(Object.assign(new Error('warmup refused'), { code: 'AUDIO_ENGINE_WARMUP_FAILED' }));
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(plugin.getSoundSettingsStatus().diagnostics.at(-1).stage, 'audio-engine-warmup');
+  await plugin.onunload();
+});
+
+test('warmup diagnostics do not delay notification subscriptions or Runtime initialization', async () => {
+  const warmupGate = deferred();
+  const bus = createBusHarness();
+  const plugin = new NotificationHubVNextPlugin(context({ notificationPersistenceEnabled: false }, { bus: bus.bus }), {
+    adapterFactory: () => new FakeAdapter(),
+    audioEngineHostFactory: () => ({
+      client: {},
+      async start() {},
+      async dispose() {},
+      getStatus: () => ({ state: 'ready', health: { ready: true } })
+    }),
+    audioEngineBackendFactory: () => ({
+      warmup: () => warmupGate.promise,
+      playCue: async () => ({ played: true }),
+      playFile: async () => ({ played: true }),
+      load: async () => {},
+      unload: async () => {},
+      dispose: async () => {}
+    })
+  });
+  plugin.startAudioEngineHost = async () => {
+    plugin.audioEngineHost = { client: {}, getStatus: () => ({ state: 'ready', health: { ready: true } }), async dispose() {} };
+    plugin.audioEngineStatus = { state: 'ready' };
+    return plugin.audioEngineStatus;
+  };
+
+  await plugin.onload();
+  assert.equal(plugin.runtimeHost.state, 'running');
+  assert.equal(typeof bus.listener, 'function');
+  warmupGate.resolve(false);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(plugin.getSoundSettingsStatus().diagnostics.at(-1).stage, 'audio-engine-warmup');
+  await plugin.onunload();
+});
+
+test('active audio engine backend falls back to legacy playCue after engine failure', async () => {
+  const cueCalls = [];
+  const legacyBackend = {
+    playCue: async (options) => {
+      cueCalls.push(options);
+      return { played: true, source: 'legacy' };
+    },
+    playFile: async () => ({ played: true }),
+    dispose() {}
+  };
+  const engineError = Object.assign(new Error('audio engine request timed out'), { code: 'AUDIO_ENGINE_REQUEST_TIMEOUT' });
+  const plugin = new NotificationHubVNextPlugin(context({ notificationPersistenceEnabled: false }), {
+    adapterFactory: () => new FakeAdapter(),
+    soundBackendFactory: () => legacyBackend,
+    audioEngineHostFactory: () => ({ client: {}, dispose: async () => {}, getStatus: () => ({ state: 'ready' }) }),
+    audioEngineBackendFactory: () => ({
+      warmup: async () => {},
+      playCue: async () => { throw engineError; },
+      playFile: async () => ({ played: true }),
+      load: async () => {},
+      unload: async () => {},
+      dispose: async () => {}
+    })
+  });
+  plugin.audioEngineHost = { client: {}, dispose: async () => {}, getStatus: () => ({ state: 'ready' }) };
+
+  await plugin.activateAudioEngineBackend();
+  try {
+    const result = await plugin.soundBackend.playCue({ cue: 'default', volume: 0.7 });
+    assert.deepEqual(result, { played: true, source: 'legacy' });
+    assert.deepEqual(cueCalls, [{ cue: 'default', volume: 0.7 }]);
+    const fallback = plugin.getSoundSettingsStatus().diagnostics.at(-1);
+    assert.equal(fallback.stage, 'audio-engine-media-fallback');
+    assert.equal(fallback.code, 'AUDIO_ENGINE_REQUEST_TIMEOUT');
+  } finally {
+    await plugin.onunload();
+  }
+});
+
+test('promotion queue is closed during plugin unload and rejects pending work', async () => {
+  const plugin = new NotificationHubVNextPlugin(context({ notificationPersistenceEnabled: false }), { adapterFactory: () => new FakeAdapter() });
+  await plugin.onload();
+  const pending = plugin.notificationPromotionQueue.enqueue({ record: { notificationId: 'unload-pending' }, promotedCard: {}, channelId: 'test' });
+  const rejection = assert.rejects(pending, /promotion queue closed/);
+  await plugin.onunload();
+  await rejection;
+  assert.equal(plugin.notificationPromotionQueue.size, 0);
+});
+
 test('vNext plugin registers and cleans the dedicated test capability when EventBus supports handlers', async () => {
   const calls = [];
   const cleanup = () => calls.push('cleanup');
@@ -186,7 +490,7 @@ test('vNext plugin owns one isolated RuntimeHostAdapter through onload/onunload'
 
   await plugin.onload();
   assert.equal(pluginName, 'notification-hub-vnext');
-  assert.equal(pluginVersion, '0.1.0');
+  assert.equal(pluginVersion, '0.1.4');
   assert.equal(adapter.started, 1);
   assert.equal(plugin.runtimeHost, adapter);
   assert.equal(ctx.logs.some(([level, ...args]) => level === 'debug' && args.some((value) => JSON.stringify(value).includes('TEST_DIAGNOSTIC'))), true);
@@ -331,6 +635,7 @@ test('vNext sound workbench runs formal scheduler without writing notification h
   try {
     await plugin.updateSoundSettings({ globalSoundEnabled: true, profile: { global: { enabled: true } } });
     const result = await plugin.runSoundWorkbench({ input: { labels: ['chat'], event: 'arrived', importance: 'normal', soundId: 'must-use-profile-rule' }, count: 2 });
+    await plugin.soundScheduler.waitForIdle({ timeoutMs: 500, pollMs: 1 });
     assert.equal(result.runs.length, 2);
     assert.equal('soundId' in result.runs[0].input, false);
     assert.equal(result.runs[0].explanation.outcome, 'play');
@@ -338,6 +643,29 @@ test('vNext sound workbench runs formal scheduler without writing notification h
     assert.equal(calls.length, 1);
     assert.equal(plugin.notificationStore.list().length, 0);
     assert.equal(plugin.getSoundSettingsStatus().soundDiagnostics.at(-1).source, 'sound-workbench');
+  } finally {
+    await plugin.onunload();
+  }
+});
+
+test('vNext sound workbench records one diagnostic for one click after playback settles', async () => {
+  const ctx = context({ notificationPersistenceEnabled: false, soundSettingsPersistenceEnabled: false });
+  const plugin = new NotificationHubVNextPlugin(ctx, {
+    adapterFactory: () => new FakeAdapter(),
+    soundBackendFactory: () => ({
+      playCue: async () => ({ played: true }),
+      playFile: async () => ({ played: true }),
+      dispose() {}
+    })
+  });
+  await plugin.onload();
+  try {
+    await plugin.updateSoundSettings({ globalSoundEnabled: true, profile: { global: { enabled: true } } });
+    await plugin.runSoundWorkbench({ input: { labels: ['chat'], event: 'arrived', importance: 'normal' }, count: 1 });
+    await plugin.soundScheduler.waitForIdle({ timeoutMs: 500, pollMs: 1 });
+    const diagnostics = plugin.getSoundSettingsStatus().soundDiagnostics.filter((entry) => entry.source === 'sound-workbench');
+    assert.equal(diagnostics.length, 1);
+    assert.equal(diagnostics[0].summary.outcome, 'played');
   } finally {
     await plugin.onunload();
   }
@@ -496,6 +824,55 @@ test('vNext sound settings test suppresses rapid accepted playback for the asset
   }
 });
 
+test('vNext restores custom sound assets into the registry captured by the scheduler', async () => {
+  const dataDir = await mkdtemp(path.join(os.tmpdir(), 'nh-sound-restore-'));
+  const assetRoot = path.join(dataDir, 'sound-assets');
+  const assetPath = path.join(assetRoot, 'custom', 'restored.wav');
+  await mkdir(path.dirname(assetPath), { recursive: true });
+  await writeFile(assetPath, Buffer.from('wav'));
+  await writeFile(path.join(dataDir, 'sound-assets.json'), JSON.stringify({
+    version: 1,
+    assets: [{
+      soundId: 'custom.restored',
+      name: 'Restored sound',
+      kind: 'custom',
+      format: 'wav',
+      relativePath: 'custom/restored.wav',
+      durationMs: 160,
+      fileSizeBytes: 3,
+      sha256: '0000000000000000000000000000000000000000000000000000000000000000',
+      enabled: true
+    }]
+  }));
+  const calls = [];
+  const plugin = new NotificationHubVNextPlugin(context({
+    runtimeEnabled: false,
+    notificationPersistenceEnabled: false,
+    soundSettingsPersistenceEnabled: false
+  }, { dataDir }), {
+    adapterFactory: () => new FakeAdapter(),
+    soundBackendFactory: () => ({
+      playCue: async () => ({ played: true }),
+      playFile: async (input) => { calls.push(input); return { played: true }; },
+      dispose() {}
+    })
+  });
+  const registry = plugin.soundAssetRegistry;
+  await plugin.onload();
+  try {
+    assert.strictEqual(plugin.soundAssetRegistry, registry);
+    assert.ok(plugin.soundAssetRegistry.get('custom.restored'));
+    const result = await plugin.testSoundAsset({ soundId: 'custom.restored' });
+    await plugin.soundScheduler.waitForIdle({ timeoutMs: 500, pollMs: 1 });
+    assert.equal(result.playback.status, 'played');
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].soundId, 'custom.restored');
+  } finally {
+    await plugin.onunload();
+    await rm(dataDir, { recursive: true, force: true });
+  }
+});
+
 test('vNext sound asset test suppresses rapid accepted playback for the asset duration', async () => {
   const ctx = context({ notificationPersistenceEnabled: false, soundSettingsPersistenceEnabled: false });
   const calls = [];
@@ -541,6 +918,43 @@ test('vNext sound settings test propagates a backend played:false result as fail
     const diagnostics = plugin.getSoundSettingsStatus().soundDiagnostics;
     assert.equal(diagnostics.at(-1).summary.outcome, 'failed');
     assert.equal(diagnostics.at(-1).playback.diagnostic, 'SOUND_PLAYBACK_FAILED');
+  } finally {
+    await plugin.onunload();
+  }
+});
+
+test('vNext visual package diagnostics export uses the save picker and writes the last import report', async () => {
+  const ctx = context({ notificationPersistenceEnabled: false, runtimeEnabled: false });
+  const pickerCalls = [];
+  const plugin = new NotificationHubVNextPlugin(ctx, {
+    adapterFactory: () => new FakeAdapter(),
+    soundFilePickerFactory: () => ({
+      async save(input) {
+        pickerCalls.push(input);
+        return { cancelled: false, path: 'C:\\Exports\\visual-import-diagnostics.json' };
+      }
+    })
+  });
+  await plugin.onload();
+  try {
+    plugin.lastVisualPackageReport = { packageId: 'visual-package-test', packageName: 'Test', version: '1.0.0', strategy: 'copy', issues: [] };
+    const result = await plugin.exportVisualPackageDiagnostics({ name: 'visual-import-diagnostics' });
+    assert.equal(result.savedToFile, true);
+    assert.equal(result.format, 'notification-hub-visual-package-import-diagnostics');
+    assert.equal(pickerCalls[0].extension, 'json');
+    assert.equal(pickerCalls[0].title, '导出视觉配置包导入诊断');
+    assert.match(pickerCalls[0].content, /visual-package-import-diagnostics/);
+  } finally {
+    await plugin.onunload();
+  }
+});
+
+test('vNext visual package diagnostics export rejects when no import report exists', async () => {
+  const ctx = context({ notificationPersistenceEnabled: false, runtimeEnabled: false });
+  const plugin = new NotificationHubVNextPlugin(ctx, { adapterFactory: () => new FakeAdapter() });
+  await plugin.onload();
+  try {
+    await assert.rejects(() => plugin.exportVisualPackageDiagnostics(), { code: 'VISUAL_PACKAGE_DIAGNOSTIC_NOT_FOUND' });
   } finally {
     await plugin.onunload();
   }
@@ -660,6 +1074,8 @@ test('vNext plugin restores and flushes event presentation settings independentl
   await plugin.onload();
   assert.deepEqual(events.slice(0, 2), ['restore', 'observe']);
   assert.equal(plugin.getEventPresentationSettings().revision, 7);
+  assert.ok(Array.isArray(plugin.getEventPresentationSettings().visualProfiles));
+  assert.ok(Array.isArray(plugin.getEventPresentationSettings().testEvents));
   assert.equal(plugin.getEventPresentationSettings().settings.events['chat.assistant_reply.completed'].soundProfileId, 'sound.reply');
   const probe = plugin.notificationApi.ingestEvent({
     event: { type: 'message_end', eventId: 'probe-message', traceId: 'probe-trace', stopReason: 'end_turn' },
@@ -875,6 +1291,25 @@ test('vNext diagnostics status does not project recovered transport errors as th
   assert.equal(status.runtime.connected, true);
   assert.equal(status.runtime.currentError, null);
   assert.equal(status.summary.currentFailure, false);
+
+  await plugin.onunload();
+});
+
+test('vNext diagnostics status treats a connected scene-state error as the current failure', async () => {
+  const ctx = context();
+  const plugin = new NotificationHubVNextPlugin(ctx, { adapterFactory: () => new FakeAdapter() });
+  await plugin.onload();
+
+  plugin.runtimeHost.lastError = {
+    code: 'RUNTIME_SCENE_STATE_CARD_INVALID',
+    message: 'SceneState card visual decision is invalid',
+    recoverable: true
+  };
+  const status = await plugin.getDiagnosticsPageStatus();
+
+  assert.equal(status.runtime.connected, true);
+  assert.equal(status.runtime.currentError.code, 'RUNTIME_SCENE_STATE_CARD_INVALID');
+  assert.equal(status.summary.currentFailure, true);
 
   await plugin.onunload();
 });
@@ -1220,7 +1655,7 @@ test('vNext plugin instance exposes a JSON-safe install response boundary', asyn
   const serialized = JSON.stringify({ id: pluginName, ctx, instance: plugin });
 
   assert.match(serialized, /"pluginName":"notification-hub-vnext"/);
-  assert.match(serialized, /"pluginVersion":"0\.1\.0"/);
+  assert.match(serialized, /"pluginVersion":"0\.1\.4"/);
   await plugin.onunload();
 });
 
@@ -1287,12 +1722,26 @@ test('vNext plugin restores notifications, observes changes, and exposes the Not
   assert.equal(plugin.notificationPersistence, persistence);
   assert.deepEqual(events, ['restore', 'observe']);
   assert.equal(ctx._notificationHubVNextNotificationApi, plugin.notificationApi);
+  assert.equal(ctx._notificationHubVNextSoundSettingsServices, plugin.soundSettingsServices);
+  assert.equal(ctx._notificationHubVNextSoundAssetServices, plugin.soundAssetServices);
+  assert.equal(Object.isFrozen(ctx._notificationHubVNextSoundSettingsServices), true);
+  assert.equal(Object.isFrozen(ctx._notificationHubVNextSoundAssetServices), true);
   assert.equal(factoryInput.contextValue, ctx);
   assert.equal(factoryInput.options.store, plugin.notificationStore);
+
+  const loadedSettingsServices = plugin.soundSettingsServices;
+  const loadedAssetServices = plugin.soundAssetServices;
+  await plugin.stopNotificationPersistence();
+  assert.notEqual(plugin.soundSettingsServices, loadedSettingsServices);
+  assert.notEqual(plugin.soundAssetServices, loadedAssetServices);
+  assert.equal(ctx._notificationHubVNextSoundSettingsServices, plugin.soundSettingsServices);
+  assert.equal(ctx._notificationHubVNextSoundAssetServices, plugin.soundAssetServices);
 
   await plugin.onunload();
   assert.deepEqual(events, ['restore', 'observe', 'unsubscribe', 'flush']);
   assert.equal(ctx._notificationHubVNextNotificationApi, undefined);
+  assert.equal(ctx._notificationHubVNextSoundSettingsServices, undefined);
+  assert.equal(ctx._notificationHubVNextSoundAssetServices, undefined);
 });
 
 test('vNext ingests tool execution errors through the Hana bus subscription', async () => {
@@ -1407,7 +1856,9 @@ test('vNext subscribes Hana message_end events and releases the subscription', a
 });
 
 test('vNext notification scene carries one resolved visual decision', async () => {
-  const ctx = context({ notificationPersistenceEnabled: false, visualSettingsPersistenceEnabled: false });
+  // Isolate from the host data directory: event presentation persistence defaults to on,
+  // and a real persisted binding would override the expectations below.
+  const ctx = context({ notificationPersistenceEnabled: false, visualSettingsPersistenceEnabled: false, eventPresentationSettingsPersistenceEnabled: false });
   const adapter = new FakeAdapter();
   const plugin = new NotificationHubVNextPlugin(ctx, { adapterFactory: () => adapter });
 
@@ -1416,7 +1867,7 @@ test('vNext notification scene carries one resolved visual decision', async () =
   await plugin.updateVisualSettings({ profile: {
     global: { enabled: true, preset: 'minimal', intensity: 'balanced' },
     categories: { error: { enabled: true, preset: 'warning', intensity: 'expressive' } },
-    card: { types: { minimal: { appearance: { size: 'large', aspectRatio: 'wide', backgroundColor: '#123456', borderRadius: 24, opacity: 0.82 } } } }
+    card: { types: { minimal: { behavior: { layout: 'simple', boundary: 'work-area', anchor: 'top-right', gap: 20, margin: 24 }, appearance: { size: 'large', aspectRatio: 'wide', width: 600, backgroundColor: '#123456', backgroundAssetId: null, borderRadius: 24, opacity: 0.82 } } } }
   } });
   const record = plugin.notificationApi.createNotification({
     notificationId: 'notification-visual-critical',
@@ -1438,8 +1889,13 @@ test('vNext notification scene carries one resolved visual decision', async () =
     category: 'tool',
     cardType: 'minimal',
     behavior: { layout: 'simple', boundary: 'work-area' },
-    appearance: { size: 'large', aspectRatio: 'wide', backgroundColor: '#123456', borderRadius: 24, opacity: 0.82 }
+    interaction: { dismissMode: 'closeButton', closeButtonPosition: 'top-right', timeoutMs: 30000 },
+    appearance: { size: 'large', aspectRatio: 'wide', backgroundColor: '#123456', backgroundFit: 'fill', backgroundPadding: 0, borderRadius: 24, opacity: 0.82 }
   });
+  assert.equal(create.payload.width, 600);
+  assert.equal(create.payload.height, 288);
+  assert.equal('gap' in create.payload, false);
+  assert.equal('margin' in create.payload, false);
   assert.deepEqual(create.payload.presentation, {
     eventId: 'tool.execution.failed',
     categoryId: 'tool',
@@ -1455,7 +1911,9 @@ test('vNext notification scene carries one resolved visual decision', async () =
 });
 
 test('vNext notification scene applies an explicit event visual profile before legacy category policy', async () => {
-  const ctx = context({ notificationPersistenceEnabled: false, visualSettingsPersistenceEnabled: false });
+  // Isolate from the host data directory: a persisted event binding from a real install
+  // would replace the event default presentation profile this test is asserting on.
+  const ctx = context({ notificationPersistenceEnabled: false, visualSettingsPersistenceEnabled: false, eventPresentationSettingsPersistenceEnabled: false });
   const adapter = new FakeAdapter();
   const plugin = new NotificationHubVNextPlugin(ctx, { adapterFactory: () => adapter });
 
@@ -1485,7 +1943,8 @@ test('vNext notification scene applies an explicit event visual profile before l
     category: 'tool',
     cardType: 'minimal',
     behavior: { layout: 'simple', boundary: 'work-area' },
-    appearance: { size: 'medium', aspectRatio: 'default', backgroundColor: '#0e1916', borderRadius: 16, opacity: 0.96 }
+    interaction: { dismissMode: 'closeButton', closeButtonPosition: 'top-right', timeoutMs: 30000 },
+    appearance: { size: 'medium', aspectRatio: 'default', backgroundColor: '#0e1916', backgroundFit: 'fill', backgroundPadding: 0, borderRadius: 16, opacity: 0.96 }
   });
   assert.deepEqual(create?.payload.presentation, {
     eventId: 'tool.execution.succeeded',
@@ -1501,8 +1960,33 @@ test('vNext notification scene applies an explicit event visual profile before l
   await plugin.onunload();
 });
 
+test('vNext notification scene resolves the applied Registry profile in legacy Runtime mode', async () => {
+  const ctx = context({ notificationPersistenceEnabled: false, visualSettingsPersistenceEnabled: false });
+  const adapter = new FakeAdapter();
+  const plugin = new NotificationHubVNextPlugin(ctx, { adapterFactory: () => adapter });
+  await plugin.onload();
+  plugin.stopNotificationSceneSubscription();
+  plugin.queueVisualRegistryPersistence = () => {};
+  plugin.saveVisualProfile({ profileId: 'visual.applied', name: '应用方案', profile: {
+    global: { enabled: true, preset: 'critical', intensity: 'expressive' },
+    categories: { tool: { enabled: true, preset: 'critical', intensity: 'expressive' } },
+    card: { types: { minimal: { appearance: { size: 'large', backgroundColor: '#123456' } } } }
+  } });
+  plugin.applyVisualProfileToEvents({ profileId: 'visual.applied', eventIds: ['tool.execution.succeeded'], behaviorChannelId: 'applied.main' });
+  const record = plugin.notificationApi.createNotification({ notificationId: 'notification-applied-profile', traceId: 'trace-applied-profile', type: 'tool_completed', source: 'test', title: '应用方案', content: 'body' });
+  await plugin.showNotificationScene(record);
+  const create = adapter.client.requests.find((request) => request.type === 'scene.create');
+  assert.equal(create.payload.behavior.behaviorChannelId, 'applied.main');
+  assert.equal(create.payload.visual.preset, 'critical');
+  assert.equal(create.payload.visual.appearance.size, 'large');
+  await plugin.onunload();
+});
+
 test('vNext notification scene evicts the oldest visible notification before Shelf overflow', async () => {
-  const ctx = context({ notificationPersistenceEnabled: false });
+  // Isolate from the host data directory and give the existing cards their real channel
+  // identity: overflow eviction is scoped per behavior channel, so cards without a channel
+  // (the legacy placeholder) are intentionally not evicted by a chat.main card.
+  const ctx = context({ notificationPersistenceEnabled: false, eventPresentationSettingsPersistenceEnabled: false });
   const adapter = new FakeAdapter();
   const sceneCards = [
     ...Array.from({ length: 4 }, (_, index) => ({
@@ -1512,7 +1996,8 @@ test('vNext notification scene evicts the oldest visible notification before She
       x: index * 480,
       y: 0,
       width: 420,
-      height: 220
+      height: 220,
+      behavior: { behaviorProfileId: 'stack', behaviorChannelId: 'chat.main' }
     })),
     { id: 'user-card', title: 'User', body: 'keep', x: 0, y: 300, width: 360, height: 180 }
   ];
@@ -1559,10 +2044,9 @@ test('vNext notification scene evicts the oldest visible notification before She
     .filter((request) => request.type === 'scene.dismiss')
     .map((request) => request.payload.id);
   const create = adapter.client.requests.find((request) => request.type === 'scene.create' && request.payload.id.includes('notification-overflow'));
-  assert.deepEqual(dismissals, [
-    'nh-vnext-notification-existing-0',
-    'nh-vnext-notification-existing-1'
-  ]);
+  // 4 existing chat.main cards + the incoming card exceed the 1920px work area at 420px+12px
+  // per card, so exactly the oldest one is evicted before the new card is created.
+  assert.deepEqual(dismissals, ['nh-vnext-notification-existing-0']);
   assert.ok(create);
 
   await plugin.onunload();
@@ -1761,6 +2245,26 @@ test('Notification persistence can be disabled without creating a coordinator', 
   assert.equal(plugin.notificationPersistence, null);
   assert.equal(plugin.notificationStore.size, 0);
   await plugin.onunload();
+});
+
+test('Plugin injects a narrow notification center service without visual methods', async () => {
+  const ctx = context({ notificationPersistenceEnabled: false, runtimeEnabled: false });
+  const plugin = new NotificationHubVNextPlugin(ctx, { adapterFactory: () => new FakeAdapter() });
+
+  await plugin.onload();
+  assert.strictEqual(ctx._notificationHubVNextNotificationCenterServices, plugin.notificationCenterServices);
+  assert.strictEqual(ctx._notificationHubVNextSoundSettingsServices, plugin.soundSettingsServices);
+  assert.equal(typeof ctx._notificationHubVNextSoundSettingsServices.getSoundSettingsStatus, 'function');
+  assert.equal('openVisualWorkbenchCard' in ctx._notificationHubVNextSoundSettingsServices, false);
+  assert.equal('getRuntimeTestStatus' in ctx._notificationHubVNextSoundSettingsServices, false);
+  assert.equal('listNotifications' in ctx._notificationHubVNextSoundSettingsServices, false);
+  assert.equal(typeof ctx._notificationHubVNextNotificationCenterServices.listNotifications, 'function');
+  assert.equal(typeof ctx._notificationHubVNextNotificationCenterServices.getNotificationDisplaySettings, 'function');
+  assert.equal('openVisualWorkbenchCard' in ctx._notificationHubVNextNotificationCenterServices, false);
+  assert.equal('_notificationHubVNextPlugin' in ctx._notificationHubVNextNotificationCenterServices, false);
+  await plugin.onunload();
+  assert.equal('_notificationHubVNextNotificationCenterServices' in ctx, false);
+  assert.equal('_notificationHubVNextSoundSettingsServices' in ctx, false);
 });
 
 test('Runtime startup failure is logged and does not escape plugin onload', async () => {

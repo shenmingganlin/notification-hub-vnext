@@ -6,6 +6,8 @@ import { filterNotificationsByCategories } from '../domain/notification-category
 import { filterNotificationsByEvents } from '../domain/notification-event-filter.js';
 import { renderSettingsPage } from './settings.js';
 import { PAGE_NAVIGATION_SCRIPT, PAGE_NAVIGATION_STYLE, renderPageNavigation } from './page-navigation.js';
+import { errorPayload as buildErrorPayload, readJsonBody, unavailablePayload } from './route-errors.js';
+import { createNotificationCenterServices } from '../services/notification-center-services.js';
 
 const DISPLAY_LIMIT_MAX = 10000;
 
@@ -36,13 +38,9 @@ function escapeHtml(value) {
     .replaceAll("'", '&#39;');
 }
 
+
 function errorPayload(error) {
-  const code = error?.code ?? 'NOTIFICATION_CENTER_READ_FAILED';
-  return {
-    code,
-    message: ERROR_MESSAGES[code] ?? error?.message ?? String(error),
-    details: error?.details ?? {}
-  };
+  return buildErrorPayload(error, ERROR_MESSAGES, 'NOTIFICATION_CENTER_READ_FAILED');
 }
 
 function readQueryValue(c, name) {
@@ -155,20 +153,11 @@ function readBooleanHeader(c, name) {
 function mutationStatus(error) {
   if (error?.code === 'NOTIFICATION_STORE_NOT_FOUND') return 404;
   if (error?.code === 'NOTIFICATION_CENTER_BATCH_INVALID'
+    || error?.code === 'ROUTE_INVALID_JSON'
     || error?.code === 'NOTIFICATION_STORE_BATCH_IDS_INVALID'
     || error?.code === 'NOTIFICATION_STORE_BATCH_STATUS_INVALID') return 400;
+  if (error?.code === 'NOTIFICATION_STORE_CONFLICT') return 409;
   return 500;
-}
-
-async function readJsonBody(c) {
-  try {
-    return await c?.req?.json();
-  } catch {
-    const error = new Error('Request body must be valid JSON');
-    error.code = 'NOTIFICATION_CENTER_BATCH_INVALID';
-    error.details = { field: 'body' };
-    throw error;
-  }
 }
 
 function validateBatchBody(body) {
@@ -822,19 +811,18 @@ ${PAGE_NAVIGATION_SCRIPT}
 }
 
 export default function registerNotificationCenterRoute(app, ctx) {
-  const getApi = () => ctx?._notificationHubVNextNotificationApi;
-  const getDisplaySettingsApi = () => ctx?._notificationHubVNextSettingsApi ?? ctx?._notificationHubVNextPlugin;
+  const getServices = () => ctx?._notificationHubVNextNotificationCenterServices
+    ?? createNotificationCenterServices({
+      notificationApi: ctx?._notificationHubVNextNotificationApi,
+      settingsApi: ctx?._notificationHubVNextSettingsApi
+    });
+  const getApi = getServices;
+  const getDisplaySettingsApi = getServices;
   const listResponse = (c, fixedOptions = {}) => {
     try {
       const api = getApi();
       if (!api?.listNotifications) {
-        return c.json({
-          ok: false,
-          error: {
-            code: 'NOTIFICATION_CENTER_API_UNAVAILABLE',
-            message: 'Notification API unavailable'
-          }
-        }, 503);
+        return c.json(unavailablePayload('NOTIFICATION_CENTER_API_UNAVAILABLE', 'Notification API unavailable'), 503);
       }
       const unread = fixedOptions.unread ?? readBooleanQuery(c, 'unread');
       const important = fixedOptions.important ?? readBooleanQuery(c, 'important');
@@ -858,8 +846,11 @@ export default function registerNotificationCenterRoute(app, ctx) {
         ? displaySettings.limit ?? displaySettings.settings?.limit ?? 100
         : requestedLimit;
       const options = {};
+      const probeLimit = configuredLimit !== null && categories === undefined && events === undefined && search === undefined
+        ? configuredLimit + 1
+        : null;
       // 分类过滤必须在完整候选集上进行，避免 Store 的 limit 先截断匹配项。
-      if (configuredLimit !== null && categories === undefined && events === undefined && search === undefined) options.limit = configuredLimit;
+      if (probeLimit !== null) options.limit = probeLimit;
       if (search !== undefined && categories === undefined && events === undefined) options.limit = DISPLAY_LIMIT_MAX;
       if (unread !== undefined) options.unread = unread;
       if (important !== undefined) options.important = important;
@@ -874,8 +865,16 @@ export default function registerNotificationCenterRoute(app, ctx) {
       let notifications = applyResponseFilters(api.listNotifications(options), { tool, system, channel, channelKind, producerKind, search });
       if (categories !== undefined) notifications = filterNotificationsByCategories(notifications, categories);
       if (events !== undefined) notifications = filterNotificationsByEvents(notifications, events);
-      const totalCount = notifications.length;
-      if ((categories !== undefined || events !== undefined) && configuredLimit !== null) notifications = notifications.slice(0, configuredLimit);
+      const matchedCount = notifications.length;
+      const hasMore = configuredLimit !== null && (categories !== undefined || events !== undefined || search !== undefined
+        ? matchedCount > configuredLimit
+        : probeLimit !== null && matchedCount > configuredLimit);
+      if (configuredLimit !== null && (categories !== undefined || events !== undefined || probeLimit !== null)) {
+        notifications = notifications.slice(0, configuredLimit);
+      }
+      const totalCount = categories !== undefined || events !== undefined
+        ? matchedCount
+        : notifications.length;
       const classifications = includeClassification
         ? Object.fromEntries(notifications.map((record) => [record.notificationId, projectNotificationCategories(record)]))
         : undefined;
@@ -888,9 +887,7 @@ export default function registerNotificationCenterRoute(app, ctx) {
         cardLifetimeSeconds: displaySettings.cardLifetimeSeconds
           ?? displaySettings.settings?.cardLifetimeSeconds
           ?? 120,
-        hasMore: configuredLimit !== null && (categories !== undefined || events !== undefined
-          ? totalCount > configuredLimit
-          : notifications.length >= configuredLimit),
+        hasMore,
         ...(classifications ? { classifications } : {})
       };
       if (unread === true) result.unreadCount = result.totalCount;
@@ -937,7 +934,7 @@ export default function registerNotificationCenterRoute(app, ctx) {
     try {
       const settingsApi = getDisplaySettingsApi();
       if (!settingsApi?.getNotificationDisplaySettings) {
-        return c.json({ ok: false, error: { code: 'NOTIFICATION_CENTER_SETTINGS_UNAVAILABLE', message: '通知中心显示设置暂不可用。' } }, 503);
+        return c.json(unavailablePayload('NOTIFICATION_CENTER_SETTINGS_UNAVAILABLE', '通知中心显示设置暂不可用。'), 503);
       }
       return c.json({ ok: true, ...settingsApi.getNotificationDisplaySettings() });
     } catch (error) {
@@ -948,20 +945,20 @@ export default function registerNotificationCenterRoute(app, ctx) {
     try {
       const settingsApi = getDisplaySettingsApi();
       if (!settingsApi?.updateNotificationDisplaySettings) {
-        return c.json({ ok: false, error: { code: 'NOTIFICATION_CENTER_SETTINGS_UNAVAILABLE', message: '通知中心显示设置暂不可用。' } }, 503);
+        return c.json(unavailablePayload('NOTIFICATION_CENTER_SETTINGS_UNAVAILABLE', '通知中心显示设置暂不可用。'), 503);
       }
       const result = await settingsApi.updateNotificationDisplaySettings(await readJsonBody(c));
       return c.json({ ok: true, ...result, saved: true });
     } catch (error) {
-      const badRequest = ['NOTIFICATION_DISPLAY_SETTINGS_CUSTOM_INVALID', 'NOTIFICATION_DISPLAY_SETTINGS_PRESET_INVALID', 'NOTIFICATION_DISPLAY_SETTINGS_MODE_INVALID', 'NOTIFICATION_DISPLAY_SETTINGS_UNLIMITED_INVALID', 'NOTIFICATION_CARD_LIFETIME_INVALID'].includes(error?.code);
-      return c.json({ ok: false, error: errorPayload(error) }, badRequest ? 400 : 503);
+      const badRequest = error?.code === 'ROUTE_INVALID_JSON' || ['NOTIFICATION_DISPLAY_SETTINGS_CUSTOM_INVALID', 'NOTIFICATION_DISPLAY_SETTINGS_PRESET_INVALID', 'NOTIFICATION_DISPLAY_SETTINGS_MODE_INVALID', 'NOTIFICATION_DISPLAY_SETTINGS_UNLIMITED_INVALID', 'NOTIFICATION_CARD_LIFETIME_INVALID'].includes(error?.code);
+      return c.json({ ok: false, error: errorPayload(error) }, badRequest ? 400 : 500);
     }
   });
   app.get('/notification-detail/:notificationId', (c) => {
     try {
       const api = getApi();
       if (!api?.getNotification) {
-        return c.json({ ok: false, error: { code: 'NOTIFICATION_CENTER_API_UNAVAILABLE', message: 'Notification API unavailable' } }, 503);
+        return c.json(unavailablePayload('NOTIFICATION_CENTER_API_UNAVAILABLE', 'Notification API unavailable'), 503);
       }
       const notificationId = typeof c?.req?.param === 'function' ? c.req.param('notificationId') : undefined;
       const notification = api.getNotification(notificationId);
@@ -980,7 +977,7 @@ export default function registerNotificationCenterRoute(app, ctx) {
     try {
       const api = getApi();
       if (!api?.setNotificationsStatus) {
-        return c.json({ ok: false, error: { code: 'NOTIFICATION_CENTER_API_UNAVAILABLE', message: 'Notification API unavailable' } }, 503);
+        return c.json(unavailablePayload('NOTIFICATION_CENTER_API_UNAVAILABLE', 'Notification API unavailable'), 503);
       }
       const { notificationIds, status } = validateBatchBody(await readJsonBody(c));
       const result = api.setNotificationsStatus(notificationIds, status);
@@ -993,7 +990,7 @@ export default function registerNotificationCenterRoute(app, ctx) {
     try {
       const api = getApi();
       if (!api?.setNotificationStatus) {
-        return c.json({ ok: false, error: { code: 'NOTIFICATION_CENTER_API_UNAVAILABLE', message: 'Notification API unavailable' } }, 503);
+        return c.json(unavailablePayload('NOTIFICATION_CENTER_API_UNAVAILABLE', 'Notification API unavailable'), 503);
       }
       const notificationId = typeof c?.req?.param === 'function' ? c.req.param('notificationId') : undefined;
       const notification = api.setNotificationStatus(notificationId, 'read');
@@ -1008,7 +1005,7 @@ export default function registerNotificationCenterRoute(app, ctx) {
       const settingsApi = getDisplaySettingsApi();
       const ids = validateNotificationIdsBody(await readJsonBody(c));
       if (!api?.removeNotifications && !settingsApi?.removeNotifications) {
-        return c.json({ ok: false, error: { code: 'NOTIFICATION_CENTER_API_UNAVAILABLE', message: 'Notification API unavailable' } }, 503);
+        return c.json(unavailablePayload('NOTIFICATION_CENTER_API_UNAVAILABLE', 'Notification API unavailable'), 503);
       }
       const result = settingsApi?.removeNotifications
         ? await settingsApi.removeNotifications(ids)
@@ -1023,7 +1020,7 @@ export default function registerNotificationCenterRoute(app, ctx) {
       const api = getApi();
       const settingsApi = getDisplaySettingsApi();
       if (!api?.removeNotification && !settingsApi?.removeNotification) {
-        return c.json({ ok: false, error: { code: 'NOTIFICATION_CENTER_API_UNAVAILABLE', message: 'Notification API unavailable' } }, 503);
+        return c.json(unavailablePayload('NOTIFICATION_CENTER_API_UNAVAILABLE', 'Notification API unavailable'), 503);
       }
       const notificationId = typeof c?.req?.param === 'function' ? c.req.param('notificationId') : undefined;
       const removed = settingsApi?.removeNotification

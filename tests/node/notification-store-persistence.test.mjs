@@ -179,6 +179,74 @@ test('NotificationStorePersistenceCoordinator restores valid snapshots and handl
   assert.equal(store.size, 0);
 });
 
+test('NotificationStorePersistenceCoordinator restores a clean snapshot without persisting the restore event', async () => {
+  const store = new NotificationStore();
+  const saved = [];
+  const coordinator = new NotificationStorePersistenceCoordinator({
+    store,
+    filePath: 'notifications.json',
+    load: async () => snapshot(notification('restored')),
+    save: async (nextSnapshot) => saved.push(nextSnapshot)
+  });
+
+  coordinator.observe();
+  await coordinator.restore();
+  await coordinator.flush();
+
+  assert.deepEqual(store.list().map((record) => record.notificationId), ['restored']);
+  assert.equal(saved.length, 0);
+});
+
+test('NotificationStorePersistenceCoordinator preserves an add during restore and persists it', async () => {
+  const store = new NotificationStore();
+  let resolveLoad;
+  const loadPromise = new Promise((resolve) => { resolveLoad = resolve; });
+  const saved = [];
+  const coordinator = new NotificationStorePersistenceCoordinator({
+    store,
+    filePath: 'notifications.json',
+    load: async () => loadPromise,
+    save: async (nextSnapshot) => saved.push(nextSnapshot)
+  });
+
+  coordinator.observe();
+  const restore = coordinator.restore();
+  store.add(notification('local-add'));
+  resolveLoad(snapshot(notification('disk')));
+  await restore;
+  await coordinator.flush();
+
+  assert.deepEqual(store.list().map((record) => record.notificationId), ['local-add']);
+  assert.deepEqual(saved.at(-1).records.map((record) => record.notificationId), ['local-add']);
+});
+
+test('NotificationStorePersistenceCoordinator preserves update and status mutations during restore', async () => {
+  const store = new NotificationStore();
+  store.add(notification('local'));
+  let resolveLoad;
+  const loadPromise = new Promise((resolve) => { resolveLoad = resolve; });
+  const saved = [];
+  const coordinator = new NotificationStorePersistenceCoordinator({
+    store,
+    filePath: 'notifications.json',
+    load: async () => loadPromise,
+    save: async (nextSnapshot) => saved.push(nextSnapshot)
+  });
+
+  coordinator.observe();
+  const restore = coordinator.restore();
+  store.update('local', { title: 'local update' });
+  store.setStatus('local', 'read');
+  resolveLoad(snapshot(notification('local', '2026-08-04T08:10:00.000Z')));
+  await restore;
+  await coordinator.flush();
+
+  assert.equal(store.get('local').title, 'local update');
+  assert.equal(store.get('local').status, 'read');
+  assert.equal(saved.at(-1).records[0].title, 'local update');
+  assert.equal(saved.at(-1).records[0].status, 'read');
+});
+
 test('NotificationStorePersistenceCoordinator preserves memory state and reports load failures', async () => {
   const store = new NotificationStore();
   store.add(notification('memory'));

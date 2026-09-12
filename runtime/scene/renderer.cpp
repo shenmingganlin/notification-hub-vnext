@@ -6,14 +6,18 @@
 #define NOMINMAX
 #endif
 #include <d2d1_1.h>
+#include <wincodec.h>
 #include <d3d11.h>
 #include <dwrite.h>
 #include <dxgi1_2.h>
 #include <windows.h>
+#include <wincrypt.h>
 #include <wrl/client.h>
 #endif
 
 #include <algorithm>
+#include <array>
+#include <cctype>
 #include <cstdint>
 #include <cstdlib>
 #include <vector>
@@ -97,6 +101,10 @@ struct CardRenderer::Impl {
     ComPtr<ID2D1SolidColorBrush> close_background_brush;
     ComPtr<ID2D1SolidColorBrush> close_icon_brush;
     ComPtr<ID2D1Bitmap1> cpu_readback_bitmap;
+    ComPtr<IWICImagingFactory> wic_factory;
+    ComPtr<ID2D1Bitmap> background_bitmap;
+    std::wstring background_bitmap_path;
+    bool com_initialized{};
     HWND hwnd{};
     int width{};
     int height{};
@@ -114,6 +122,9 @@ bool CardRenderer::initialize(void* native_window, int width, int height) {
     reset();
     if (native_window == nullptr || width <= 0 || height <= 0) return false;
 
+    const auto com_result = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
+    if (FAILED(com_result) && com_result != RPC_E_CHANGED_MODE) return false;
+    impl_->com_initialized = SUCCEEDED(com_result);
     impl_->hwnd = static_cast<HWND>(native_window);
     impl_->width = width;
     impl_->height = height;
@@ -138,6 +149,9 @@ bool CardRenderer::initialize(void* native_window, int width, int height) {
         DWRITE_FACTORY_TYPE_SHARED,
         __uuidof(IDWriteFactory),
         reinterpret_cast<IUnknown**>(impl_->write_factory.GetAddressOf()));
+    if (FAILED(result)) return false;
+
+    result = CoCreateInstance(CLSID_WICImagingFactory, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&impl_->wic_factory));
     if (FAILED(result)) return false;
 
     result = impl_->write_factory->CreateTextFormat(
@@ -187,6 +201,8 @@ bool CardRenderer::resize(int width, int height) {
     impl_->width = width;
     impl_->height = height;
     impl_->cpu_readback_bitmap.Reset();
+    impl_->background_bitmap.Reset();
+    impl_->background_bitmap_path.clear();
     impl_->pixels.clear();
     return true;
 #else
@@ -299,6 +315,47 @@ bool CardRenderer::update_layered_window() {
 #endif
 }
 
+bool CardRenderer::load_background_bitmap(const VisualStyle& visual) {
+#ifdef _WIN32
+    if (!visual.specified || visual.background_asset_path.empty() || visual.background_asset_sha256.empty() || impl_->wic_factory == nullptr || impl_->d2d_context == nullptr) { impl_->background_bitmap.Reset(); impl_->background_bitmap_path.clear(); return false; }
+    const auto path = std::wstring(visual.background_asset_path.begin(), visual.background_asset_path.end());
+    if (impl_->background_bitmap != nullptr && impl_->background_bitmap_path == path) return true;
+    { HANDLE file = CreateFileW(path.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+        if (file == INVALID_HANDLE_VALUE) return false;
+        HCRYPTPROV provider{}; HCRYPTHASH hash{}; bool valid = false;
+        if (CryptAcquireContextW(&provider, nullptr, nullptr, PROV_RSA_AES, CRYPT_VERIFYCONTEXT) && CryptCreateHash(provider, CALG_SHA_256, 0, 0, &hash)) {
+            std::array<std::uint8_t, 8192> buffer{}; DWORD read = 0; bool read_ok = true;
+            while (ReadFile(file, buffer.data(), static_cast<DWORD>(buffer.size()), &read, nullptr) && read > 0) if (!CryptHashData(hash, buffer.data(), read, 0)) { read_ok = false; break; }
+            DWORD size = 32; std::array<std::uint8_t, 32> digest{};
+            if (read_ok && CryptGetHashParam(hash, HP_HASHVAL, digest.data(), &size, 0)) {
+                static constexpr char hex[] = "0123456789abcdef"; std::string actual; actual.reserve(64);
+                for (const auto byte : digest) { actual.push_back(hex[byte >> 4]); actual.push_back(hex[byte & 15]); }
+                auto expected = visual.background_asset_sha256; std::transform(expected.begin(), expected.end(), expected.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+                valid = actual == expected;
+            }
+            CryptDestroyHash(hash);
+        }
+        if (provider) CryptReleaseContext(provider, 0);
+        CloseHandle(file);
+        if (!valid) return false;
+    }
+    ComPtr<IWICBitmapDecoder> decoder;
+    const auto decoder_result = impl_->wic_factory->CreateDecoderFromFilename(path.c_str(), nullptr, GENERIC_READ, WICDecodeMetadataCacheOnLoad, &decoder);
+    if (FAILED(decoder_result)) return false;
+    ComPtr<IWICBitmapFrameDecode> frame;
+    if (FAILED(decoder->GetFrame(0, &frame))) return false;
+    ComPtr<IWICFormatConverter> converter;
+    if (FAILED(impl_->wic_factory->CreateFormatConverter(&converter))) return false;
+    if (FAILED(converter->Initialize(frame.Get(), GUID_WICPixelFormat32bppPBGRA, WICBitmapDitherTypeNone, nullptr, 0.0, WICBitmapPaletteTypeCustom))) return false;
+    ComPtr<ID2D1Bitmap> bitmap;
+    const auto bitmap_result = impl_->d2d_context->CreateBitmapFromWicBitmap(converter.Get(), nullptr, &bitmap);
+    if (FAILED(bitmap_result)) return false;
+    impl_->background_bitmap = bitmap; impl_->background_bitmap_path = path; return true;
+#else
+    static_cast<void>(visual); return false;
+#endif
+}
+
 bool CardRenderer::capture_offscreen(std::wstring_view title, std::wstring_view body, const VisualStyle& visual) {
 #ifdef _WIN32
     if (!impl_->ready || impl_->d2d_context == nullptr) return false;
@@ -323,7 +380,11 @@ bool CardRenderer::capture_offscreen(std::wstring_view title, std::wstring_view 
     const auto width = static_cast<float>(impl_->width);
     const auto height = static_cast<float>(impl_->height);
     auto bounds = card_bounds(width, height);
-    if (visual.specified) bounds.radius = static_cast<float>(visual.border_radius);
+    if (visual.specified) {
+        bounds.radius = static_cast<float>(visual.border_radius);
+        if (visual.card_type == "danmaku") bounds.radius = (std::min)(bounds.radius, 12.0f);
+        if (visual.card_type == "popup") bounds.radius = (std::max)(bounds.radius, 22.0f);
+    }
     auto* surface_brush = impl_->surface_brush.Get();
     auto* accent_brush = impl_->accent_brush.Get();
     ComPtr<ID2D1SolidColorBrush> visual_surface_brush;
@@ -355,9 +416,41 @@ bool CardRenderer::capture_offscreen(std::wstring_view title, std::wstring_view 
             bounds.radius,
             bounds.radius),
         surface_brush);
-    impl_->d2d_context->FillRectangle(
-        D2D1::RectF(bounds.left, bounds.top, bounds.left + 4.0f, (std::max)(20.0f, bounds.bottom)),
-        accent_brush);
+    if (load_background_bitmap(visual)) {
+        const auto bmp_size = impl_->background_bitmap->GetSize();
+        const float pad = visual.background_padding;
+        const float area_left = bounds.left + pad;
+        const float area_top = bounds.top + pad;
+        const float area_right = (std::max)(20.0f, bounds.right) - pad;
+        const float area_bottom = (std::max)(20.0f, bounds.bottom) - pad;
+        if (area_right <= area_left || area_bottom <= area_top) { return false; }
+        const float card_w = area_right - area_left;
+        const float card_h = area_bottom - area_top;
+        const float img_w = bmp_size.width;
+        const float img_h = bmp_size.height;
+        D2D1_RECT_F dest = D2D1::RectF(area_left, area_top, area_right, area_bottom);
+        if (visual.background_fit == "contain" && img_w > 0 && img_h > 0) {
+            const float scale = (std::min)(card_w / img_w, card_h / img_h);
+            const float out_w = img_w * scale;
+            const float out_h = img_h * scale;
+            dest = D2D1::RectF(area_left + (card_w - out_w) * 0.5f, area_top + (card_h - out_h) * 0.5f, area_left + (card_w + out_w) * 0.5f, area_top + (card_h + out_h) * 0.5f);
+        } else if (visual.background_fit == "cover" && img_w > 0 && img_h > 0) {
+            const float scale = (std::max)(card_w / img_w, card_h / img_h);
+            const float out_w = img_w * scale;
+            const float out_h = img_h * scale;
+            dest = D2D1::RectF(area_left + (card_w - out_w) * 0.5f, area_top + (card_h - out_h) * 0.5f, area_left + (card_w + out_w) * 0.5f, area_top + (card_h + out_h) * 0.5f);
+        }
+        impl_->d2d_context->DrawBitmap(impl_->background_bitmap.Get(), dest, visual.opacity, D2D1_INTERPOLATION_MODE_LINEAR, nullptr);
+    }
+    if (visual.card_type == "danmaku") {
+        impl_->d2d_context->FillRectangle(
+            D2D1::RectF(bounds.left, bounds.bottom - 5.0f, (std::max)(20.0f, bounds.right), bounds.bottom),
+            accent_brush);
+    } else {
+        impl_->d2d_context->FillRectangle(
+            D2D1::RectF(bounds.left, bounds.top, bounds.left + (visual.card_type == "popup" ? 7.0f : 4.0f), (std::max)(20.0f, bounds.bottom)),
+            accent_brush);
+    }
 
     const auto close_button = close_button_bounds(width, height);
     const auto close_center_x = (close_button.left + close_button.right) * 0.5f;
@@ -376,13 +469,16 @@ bool CardRenderer::capture_offscreen(std::wstring_view title, std::wstring_view 
         D2D1::Point2F(close_button.left + icon_padding, close_button.bottom - icon_padding),
         impl_->close_icon_brush.Get(), 1.5f);
 
+    const float text_left = visual.card_type == "popup" ? 36.0f : 30.0f;
+    const float title_top = visual.card_type == "danmaku" ? 18.0f : 24.0f;
+    const float body_top = visual.card_type == "danmaku" ? 46.0f : 62.0f;
     impl_->d2d_context->DrawText(
         title.data(), static_cast<UINT32>(title.size()), impl_->title_format.Get(),
-        D2D1::RectF(30.0f, 24.0f, (std::max)(36.0f, close_button.left - 8.0f), 56.0f),
+        D2D1::RectF(text_left, title_top, (std::max)(36.0f, close_button.left - 8.0f), body_top - 4.0f),
         impl_->title_brush.Get(), D2D1_DRAW_TEXT_OPTIONS_ENABLE_COLOR_FONT);
     impl_->d2d_context->DrawText(
         body.data(), static_cast<UINT32>(body.size()), impl_->body_format.Get(),
-        D2D1::RectF(30.0f, 62.0f, (std::max)(36.0f, width - 24.0f), (std::max)(72.0f, height - 22.0f)),
+        D2D1::RectF(text_left, body_top, (std::max)(36.0f, width - 24.0f), (std::max)(72.0f, height - (visual.card_type == "danmaku" ? 18.0f : 22.0f))),
         impl_->body_brush.Get(), D2D1_DRAW_TEXT_OPTIONS_ENABLE_COLOR_FONT);
 
     result = impl_->d2d_context->EndDraw();
@@ -466,6 +562,10 @@ void CardRenderer::reset() noexcept {
     impl_->dxgi_device.Reset();
     impl_->d3d_context.Reset();
     impl_->cpu_readback_bitmap.Reset();
+    impl_->background_bitmap.Reset();
+    impl_->background_bitmap_path.clear();
+    impl_->wic_factory.Reset();
+    if (impl_->com_initialized) { CoUninitialize(); impl_->com_initialized = false; }
     impl_->d3d_device.Reset();
     impl_->pixels.clear();
     impl_->hwnd = nullptr;

@@ -23,8 +23,10 @@ function parseCommandInput(input) {
 }
 
 export async function handler(context = {}) {
+  const input = parseCommandInput(context.args);
   const result = await context.hub?.eventBus?.request?.('notification-hub-vnext.run-test', {
-    ...parseCommandInput(context.args),
+    ...input,
+    playSound: input.playSound === true,
     events: ['tool_completed'],
     entryPoint: 'command'
   });

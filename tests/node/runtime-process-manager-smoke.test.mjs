@@ -1,11 +1,23 @@
 import assert from 'node:assert/strict';
+import { EventEmitter } from 'node:events';
 import test from 'node:test';
 
 import { PipeClient } from '../../plugin/runtime/pipe-client.js';
 import { RuntimeProcessManager } from '../../plugin/runtime/process-manager.js';
 import { addRecoveryEntry, createRecoverySnapshot } from '../../plugin/runtime/recovery-snapshot.js';
+import { createSceneState } from '../../plugin/runtime/scene-state.js';
 
-const runtimePath = process.argv[2];
+const runtimePath = process.env.NOTIFICATION_HUB_RUNTIME_PATH ?? process.argv[2];
+const requireRuntime = process.env.NOTIFICATION_HUB_REQUIRE_RUNTIME === '1';
+
+function requireRuntimeForIntegration(t) {
+  if (runtimePath) return true;
+  if (requireRuntime) {
+    throw new Error('Runtime executable is required for the integration gate; pass its path as the first argument');
+  }
+  t.skip('requires a Runtime executable path; CTest or test:integration supplies it');
+  return false;
+}
 
 async function runRecoveryScenario(t, suffix, entries) {
   const pipeName = `\\\\.\\pipe\\notification-hub-vnext-recovery-${suffix}-${process.pid}`;
@@ -61,11 +73,96 @@ async function runRecoveryScenario(t, suffix, entries) {
   return { manager, client, managerStates, recoveryEvents, health: await client.request('health') };
 }
 
+test('scene command ACK updates the in-memory recovery snapshot before health sync', () => {
+  const manager = new RuntimeProcessManager({ runtimePath: 'runtime.exe', pipeName: '\\\\.\\pipe\\recovery-ack-test' });
+  const snapshot = createSceneState({
+    sceneWindow: { x: 0, y: 0, width: 400, height: 200 },
+    cards: [{ id: 'card-a', title: 'Card A', body: 'Created', x: 0, y: 0, width: 320, height: 160 }],
+    cardOrder: ['card-a']
+  });
+  manager.observeSceneStateResponse({
+    type: 'ack',
+    payload: { requestType: 'scene.create', result: { sceneStateSnapshot: snapshot } }
+  });
+  assert.deepEqual(manager.recoverySnapshot.entries.map((entry) => entry.key), ['scene-window', 'scene-card-card-a']);
+});
+
+test('RuntimeProcessManager exhausts the restart budget after repeated ready-then-crash cycles', async (t) => {
+  const manager = new RuntimeProcessManager({
+    runtimePath: 'runtime.exe',
+    pipeName: '\\\\.\\pipe\\restart-budget-test',
+    restartDelayMs: 1,
+    stabilityWindowMs: 100,
+    maxRestartAttempts: 2,
+    spawnProcess: () => {
+      const child = new EventEmitter();
+      child.stdout = new EventEmitter();
+      child.stderr = new EventEmitter();
+      child.stdout.setEncoding = () => {};
+      child.stderr.setEncoding = () => {};
+      child.exitCode = null;
+      child.killed = false;
+      child.kill = () => {
+        if (child.exitCode !== null) return;
+        child.killed = true;
+        child.exitCode = 1;
+        child.emit('exit', 1, null);
+      };
+      setImmediate(() => {
+        child.stdout.emit('data', 'named pipe ready: fake\\n');
+        setImmediate(() => {
+          if (child.exitCode !== null) return;
+          child.exitCode = 1;
+          child.emit('exit', 1, null);
+        });
+      });
+      return child;
+    }
+  });
+  const diagnostics = [];
+  manager.on('diagnostic', (diagnostic) => diagnostics.push(diagnostic));
+
+  await manager.start();
+  await new Promise((resolve) => setTimeout(resolve, 250));
+
+  assert.equal(manager.restartAttempts, 2);
+  assert.equal(diagnostics.filter((diagnostic) => diagnostic.code === 'RUNTIME_RESTART_SCHEDULED').length, 2);
+  assert.equal(diagnostics.filter((diagnostic) => diagnostic.code === 'RUNTIME_RESTART_EXHAUSTED').length, 1);
+  await manager.stop();
+});
+
+test('RuntimeProcessManager retains a recovery entry after a transient restore failure for a later retry', async () => {
+  const snapshot = createRecoverySnapshot({ entries: [{
+    key: 'scene-window',
+    type: 'scene.update',
+    payload: { x: 1, y: 2, width: 300, height: 200 }
+  }] });
+  const manager = new RuntimeProcessManager({
+    runtimePath: 'runtime.exe',
+    pipeName: '\\\\.\\pipe\\recovery-retention-test',
+    recoverySnapshot: snapshot
+  });
+  let attempts = 0;
+  const client = {
+    async request() {
+      attempts += 1;
+      if (attempts === 1) throw Object.assign(new Error('temporary timeout'), { code: 'TRANSPORT_ACK_TIMEOUT' });
+      return { type: 'ack', payload: { result: { applied: true } } };
+    }
+  };
+
+  const first = await manager.restoreRecoverySnapshot(client);
+  assert.equal(first[0].skipped, true);
+  assert.deepEqual(manager.recoverySnapshot.entries.map((entry) => entry.key), ['scene-window']);
+  assert.equal(manager.recoverySnapshot.entries[0].payload.width, 300);
+
+  const second = await manager.restoreRecoverySnapshot(client);
+  assert.equal(second[0].skipped, undefined);
+  assert.deepEqual(manager.recoverySnapshot.entries.map((entry) => entry.key), ['scene-window']);
+});
+
 test('RuntimeProcessManager re-handshakes after restart with an empty recovery snapshot', async (t) => {
-  if (!runtimePath) {
-    t.skip('requires a Runtime executable path; CTest supplies it');
-    return;
-  }
+  if (!requireRuntimeForIntegration(t)) return;
 
   const pipeName = `\\\\.\\pipe\\notification-hub-vnext-empty-restart-${process.pid}`;
   const manager = new RuntimeProcessManager({
@@ -128,10 +225,7 @@ test('RuntimeProcessManager re-handshakes after restart with an empty recovery s
 });
 
 test('RuntimeProcessManager restores the last replayed layout with no cards', async (t) => {
-  if (!runtimePath) {
-    t.skip('requires a Runtime executable path; CTest supplies it');
-    return;
-  }
+  if (!requireRuntimeForIntegration(t)) return;
 
   const result = await runRecoveryScenario(t, 'empty-scene', [
     {
@@ -169,10 +263,7 @@ test('RuntimeProcessManager restores the last replayed layout with no cards', as
 });
 
 test('RuntimeProcessManager reapplies recovery layout when cards follow the mode', async (t) => {
-  if (!runtimePath) {
-    t.skip('requires a Runtime executable path; CTest supplies it');
-    return;
-  }
+  if (!requireRuntimeForIntegration(t)) return;
 
   const result = await runRecoveryScenario(t, 'layout-before-card', [
     {
@@ -213,10 +304,7 @@ test('RuntimeProcessManager reapplies recovery layout when cards follow the mode
 });
 
 test('RuntimeProcessManager reapplies recovery layout when cards precede the mode', async (t) => {
-  if (!runtimePath) {
-    t.skip('requires a Runtime executable path; CTest supplies it');
-    return;
-  }
+  if (!requireRuntimeForIntegration(t)) return;
 
   const result = await runRecoveryScenario(t, 'card-before-layout', [
     {
@@ -257,10 +345,7 @@ test('RuntimeProcessManager reapplies recovery layout when cards precede the mod
 });
 
 test('RuntimeProcessManager restarts Runtime after a controlled exit', async (t) => {
-  if (!runtimePath) {
-    t.skip('requires a Runtime executable path; CTest supplies it');
-    return;
-  }
+  if (!requireRuntimeForIntegration(t)) return;
 
   const pipeName = `\\\\.\\pipe\\notification-hub-vnext-restart-${process.pid}`;
   const recoverySnapshot = createRecoverySnapshot();

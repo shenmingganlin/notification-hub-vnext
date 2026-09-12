@@ -1,5 +1,6 @@
 const TEST_EVENT_DEFINITIONS = Object.freeze({
   chat_message: Object.freeze({
+    eventId: 'chat.assistant_reply.completed',
     label: '聊天新消息',
     semantic: '测试聊天新消息展示；不代表助手回复完成。',
     type: 'message_end',
@@ -9,6 +10,7 @@ const TEST_EVENT_DEFINITIONS = Object.freeze({
     importance: 'normal'
   }),
   channel_message: Object.freeze({
+    eventId: 'channel.message.received',
     label: '频道新消息',
     semantic: '测试外部频道收到新消息。',
     type: 'message_end',
@@ -18,6 +20,7 @@ const TEST_EVENT_DEFINITIONS = Object.freeze({
     importance: 'normal'
   }),
   tool_completed: Object.freeze({
+    eventId: 'tool.execution.succeeded',
     label: '工具执行完成',
     semantic: '测试工具已完成；不代表助手回复完成。',
     type: 'message_end',
@@ -26,6 +29,7 @@ const TEST_EVENT_DEFINITIONS = Object.freeze({
     importance: 'normal'
   }),
   tool_error: Object.freeze({
+    eventId: 'tool.execution.failed',
     label: '工具执行失败',
     semantic: '测试工具失败声音和错误分类。',
     type: 'message_end',
@@ -34,6 +38,7 @@ const TEST_EVENT_DEFINITIONS = Object.freeze({
     importance: 'high'
   }),
   timeout: Object.freeze({
+    eventId: 'tool.execution.timed_out',
     label: '操作超时',
     semantic: '测试超时声音和错误分类。',
     type: 'message_end',
@@ -42,6 +47,7 @@ const TEST_EVENT_DEFINITIONS = Object.freeze({
     importance: 'high'
   }),
   system_warning: Object.freeze({
+    eventId: 'session.health.degraded',
     label: '系统警告',
     semantic: '测试系统级警告展示和重要声音。',
     type: 'session_unhealthy_warning',
@@ -83,7 +89,7 @@ function normalizeInput(input = {}) {
     intervalMs,
     events: Object.freeze([...events]),
     createCards: input.createCards !== false,
-    playSound: input.playSound !== false,
+    playSound: input.playSound === true,
     label
   });
 }
@@ -107,7 +113,7 @@ export function createNotificationTestNotifications(input = {}, { now = () => Da
     const content = `[压力测试] ${normalized.label}\n事件：${definition.label}（${eventName}）\n序号：${ordinal}\n语义：${definition.semantic}`;
     return Object.freeze({
       event: Object.freeze({
-        eventId: id,
+        eventId: definition.eventId,
         traceId: `${id}:trace`,
         type: definition.type,
         ...(eventName === 'tool_completed' ? { stopReason: 'tool_result' } : {}),
@@ -143,21 +149,23 @@ export function createParallelCardSample({ count = 4, now = () => Date.now(), id
   if (!Number.isInteger(count) || count < 1 || count > 100) throw generatorError('NOTIFICATION_SAMPLE_COUNT_INVALID', 'count must be an integer from 1 to 100');
   if (typeof now !== 'function' || (idFactory !== undefined && typeof idFactory !== 'function')) throw generatorError('NOTIFICATION_SAMPLE_FACTORY_INVALID', 'now and idFactory must be functions');
   const makeId = idFactory ?? ((index, kind) => `nh-card-sample-${kind}-${now().toString(36)}-${index + 1}`);
-  const make = (index, kind, eventId, channelId, title) => {
+  const make = (index, kind, eventId, channelId, title, cardType) => {
     const id = String(makeId(index, kind));
+    const marker = { minimal: 'M', danmaku: 'D', popup: 'P' }[cardType] ?? '?';
     return Object.freeze({
       notificationId: id,
-      title,
-      content: `并行卡片样板 · ${title} · ${index + 1}/${count}`,
+      title: `[${marker}] ${title}`,
+      content: `并行卡片样板 · [${marker}] ${title} · ${index + 1}/${count}`,
       type: kind === 'reply' ? 'assistant_message' : 'tool_result',
       source: kind === 'reply' ? 'notification-hub.sample.reply' : 'notification-hub.sample.tool',
       importance: 'normal',
-      metadata: Object.freeze({ sample: 'parallel-card-channels', sampleKind: kind, eventId, channelId, test: true })
+      metadata: Object.freeze({ sample: 'parallel-card-channels', sampleKind: kind, eventId, channelId, cardType, test: true })
     });
   };
   return Object.freeze([
-    ...Array.from({ length: count }, (_, index) => make(index, 'reply', 'chat.assistant_reply.completed', 'stack.reply', '助手回复极简卡片')),
-    ...Array.from({ length: count }, (_, index) => make(index, 'tool', 'tool.execution.succeeded', 'stack.tool', '工具事件极简卡片'))
+    ...Array.from({ length: count }, (_, index) => make(index, 'reply', 'chat.assistant_reply.completed', 'stack.reply', '助手回复极简卡片', 'minimal')),
+    ...Array.from({ length: count }, (_, index) => make(index, 'tool', 'tool.execution.succeeded', 'danmaku.tool', '工具事件弹幕卡片', 'danmaku')),
+    ...Array.from({ length: count }, (_, index) => make(index, 'popup', 'session.health.degraded', 'popup.alert', '系统警告突脸卡片', 'popup'))
   ]);
 }
 

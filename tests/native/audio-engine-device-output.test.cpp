@@ -4,7 +4,12 @@
 
 #include <cassert>
 #include <chrono>
+#include <iostream>
 #include <thread>
+
+namespace {
+constexpr int kEnvironmentUnavailable = 77;
+}
 
 int main() {
     notification_hub::audio_engine::Mixer mixer;
@@ -12,7 +17,11 @@ int main() {
     std::string error;
     const bool started = output.start(mixer, error);
 #ifdef _WIN32
-    if (!started) return 0; // A headless/disabled audio device is an environment result, not a compile failure.
+    if (!started) {
+        std::cerr << "ENVIRONMENT_UNAVAILABLE: default audio output device is unavailable"
+                  << (error.empty() ? "" : ": " + error) << "\n";
+        return kEnvironmentUnavailable;
+    }
     assert(output.available());
     assert(output.buffer_frames() > 0);
     std::this_thread::sleep_for(std::chrono::milliseconds(20));
@@ -21,6 +30,8 @@ int main() {
 #else
     assert(!started);
     assert(!error.empty());
+    std::cerr << "ENVIRONMENT_UNAVAILABLE: WASAPI is only available on Windows\n";
+    return kEnvironmentUnavailable;
 #endif
     return 0;
 }

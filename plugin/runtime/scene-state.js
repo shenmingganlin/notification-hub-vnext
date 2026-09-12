@@ -17,6 +17,14 @@ const CARD_FIELDS = new Set(['id', 'title', 'body', 'x', 'y', 'width', 'height',
 const VISUAL_PRESETS = new Set(['minimal', 'soft', 'accent', 'warning', 'critical']);
 const VISUAL_INTENSITIES = new Set(['reduced', 'balanced', 'expressive']);
 const VISUAL_CATEGORIES = new Set(['chat', 'channel', 'tool', 'error', 'plugin', 'model_service']);
+const VISUAL_CARD_TYPES = new Set(['minimal', 'danmaku', 'popup']);
+const VISUAL_CARD_SIZES = new Set(['small', 'medium', 'large']);
+const VISUAL_ASPECT_RATIOS = new Set(['default', 'square', 'wide']);
+const VISUAL_BACKGROUND_FITS = new Set(['fill', 'contain', 'cover']);
+const VISUAL_DISMISS_MODES = new Set(['closeButton', 'anywhere', 'timeout', 'buttonOnly']);
+const VISUAL_CLOSE_BUTTON_POSITIONS = new Set(['top-right', 'top-left', 'bottom-right', 'bottom-left']);
+const VISUAL_BACKGROUND_COLOR = /^#[0-9a-f]{6}$/i;
+const VISUAL_ASSET_ID = /^[a-z0-9][a-z0-9._-]{0,79}$/i;
 const LAYOUT_FIELDS = new Set(['mode', 'direction', 'anchor', 'spacing', 'workArea']);
 const WORK_AREA_FIELDS = new Set([
   'resolution',
@@ -95,6 +103,76 @@ function validateGeometry(value, label, code) {
   }
 }
 
+function validateVisualDecision(visual) {
+  if (!isRecord(visual)
+    || typeof visual.enabled !== 'boolean'
+    || !VISUAL_PRESETS.has(visual.preset)
+    || !VISUAL_INTENSITIES.has(visual.intensity)
+    || (visual.category !== null && !VISUAL_CATEGORIES.has(visual.category))) {
+    throw sceneStateError('RUNTIME_SCENE_STATE_CARD_INVALID', 'SceneState card visual decision is invalid');
+  }
+  assertExactFields(visual, new Set(['enabled', 'preset', 'intensity', 'category']), 'SceneState card visual', 'RUNTIME_SCENE_STATE_CARD_INVALID');
+}
+
+function validateNativeVisual(visual) {
+  const nativeFields = new Set(['enabled', 'preset', 'intensity', 'category', 'cardType', 'behavior', 'appearance', 'interaction']);
+  assertExactFields(visual, nativeFields, 'SceneState card visual', 'RUNTIME_SCENE_STATE_CARD_INVALID');
+  if (typeof visual.enabled !== 'boolean'
+    || !VISUAL_PRESETS.has(visual.preset)
+    || !VISUAL_INTENSITIES.has(visual.intensity)
+    || (visual.category !== null && !VISUAL_CATEGORIES.has(visual.category))) {
+    throw sceneStateError('RUNTIME_SCENE_STATE_CARD_INVALID', 'SceneState card visual decision is invalid');
+  }
+  if (!VISUAL_CARD_TYPES.has(visual.cardType)) {
+    throw sceneStateError('RUNTIME_SCENE_STATE_CARD_INVALID', 'SceneState card visual cardType is invalid');
+  }
+  if (!isRecord(visual.behavior)
+    || visual.behavior.layout !== 'simple'
+    || visual.behavior.boundary !== 'work-area') {
+    throw sceneStateError('RUNTIME_SCENE_STATE_CARD_INVALID', 'SceneState card visual behavior is invalid');
+  }
+  assertExactFields(visual.behavior, new Set(['layout', 'boundary']), 'SceneState card visual behavior', 'RUNTIME_SCENE_STATE_CARD_INVALID');
+  if ('interaction' in visual) {
+    const interaction = visual.interaction;
+    if (!isRecord(interaction)
+      || !VISUAL_DISMISS_MODES.has(interaction.dismissMode)
+      || !VISUAL_CLOSE_BUTTON_POSITIONS.has(interaction.closeButtonPosition)
+      || !Number.isInteger(interaction.timeoutMs)
+      || interaction.timeoutMs < 1000
+      || interaction.timeoutMs > 60000) {
+      throw sceneStateError('RUNTIME_SCENE_STATE_CARD_INVALID', 'SceneState card visual interaction is invalid');
+    }
+    assertExactFields(interaction, new Set(['dismissMode', 'closeButtonPosition', 'timeoutMs']), 'SceneState card visual interaction', 'RUNTIME_SCENE_STATE_CARD_INVALID');
+  }
+  const appearance = visual.appearance;
+  if (!isRecord(appearance)
+    || !VISUAL_CARD_SIZES.has(appearance.size)
+    || !VISUAL_ASPECT_RATIOS.has(appearance.aspectRatio)
+    || typeof appearance.backgroundColor !== 'string'
+    || !VISUAL_BACKGROUND_COLOR.test(appearance.backgroundColor)
+    || !VISUAL_BACKGROUND_FITS.has(appearance.backgroundFit)
+    || typeof appearance.backgroundPadding !== 'number'
+    || !Number.isFinite(appearance.backgroundPadding)
+    || appearance.backgroundPadding < 0
+    || appearance.backgroundPadding > 40
+    || !Number.isInteger(appearance.borderRadius)
+    || appearance.borderRadius < 0
+    || appearance.borderRadius > 48
+    || typeof appearance.opacity !== 'number'
+    || !Number.isFinite(appearance.opacity)
+    || appearance.opacity < 0
+    || appearance.opacity > 1
+    || ('backgroundAssetId' in appearance && (typeof appearance.backgroundAssetId !== 'string' || !VISUAL_ASSET_ID.test(appearance.backgroundAssetId)))) {
+    throw sceneStateError('RUNTIME_SCENE_STATE_CARD_INVALID', 'SceneState card visual appearance is invalid');
+  }
+  assertExactFields(
+    appearance,
+    new Set(['size', 'aspectRatio', 'backgroundColor', 'backgroundAssetId', 'backgroundFit', 'backgroundPadding', 'borderRadius', 'opacity']),
+    'SceneState card visual appearance',
+    'RUNTIME_SCENE_STATE_CARD_INVALID'
+  );
+}
+
 function validateCard(card) {
   assertExactFields(card, CARD_FIELDS, 'SceneState card', 'RUNTIME_SCENE_STATE_CARD_INVALID');
   if (!isNonEmptyString(card.id) || !isNonEmptyString(card.title) || typeof card.body !== 'string') {
@@ -110,14 +188,14 @@ function validateCard(card) {
     height: card.height
   }, 'SceneState card', 'RUNTIME_SCENE_STATE_CARD_INVALID');
   if ('visual' in card) {
-    if (!isRecord(card.visual)
-      || typeof card.visual.enabled !== 'boolean'
-      || !VISUAL_PRESETS.has(card.visual.preset)
-      || !VISUAL_INTENSITIES.has(card.visual.intensity)
-      || (card.visual.category !== null && !VISUAL_CATEGORIES.has(card.visual.category))) {
-      throw sceneStateError('RUNTIME_SCENE_STATE_CARD_INVALID', 'SceneState card visual decision is invalid');
+    if (!isRecord(card.visual)) {
+      throw sceneStateError('RUNTIME_SCENE_STATE_CARD_INVALID', 'SceneState card visual must be an object');
     }
-    assertExactFields(card.visual, new Set(['enabled', 'preset', 'intensity', 'category']), 'SceneState card visual', 'RUNTIME_SCENE_STATE_CARD_INVALID');
+    if ('cardType' in card.visual || 'behavior' in card.visual || 'appearance' in card.visual) {
+      validateNativeVisual(card.visual);
+    } else {
+      validateVisualDecision(card.visual);
+    }
   }
   if ('presentation' in card) {
     if (!isRecord(card.presentation)

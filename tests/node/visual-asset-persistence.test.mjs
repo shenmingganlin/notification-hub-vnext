@@ -1,0 +1,10 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { createVisualAssetStorage } from '../../plugin/domain/visual-asset-storage.js';
+import { loadVisualAssetSnapshot, saveVisualAssetSnapshot } from '../../plugin/domain/visual-asset-persistence.js';
+const data = Buffer.from('asset-data');
+test('asset storage writes, reads, removes, and rejects traversal', async () => { const root = await mkdtemp(join(tmpdir(), 'nh-visual-assets-')); try { const storage = createVisualAssetStorage(root); await storage.put('asset-1', 'png', data); assert.deepEqual(await storage.read('asset-1', 'png'), data); assert.match(storage.resolveAssetPath('asset-1', 'png'), /asset-1\.png$/); await assert.rejects(() => storage.put('../escape', 'png', data), { code:'VISUAL_ASSET_PATH_INVALID' }); await assert.rejects(() => storage.read('asset-1', 'svg'), { code:'VISUAL_ASSET_FORMAT_UNSUPPORTED' }); await storage.remove('asset-1', 'png'); await assert.rejects(() => storage.read('asset-1', 'png'), { code:'ENOENT' }); } finally { await rm(root, { recursive:true, force:true }); } });
+test('asset snapshots save atomically and reject corruption', async () => { const root = await mkdtemp(join(tmpdir(), 'nh-visual-snapshot-')); const path = join(root, 'nested', 'assets.json'); const snapshot = { version:1, assets:[], references:{} }; try { await saveVisualAssetSnapshot(snapshot, path); assert.deepEqual(await loadVisualAssetSnapshot(path), snapshot); await writeFile(path, '{bad', 'utf8'); await assert.rejects(() => loadVisualAssetSnapshot(path), { code:'VISUAL_ASSET_LOAD_FAILED' }); } finally { await rm(root, { recursive:true, force:true }); } });
