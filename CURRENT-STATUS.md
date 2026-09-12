@@ -1,5 +1,20 @@
 # 当前状态快照（2026-08-15，Windows）
 
+## 2026-09-12 卡片两轴分离（根修复）+ 设置页两轴重构
+
+背景：`CARD_TYPES` 在不同文件里有两个矛盾定义——`card-composition-contract.js` 把卡片种类定义为内容结构（未接线），而运行时 `card-visual-settings.js` 把「外观＋出现方式」揉成 `minimal/danmaku/popup`。同时系统里另有一条真实行为轴（表现绑定的 `behaviorProfileId`）。
+
+决策：`docs/adr/ADR-002-card-type-behavior-axis.md`；实现计划：`docs/superpowers/plans/2026-09-12-card-behavior-axis-separation.md`。
+
+- **卡片种类回归内容结构轴**：`CARD_TYPES` 对齐 `CARD_TYPE_IDS`（已实现仅 `minimal`）；`card.types[*].behavior` 删除。
+- **出现方式独立为 `profile.behaviorId`**：词表 `stack/ticker/popup`，已实现仅 `stack`；`danmaku` 收敛为迁移期别名 `ticker`。
+- **v1→v2 迁移**：新增 `plugin/domain/visual-profile-migration.js`（纯函数、幂等）；两套存储的 load 路径都会经 `createVisualProfile` 自动升级，旧数据不再因版本号被拒绝。
+- **运行时投影**：`native-visual-payload`、`runtime/scene-state`、`visual-rule-resolver` 三处 `cardType` 白名单收敛到单一来源；几何参数改由 `properties.space` 承载。
+- **设置页**：顶部改为「出现方式｜卡片种类」双格轴条，左栏改为「起步预设」；未实现能力显示但 `aria-disabled` 并带**非颜色**文字标记「未实现」；删除装饰性「出现方式」下拉。
+- **验证**：`npm run check` 338 文件通过；全量 `npm test` **1021 项 / 994 通过 / 0 失败 / 27 跳过**；`git diff --check` 退出码 0。
+- 页面不变量实测：实心主按钮 1 个、禁用控件 0 个、无 `data-visual-mode` 残留、`danmaku` 残留 0、收集草稿为 `version:2` 且含 `behaviorId`。
+- 待办：真机安装新包验收设置页两条轴的呈现与保存闭环。
+
 ## 2026-09-11 视觉页收敛（Round 2 · IA 收缩）
 
 目标：把通知视觉页从“配置表单”收敛为“看得见的都是能用的”。规格与验收见 `docs\superpowers\plans\2026-09-11-visual-page-convergence.md`。

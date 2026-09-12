@@ -1,12 +1,18 @@
 import { createCardVisualSettings, cardVisualDefaults, createCardProperties, createCardSkin, createCardEffect } from './card-visual-settings.js';
+import { migrateVisualProfile } from './visual-profile-migration.js';
 
-export const VISUAL_PROFILE_VERSION = 1;
+export const VISUAL_PROFILE_VERSION = 2;
+// 出现方式（行为）轴词表。VISUAL_BEHAVIOR_IDS 是可表示的已知行为（含尚未实现者，用于载入旧数据）；
+// IMPLEMENTED_VISUAL_BEHAVIOR_IDS 是当前真实可用的行为，UI 只允许选择它。
+export const VISUAL_BEHAVIOR_IDS = Object.freeze(['stack', 'ticker', 'popup']);
+export const IMPLEMENTED_VISUAL_BEHAVIOR_IDS = Object.freeze(['stack']);
+export const DEFAULT_VISUAL_BEHAVIOR_ID = 'stack';
 export { createCardVisualSettings, cardVisualDefaults, createCardProperties, createCardSkin, createCardEffect } from './card-visual-settings.js';
 export const VISUAL_CATEGORIES = Object.freeze(['chat', 'channel', 'tool', 'error', 'plugin', 'model_service']);
 export const VISUAL_PRESETS = Object.freeze(['minimal', 'soft', 'accent', 'warning', 'critical']);
 export const VISUAL_INTENSITIES = Object.freeze(['reduced', 'balanced', 'expressive']);
 
-const PROFILE_FIELDS = Object.freeze(['version', 'global', 'categories', 'visualProfiles', 'rules', 'card', 'propertiesId', 'skinId', 'effectConfigId']);
+const PROFILE_FIELDS = Object.freeze(['version', 'global', 'categories', 'visualProfiles', 'rules', 'card', 'behaviorId', 'propertiesId', 'skinId', 'effectConfigId']);
 const POLICY_FIELDS = Object.freeze(['enabled', 'preset', 'intensity', 'defaultMode']);
 const VISUAL_PROFILE_ID_PATTERN = /^[a-z0-9][a-z0-9._-]{0,79}$/i;
 const CATEGORY_DEFAULTS = Object.freeze({
@@ -70,8 +76,12 @@ function validateVisualProfiles(value) {
 
 export function createVisualProfile(input = {}) {
   if (!plain(input)) throw fail('VISUAL_PROFILE_FIELD_INVALID', 'profile must be a plain object', { field: 'profile' });
+  // 旧版本（v1）先升级为两轴形态，再做严格校验。
+  input = migrateVisualProfile(input, VISUAL_PROFILE_VERSION).profile;
   for (const key of Object.keys(input)) if (!PROFILE_FIELDS.includes(key)) throw fail('VISUAL_PROFILE_FIELD_UNKNOWN', `Unknown profile field: ${key}`, { field: key });
   if ('version' in input && input.version !== VISUAL_PROFILE_VERSION) throw fail('VISUAL_PROFILE_VERSION_INVALID', 'Unsupported visual profile version', { field: 'version' });
+  const behaviorId = input.behaviorId ?? DEFAULT_VISUAL_BEHAVIOR_ID;
+  if (!VISUAL_BEHAVIOR_IDS.includes(behaviorId)) throw fail('VISUAL_PROFILE_BEHAVIOR_INVALID', `Unknown visual behavior: ${behaviorId}`, { field: 'behaviorId' });
   if ('global' in input) validatePolicy(input.global, 'global');
   if ('categories' in input) {
     if (!plain(input.categories)) throw fail('VISUAL_PROFILE_FIELD_INVALID', 'categories must be a plain object', { field: 'categories' });
@@ -102,6 +112,7 @@ export function createVisualProfile(input = {}) {
     categories,
     visualProfiles: freeze(visualProfiles),
     rules: clone(input.rules ?? []),
+    behaviorId,
     card: createCardVisualSettings(input.card ?? {}),
     propertiesId: input.propertiesId ?? null,
     skinId: input.skinId ?? null,

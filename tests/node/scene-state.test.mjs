@@ -98,23 +98,35 @@ test('SceneState accepts the complete controlled visual returned by Native', () 
   );
 });
 
-test('SceneState accepts implemented danmaku and popup visual types and rejects unknown types', () => {
-  for (const [cardType, width, height] of [['danmaku', 520, 96], ['popup', 500, 280]]) {
+test('SceneState accepts content-structure card types and rejects behavior-bearing types', () => {
+  const visualFor = (cardType) => ({
+    enabled: true,
+    preset: 'minimal',
+    intensity: 'balanced',
+    category: null,
+    cardType,
+    behavior: { layout: 'simple', boundary: 'work-area' },
+    appearance: { size: 'medium', aspectRatio: 'default', backgroundColor: '#0e1916', backgroundFit: 'fill', backgroundPadding: 0, borderRadius: 16, opacity: 0.96 }
+  });
+  const cardFor = (cardType) => ({ id: `card-${cardType}`, title: cardType, body: '', x: 0, y: 0, width: 420, height: 220, visual: visualFor(cardType) });
+  for (const cardType of ['minimal', 'message']) {
     const state = createSceneState({
-      sceneWindow: { x: 0, y: 0, width, height },
+      sceneWindow: { x: 0, y: 0, width: 420, height: 220 },
       cardOrder: [`card-${cardType}`],
-      cards: [{
-        id: `card-${cardType}`, title: cardType, body: '', x: cardType === 'danmaku' ? 100 : 500, y: cardType === 'danmaku' ? 18 : 180, width, height,
-        visual: { enabled: true, preset: 'minimal', intensity: 'balanced', category: null, cardType, behavior: { layout: 'simple', boundary: 'work-area' }, appearance: { size: cardType === 'danmaku' ? 'small' : 'large', aspectRatio: cardType === 'danmaku' ? 'wide' : 'default', backgroundColor: '#0e1916', backgroundFit: 'fill', backgroundPadding: 0, borderRadius: 12, opacity: 0.96 } }
-      }],
+      cards: [cardFor(cardType)],
       layout: null
     });
     assert.equal(state.cards[0].visual.cardType, cardType);
   }
-  assert.throws(() => createSceneState({
-    sceneWindow: { x: 0, y: 0, width: 420, height: 220 }, cardOrder: ['unknown'],
-    cards: [{ id: 'unknown', title: 'unknown', body: '', x: 0, y: 0, width: 420, height: 220, visual: { enabled: true, preset: 'minimal', intensity: 'balanced', category: null, cardType: 'future', behavior: { layout: 'simple', boundary: 'work-area' }, appearance: { size: 'medium', aspectRatio: 'default', backgroundColor: '#0e1916', backgroundFit: 'fill', backgroundPadding: 0, borderRadius: 16, opacity: 0.96 } } }], layout: null
-  }), (error) => error.code === 'RUNTIME_SCENE_STATE_CARD_INVALID');
+  // danmaku/popup 现在是出现方式而非卡片种类，SceneState 必须拒绝。
+  for (const cardType of ['danmaku', 'popup', 'future']) {
+    assert.throws(() => createSceneState({
+      sceneWindow: { x: 0, y: 0, width: 420, height: 220 },
+      cardOrder: [`card-${cardType}`],
+      cards: [cardFor(cardType)],
+      layout: null
+    }), (error) => error.code === 'RUNTIME_SCENE_STATE_CARD_INVALID');
+  }
 });
 
 test('SceneState preserves controlled presentation and behavior metadata', () => {

@@ -1,6 +1,11 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { CARD_ASPECT_RATIOS, CARD_FITS, CARD_SIZES, createCardVisualSettings, PROPERTIES_DEFAULTS, SKIN_DEFAULTS, EFFECT_DEFAULTS } from '../../plugin/domain/card-visual-settings.js';
+import { CARD_ASPECT_RATIOS, CARD_FITS, CARD_SIZES, CARD_TYPES, IMPLEMENTED_CARD_TYPES, createCardVisualSettings, PROPERTIES_DEFAULTS, SKIN_DEFAULTS, EFFECT_DEFAULTS } from '../../plugin/domain/card-visual-settings.js';
+
+test('card types are the content-structure axis; only minimal is implemented', () => {
+  assert.deepEqual(CARD_TYPES, ['minimal', 'message', 'detail', 'progress', 'character', 'system']);
+  assert.deepEqual(IMPLEMENTED_CARD_TYPES, ['minimal']);
+});
 
 test('minimal card visual settings have stable defaults and are deeply frozen', () => {
   const settings = createCardVisualSettings();
@@ -8,7 +13,6 @@ test('minimal card visual settings have stable defaults and are deeply frozen', 
   assert.deepEqual(CARD_SIZES, ['small', 'medium', 'large']);
   assert.deepEqual(CARD_ASPECT_RATIOS, ['default', 'square', 'wide']);
   assert.deepEqual(settings.types.minimal, {
-    behavior: { layout: 'simple', boundary: 'work-area' },
     appearance: { size: 'medium', aspectRatio: 'default', backgroundColor: '#0e1916', backgroundFit: 'fill', backgroundPadding: 0, borderRadius: 16, opacity: 0.96 },
     properties: PROPERTIES_DEFAULTS,
     skin: SKIN_DEFAULTS,
@@ -18,12 +22,13 @@ test('minimal card visual settings have stable defaults and are deeply frozen', 
   assert.equal(Object.isFrozen(settings.types.minimal.properties), true);
   assert.equal(Object.isFrozen(settings.types.minimal.skin), true);
   assert.equal(Object.isFrozen(settings.types.minimal.effects), true);
+  assert.equal('behavior' in settings.types.minimal, false);
 });
 
-test('minimal card settings accept controlled behavior and appearance fields', () => {
+test('minimal card settings accept controlled appearance fields', () => {
   const settings = createCardVisualSettings({
     activeType: 'minimal',
-    types: { minimal: { behavior: { layout: 'simple' }, appearance: { size: 'large', aspectRatio: 'wide', backgroundColor: '#123456', backgroundAssetId: 'visual-asset-1', backgroundFit: 'cover', backgroundPadding: 8, borderRadius: 24, opacity: 0.8 } } }
+    types: { minimal: { appearance: { size: 'large', aspectRatio: 'wide', backgroundColor: '#123456', backgroundAssetId: 'visual-asset-1', backgroundFit: 'cover', backgroundPadding: 8, borderRadius: 24, opacity: 0.8 } } }
   });
   assert.equal(settings.types.minimal.appearance.size, 'large');
   assert.equal(settings.types.minimal.appearance.aspectRatio, 'wide');
@@ -52,24 +57,27 @@ test('CARD_FITS exports the three fit modes', () => {
   assert.deepEqual(CARD_FITS, ['fill', 'contain', 'cover']);
 });
 
-test('minimal card settings accept bounded dimensions and layout spacing', () => {
+test('minimal card settings accept bounded dimensions and space parameters', () => {
   const settings = createCardVisualSettings({ types: { minimal: {
-    behavior: { anchor: 'top-right', gap: 12, margin: 24 },
+    properties: { space: { anchor: 'top-right', gap: 12, margin: 24 } },
     appearance: { width: 480, height: 120 }
   } } });
-  assert.deepEqual(settings.types.minimal.behavior, { layout: 'simple', boundary: 'work-area', anchor: 'top-right', gap: 12, margin: 24 });
+  assert.equal(settings.types.minimal.properties.space.anchor, 'top-right');
+  assert.equal(settings.types.minimal.properties.space.gap, 12);
+  assert.equal(settings.types.minimal.properties.space.margin, 24);
   assert.equal(settings.types.minimal.appearance.width, 480);
   assert.equal(settings.types.minimal.appearance.height, 120);
   assert.throws(() => createCardVisualSettings({ types: { minimal: { appearance: { width: 100 } } } }), (error) => error.code === 'CARD_VISUAL_DIMENSION_INVALID');
-  assert.throws(() => createCardVisualSettings({ types: { minimal: { behavior: { margin: 97 } } } }), (error) => error.code === 'CARD_VISUAL_SPACING_INVALID');
+  assert.throws(() => createCardVisualSettings({ types: { minimal: { properties: { space: { margin: 97 } } } } }), (error) => error.code === 'CARD_VISUAL_FIELD_INVALID');
 });
 
 test('card visual settings reject arbitrary styling and unsupported types', () => {
   assert.throws(() => createCardVisualSettings({ types: { minimal: { appearance: { css: 'body{}' } } } }), (error) => error.code === 'CARD_VISUAL_FIELD_UNKNOWN');
   assert.throws(() => createCardVisualSettings({ types: { minimal: { appearance: { backgroundColor: 'red' } } } }), (error) => error.code === 'CARD_VISUAL_COLOR_INVALID');
   assert.throws(() => createCardVisualSettings({ activeType: 'unknown' }), (error) => error.code === 'CARD_VISUAL_TYPE_INVALID');
-  const implemented = createCardVisualSettings({ activeType: 'danmaku' });
-  assert.equal(implemented.types.danmaku.appearance.width, 520);
-  assert.equal(implemented.types.danmaku.appearance.height, 96);
-  assert.equal(createCardVisualSettings({ activeType: 'popup' }).types.popup.appearance.width, 500);
+  // 出现方式（danmaku/popup）不再是卡片种类，直接传入必须被拒绝。
+  assert.throws(() => createCardVisualSettings({ activeType: 'danmaku' }), (error) => error.code === 'CARD_VISUAL_TYPE_INVALID');
+  assert.throws(() => createCardVisualSettings({ activeType: 'popup' }), (error) => error.code === 'CARD_VISUAL_TYPE_INVALID');
+  // 卡片种类里不再接受 behavior 字段。
+  assert.throws(() => createCardVisualSettings({ types: { minimal: { behavior: { layout: 'simple' } } } }), (error) => error.code === 'CARD_VISUAL_FIELD_UNKNOWN');
 });

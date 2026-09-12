@@ -1,5 +1,7 @@
 import {
+  createCardVisualSettings,
   createVisualProfile,
+  DEFAULT_VISUAL_BEHAVIOR_ID,
   VISUAL_CATEGORIES,
   VISUAL_INTENSITIES,
   VISUAL_PRESETS
@@ -41,16 +43,20 @@ function validateVisualInput(input) {
 
 function cardDecision(profile, strategy = null) {
   const card = strategy?.card ?? profile.card;
+  const active = card.types[card.activeType] ?? {};
   return {
     cardType: card.activeType,
-    behavior: card.types[card.activeType].behavior,
-    appearance: card.types[card.activeType].appearance
+    behaviorId: profile.behaviorId,
+    appearance: active.appearance,
+    space: active.properties?.space
   };
 }
 
 function decision(profile, values, strategy = null) {
   return freeze({ ...values, ...cardDecision(profile, strategy) });
 }
+
+const FALLBACK_CARD = createCardVisualSettings().types.minimal;
 
 function fallbackDecision(reason = 'fallback-invalid-profile') {
   return freeze({
@@ -61,8 +67,9 @@ function fallbackDecision(reason = 'fallback-invalid-profile') {
     matchedBy: 'fallback',
     reason,
     cardType: 'minimal',
-    behavior: { layout: 'simple', boundary: 'work-area' },
-    appearance: { size: 'medium', aspectRatio: 'default', backgroundColor: '#0e1916', borderRadius: 16, opacity: 0.96 }
+    behaviorId: DEFAULT_VISUAL_BEHAVIOR_ID,
+    appearance: FALLBACK_CARD.appearance,
+    space: FALLBACK_CARD.properties.space
   });
 }
 

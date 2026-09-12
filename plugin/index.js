@@ -153,34 +153,27 @@ function normalizeVisualPreviewProfile(input) {
   if (activeType !== 'minimal') return source;
 
   const sourceType = isPlainPreviewRecord(sourceTypes[activeType]) ? sourceTypes[activeType] : {};
-  const sourceBehavior = isPlainPreviewRecord(sourceType.behavior) ? sourceType.behavior : {};
   const sourceProperties = isPlainPreviewRecord(sourceType.properties) ? sourceType.properties : {};
   const sourceSpace = isPlainPreviewRecord(sourceProperties.space) ? sourceProperties.space : {};
   const defaultSpace = PROPERTIES_DEFAULTS.space;
-  const behavior = {
-    ...sourceBehavior,
-    layout: CARD_LAYOUTS.includes(sourceBehavior.layout) ? sourceBehavior.layout : MINIMAL_CARD_DEFAULTS.behavior.layout,
-    boundary: CARD_BOUNDARIES.includes(sourceBehavior.boundary) ? sourceBehavior.boundary : MINIMAL_CARD_DEFAULTS.behavior.boundary,
-    anchor: CARD_ANCHORS.includes(sourceBehavior.anchor) ? sourceBehavior.anchor : defaultSpace.anchor,
-    gap: Number.isInteger(sourceBehavior.gap) && sourceBehavior.gap >= 0 && sourceBehavior.gap <= 48 ? sourceBehavior.gap : defaultSpace.gap,
-    margin: Number.isInteger(sourceBehavior.margin) && sourceBehavior.margin >= 0 && sourceBehavior.margin <= 96 ? sourceBehavior.margin : defaultSpace.margin
-  };
   const space = {
     ...sourceSpace,
     size: CARD_SIZES.includes(sourceSpace.size) ? sourceSpace.size : defaultSpace.size,
     aspectRatio: CARD_ASPECT_RATIOS.includes(sourceSpace.aspectRatio) ? sourceSpace.aspectRatio : defaultSpace.aspectRatio,
-    layout: behavior.layout,
-    anchor: behavior.anchor,
-    gap: behavior.gap,
-    margin: behavior.margin
+    layout: CARD_LAYOUTS.includes(sourceSpace.layout) ? sourceSpace.layout : 'simple',
+    anchor: CARD_ANCHORS.includes(sourceSpace.anchor) ? sourceSpace.anchor : defaultSpace.anchor,
+    gap: Number.isInteger(sourceSpace.gap) && sourceSpace.gap >= 0 && sourceSpace.gap <= 48 ? sourceSpace.gap : defaultSpace.gap,
+    margin: Number.isInteger(sourceSpace.margin) && sourceSpace.margin >= 0 && sourceSpace.margin <= 96 ? sourceSpace.margin : defaultSpace.margin
   };
+  // 出现方式已不在卡片种类里；丢弃遗留的 behavior stub，几何只保留 properties.space。
+  const { behavior: _legacyBehavior, ...typeRest } = sourceType;
 
   return {
     ...source,
     card: {
       ...sourceCard,
       activeType,
-      types: { ...sourceTypes, [activeType]: { ...sourceType, behavior, properties: { ...sourceProperties, space } } }
+      types: { ...sourceTypes, [activeType]: { ...typeRest, properties: { ...sourceProperties, space } } }
     }
   };
 }
@@ -404,15 +397,15 @@ function visualFingerprint(visual) {
 
 function visualPlacementFingerprint(profile = {}) {
   const activeType = profile?.card?.types?.[profile?.card?.activeType ?? 'minimal'] ?? {};
-  const behavior = activeType.behavior ?? {};
   const space = activeType.properties?.space ?? {};
-  const legacyMargin = behavior.margin ?? space.margin ?? 18;
+  const legacyMargin = space.margin ?? 18;
   return JSON.stringify({
-    anchor: behavior.anchor ?? space.anchor ?? 'bottom-right',
-    marginLeft: behavior.marginLeft ?? space.marginLeft ?? legacyMargin,
-    marginRight: behavior.marginRight ?? space.marginRight ?? legacyMargin,
-    marginTop: behavior.marginTop ?? space.marginTop ?? legacyMargin,
-    marginBottom: behavior.marginBottom ?? space.marginBottom ?? legacyMargin
+    behaviorId: profile?.behaviorId ?? 'stack',
+    anchor: space.anchor ?? 'bottom-right',
+    marginLeft: space.marginLeft ?? legacyMargin,
+    marginRight: space.marginRight ?? legacyMargin,
+    marginTop: space.marginTop ?? legacyMargin,
+    marginBottom: space.marginBottom ?? legacyMargin
   });
 }
 
@@ -429,15 +422,16 @@ function visualPreviewHandshake({ receivedDraft, updated, recreated, cardId, dra
 
 function notificationCardPayload(record, index, workArea, layout, visual, presentation = null, behavior = null) {
   const cardType = visual?.cardType ?? 'minimal';
+  const space = visual?.space ?? {};
   const dimensions = {
     ...notificationCardDimensions(visual?.appearance, cardType),
-    gap: visual?.behavior?.gap,
-    margin: visual?.behavior?.margin,
-    marginLeft: visual?.behavior?.marginLeft,
-    marginRight: visual?.behavior?.marginRight,
-    marginTop: visual?.behavior?.marginTop,
-    marginBottom: visual?.behavior?.marginBottom,
-    anchor: visual?.behavior?.anchor ?? (cardType === 'danmaku' ? 'top-right' : 'bottom-right')
+    gap: space.gap,
+    margin: space.margin,
+    marginLeft: space.marginLeft,
+    marginRight: space.marginRight,
+    marginTop: space.marginTop,
+    marginBottom: space.marginBottom,
+    anchor: space.anchor ?? 'bottom-right'
   };
   const position = notificationCardPosition(index, workArea, layout, dimensions, cardType);
   return {
@@ -2635,7 +2629,7 @@ export default class NotificationHubVNextPlugin {
       ? (this.visualProfileRegistry.get(explicitVisualBinding.visualProfileId)?.profile ?? draftVisualProfile)
       : draftVisualProfile;
     const visual = resolveVisualRuleSafe({ visualInput: presentationInput.visualInput, profile: visualProfile, context: { globalEnabled: visualProfile.global.enabled } });
-    const visualPayload = { enabled: visual.enabled, preset: visual.preset, intensity: visual.intensity, category: visual.category, cardType: visual.cardType, behavior: visual.behavior, appearance: visual.appearance };
+    const visualPayload = { enabled: visual.enabled, preset: visual.preset, intensity: visual.intensity, category: visual.category, cardType: visual.cardType, behaviorId: visual.behaviorId, space: visual.space, appearance: visual.appearance };
     const presentation = selector ? { eventId: selector.eventId, categoryId: selector.categoryId, eventTypeId: selector.eventTypeId, visualProfileId: selector.visual.visualProfileId } : null;
     const card = this.buildNotificationScenePayload({ record, health, layout, retainedNotificationCards, visualPayload, presentation, behavior });
     this.recordNotificationLifecycle(record.notificationId, 'scene.create.request', { channelId: behavior?.behaviorChannelId, reason: 'promotion' });
@@ -2720,7 +2714,8 @@ export default class NotificationHubVNextPlugin {
       intensity: visual.intensity,
       category: visual.category,
       cardType: visual.cardType,
-      behavior: visual.behavior,
+      behaviorId: visual.behaviorId,
+      space: visual.space,
       appearance: visual.appearance
     };
     const channelId = behavior?.behaviorChannelId ?? '__legacy__';
@@ -3368,14 +3363,14 @@ export default class NotificationHubVNextPlugin {
       ? ((await host.client.request('health', {}, { retryable: true, maxAttempts: 2 }))?.payload?.result ?? {})
       : { workArea: { left: 0, top: 0, width: 1920, height: 1080 }, layout: { direction: 'right', anchor: 'bottom-right', spacing: 12 } };
     const samples = [
-      { cardType: 'minimal', channelId: 'stack.main', behaviorId: 'minimal', category: 'chat', title: 'M · 极简卡片', content: '后台动作已记录。', visual: { enabled: true, preset: 'minimal', intensity: 'balanced', category: 'chat', cardType: 'minimal', behavior: { layout: 'simple', boundary: 'work-area', anchor: 'bottom-right', gap: 12, margin: 18 }, appearance: { size: 'medium', aspectRatio: 'default', backgroundColor: '#0e1916', backgroundFit: 'fill', backgroundPadding: 0, borderRadius: 16, opacity: 0.96 } } },
-      { cardType: 'danmaku', channelId: 'danmaku.main', behaviorId: 'danmaku', category: 'chat', title: 'D · 弹幕通知', content: '一条新消息划过顶部轨道。', visual: { enabled: true, preset: 'accent', intensity: 'expressive', category: 'chat', cardType: 'danmaku', behavior: { layout: 'simple', boundary: 'work-area', anchor: 'top-right', gap: 12, margin: 18 }, appearance: { size: 'small', aspectRatio: 'wide', backgroundColor: '#10221e', backgroundFit: 'fill', backgroundPadding: 0, borderRadius: 12, opacity: 0.98 } } },
-      { cardType: 'popup', channelId: 'popup.main', behaviorId: 'popup', category: 'error', title: 'P · 突脸信息', content: '重要事件需要确认。', visual: { enabled: true, preset: 'warning', intensity: 'expressive', category: 'error', cardType: 'popup', behavior: { layout: 'simple', boundary: 'work-area', anchor: 'top-right', gap: 16, margin: 24 }, appearance: { size: 'large', aspectRatio: 'default', backgroundColor: '#201817', backgroundFit: 'fill', backgroundPadding: 0, borderRadius: 24, opacity: 0.99 } } }
+      { cardType: 'minimal', channelId: 'stack.main', behaviorId: 'stack', category: 'chat', title: 'M · 极简卡片', content: '后台动作已记录。', visual: { enabled: true, preset: 'minimal', intensity: 'balanced', category: 'chat', cardType: 'minimal', space: { anchor: 'bottom-right', gap: 12, margin: 18 }, appearance: { size: 'medium', aspectRatio: 'default', backgroundColor: '#0e1916', backgroundFit: 'fill', backgroundPadding: 0, borderRadius: 16, opacity: 0.96 } } },
+      { cardType: 'minimal', channelId: 'ticker.main', behaviorId: 'ticker', category: 'chat', title: 'D · 弹幕通知', content: '一条新消息划过顶部轨道。', visual: { enabled: true, preset: 'accent', intensity: 'expressive', category: 'chat', cardType: 'minimal', space: { anchor: 'top-right', gap: 12, margin: 18 }, appearance: { size: 'small', aspectRatio: 'wide', backgroundColor: '#10221e', backgroundFit: 'fill', backgroundPadding: 0, borderRadius: 12, opacity: 0.98 } } },
+      { cardType: 'minimal', channelId: 'popup.main', behaviorId: 'popup', category: 'error', title: 'P · 突脸信息', content: '重要事件需要确认。', visual: { enabled: true, preset: 'warning', intensity: 'expressive', category: 'error', cardType: 'minimal', space: { anchor: 'top-right', gap: 16, margin: 24 }, appearance: { size: 'large', aspectRatio: 'default', backgroundColor: '#201817', backgroundFit: 'fill', backgroundPadding: 0, borderRadius: 24, opacity: 0.99 } } }
     ];
     const results = [];
     for (const sample of samples) {
       for (let index = 0; index < count; index += 1) {
-        const notificationId = `parallel-${sample.cardType}-${Date.now().toString(36)}-${index + 1}`;
+        const notificationId = `parallel-${sample.behaviorId}-${Date.now().toString(36)}-${index + 1}`;
         const record = { notificationId, title: sample.title, content: `${sample.content} 通道：${sample.channelId}` };
         const card = notificationCardPayload(record, index, health.workArea, health.layout, sample.visual, { eventId: `visual.parallel.${sample.cardType}`, categoryId: sample.category, eventTypeId: 'parallel-test', visualProfileId: `visual.${sample.cardType}` }, { behaviorProfileId: sample.behaviorId, behaviorChannelId: sample.channelId });
         const entry = { cardId: card.id, notificationId, cardType: sample.cardType, behaviorChannelId: sample.channelId, geometry: { x: card.x, y: card.y, width: card.width, height: card.height } };
@@ -3503,7 +3498,7 @@ export default class NotificationHubVNextPlugin {
     const activeType = profile?.card?.types?.[profile.card.activeType ?? 'minimal'] ?? {};
     const visualPayload = event
       ? visual
-      : resolveVisualDraftPayload({ enabled: visual.enabled, preset: visual.preset, intensity: visual.intensity, category: visual.category, cardType: visual.cardType, behavior: visual.behavior, appearance: visual.appearance }, activeType);
+      : resolveVisualDraftPayload({ enabled: visual.enabled, preset: visual.preset, intensity: visual.intensity, category: visual.category, cardType: visual.cardType, behaviorId: visual.behaviorId, space: visual.space, appearance: visual.appearance }, activeType);
     const id = cardId ?? `${VISUAL_WORKBENCH_CARD_PREFIX}${Date.now().toString(36)}-${Math.random().toString(16).slice(2, 8)}`;
     const phaseLabels = { enter: '入场测试', hold: '持续更新测试', exit: '消失测试' };
     const card = notificationCardPayload({ notificationId: id, title: `视觉实验台 · ${phaseLabels[phase]}`, content: '真实 Native 卡片。修改设置后点击持续 / 更新，验证当前视觉配置。' }, 0, health.workArea, health.layout ?? { direction: 'right', anchor: 'bottom-left', spacing: 12 }, visualPayload, { eventId: eventInput.eventId, categoryId: eventInput.categoryId ?? 'chat', eventTypeId: eventInput.eventTypeId ?? 'completed', visualProfileId: eventInput.visualProfileId ?? 'visual.default' }, { behaviorProfileId: 'stack', behaviorChannelId: eventInput.behaviorChannelId ?? 'visual.workbench' });
@@ -3551,7 +3546,8 @@ export default class NotificationHubVNextPlugin {
       intensity: profile.global.intensity,
       category: 'chat',
       cardType: profile.card.activeType,
-      behavior: activeType.behavior,
+      behaviorId: profile.behaviorId,
+      space: activeType.properties?.space,
       appearance: activeType.appearance
     }, activeType);
     const card = notificationCardPayload(

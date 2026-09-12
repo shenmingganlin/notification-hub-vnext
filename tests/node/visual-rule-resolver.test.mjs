@@ -2,11 +2,14 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import { resolveVisualRule, resolveVisualRuleSafe } from '../../plugin/domain/visual-rule-resolver.js';
+import { createCardVisualSettings } from '../../plugin/domain/visual-settings.js';
 
+const minimalType = createCardVisualSettings().types.minimal;
 const card = {
   cardType: 'minimal',
-  behavior: { layout: 'simple', boundary: 'work-area' },
-  appearance: { size: 'medium', aspectRatio: 'default', backgroundColor: '#0e1916', backgroundFit: 'fill', backgroundPadding: 0, borderRadius: 16, opacity: 0.96 }
+  behaviorId: 'stack',
+  appearance: minimalType.appearance,
+  space: minimalType.properties.space
 };
 
 const profile = {
@@ -145,8 +148,9 @@ test('visual resolver safely falls back for invalid input or profile', () => {
     matchedBy: 'fallback',
     reason: 'fallback-invalid-profile',
     cardType: 'minimal',
-    behavior: { layout: 'simple', boundary: 'work-area' },
-    appearance: { size: 'medium', aspectRatio: 'default', backgroundColor: '#0e1916', borderRadius: 16, opacity: 0.96 }
+    behaviorId: 'stack',
+    appearance: minimalType.appearance,
+    space: minimalType.properties.space
   });
   assert.ok(Object.isFrozen(result));
 });

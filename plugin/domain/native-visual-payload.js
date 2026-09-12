@@ -1,4 +1,8 @@
-const CARD_TYPES = new Set(['minimal', 'danmaku', 'popup']);
+import { CARD_TYPES as CONTENT_CARD_TYPES } from './card-visual-settings.js';
+
+// cardType 只承载内容结构轴（与 CARD_TYPES 单一来源对齐）。
+// 出现方式（stack/ticker/popup）不再混进 cardType，已独立为 behaviorId 轴。
+const CARD_TYPES = new Set(CONTENT_CARD_TYPES);
 
 function nativeVisualError(code, message, field) {
   return Object.assign(new Error(message), { code, details: field ? { field } : {} });

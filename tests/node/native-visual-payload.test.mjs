@@ -45,9 +45,12 @@ test('native visual payload projects rich settings into the strict scene contrac
   });
 });
 
-test('native visual payload preserves implemented card types and rejects unknown types', () => {
-  assert.equal(projectNativeVisualPayload({ cardType: 'danmaku' }).cardType, 'danmaku');
-  assert.equal(projectNativeVisualPayload({ cardType: 'popup' }).cardType, 'popup');
+test('native visual payload accepts content-structure card types and rejects behavior-bearing types', () => {
+  assert.equal(projectNativeVisualPayload({ cardType: 'minimal' }).cardType, 'minimal');
+  assert.equal(projectNativeVisualPayload({ cardType: 'message' }).cardType, 'message');
+  // danmaku/popup 是出现方式，不再是被接受的卡片种类。
+  assert.throws(() => projectNativeVisualPayload({ cardType: 'danmaku' }), (error) => error.code === 'NATIVE_VISUAL_CARD_TYPE_INVALID');
+  assert.throws(() => projectNativeVisualPayload({ cardType: 'popup' }), (error) => error.code === 'NATIVE_VISUAL_CARD_TYPE_INVALID');
   assert.throws(() => projectNativeVisualPayload({ cardType: 'future' }), (error) => error.code === 'NATIVE_VISUAL_CARD_TYPE_INVALID');
 });
 

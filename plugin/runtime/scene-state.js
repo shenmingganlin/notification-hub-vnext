@@ -1,4 +1,5 @@
 import { PROTOCOL_VERSION } from '../protocol/index.js';
+import { CARD_TYPES as CONTENT_CARD_TYPES } from '../domain/card-visual-settings.js';
 
 export const SCENE_STATE_VERSION = 1;
 
@@ -17,7 +18,7 @@ const CARD_FIELDS = new Set(['id', 'title', 'body', 'x', 'y', 'width', 'height',
 const VISUAL_PRESETS = new Set(['minimal', 'soft', 'accent', 'warning', 'critical']);
 const VISUAL_INTENSITIES = new Set(['reduced', 'balanced', 'expressive']);
 const VISUAL_CATEGORIES = new Set(['chat', 'channel', 'tool', 'error', 'plugin', 'model_service']);
-const VISUAL_CARD_TYPES = new Set(['minimal', 'danmaku', 'popup']);
+const VISUAL_CARD_TYPES = new Set(CONTENT_CARD_TYPES);
 const VISUAL_CARD_SIZES = new Set(['small', 'medium', 'large']);
 const VISUAL_ASPECT_RATIOS = new Set(['default', 'square', 'wide']);
 const VISUAL_BACKGROUND_FITS = new Set(['fill', 'contain', 'cover']);

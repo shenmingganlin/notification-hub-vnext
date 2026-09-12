@@ -1,5 +1,8 @@
-export const CARD_TYPES = Object.freeze(['minimal', 'danmaku', 'popup']);
-export const IMPLEMENTED_CARD_TYPES = Object.freeze(['minimal', 'danmaku', 'popup']);
+// 卡片种类 = 内容结构轴，与 card-composition-contract.js 的 CARD_TYPE_IDS 对齐。
+// 完整词表为未来种类预留；本轮已实现的只有内容结构 minimal。
+// 「出现方式」不再属于卡片种类，已独立为视觉方案的 behaviorId 轴（见 ADR-002）。
+export const CARD_TYPES = Object.freeze(['minimal', 'message', 'detail', 'progress', 'character', 'system']);
+export const IMPLEMENTED_CARD_TYPES = Object.freeze(['minimal']);
 export const CARD_LAYOUTS = Object.freeze(['simple']);
 export const CARD_BOUNDARIES = Object.freeze(['work-area']);
 export const CARD_ANCHORS = Object.freeze(['top-left', 'top-right', 'bottom-left', 'bottom-right']);
@@ -17,8 +20,7 @@ export const PARTICLE_EFFECT_IDS = Object.freeze(['star', 'circle', 'heart', 'pe
 export const EFFECT_SLOTS = Object.freeze(['enter', 'idle', 'exit', 'enterParticles', 'idleParticles', 'exitParticles']);
 
 const CARD_SETTINGS_FIELDS = Object.freeze(['activeType', 'types']);
-const TYPE_FIELDS = Object.freeze(['behavior', 'appearance', 'properties', 'skin', 'effects']);
-const BEHAVIOR_FIELDS = Object.freeze(['layout', 'boundary', 'anchor', 'gap', 'margin', 'marginLeft', 'marginRight', 'marginTop', 'marginBottom', 'dismissMode']);
+const TYPE_FIELDS = Object.freeze(['appearance', 'properties', 'skin', 'effects']);
 const APPEARANCE_FIELDS = Object.freeze(['size', 'aspectRatio', 'width', 'height', 'backgroundColor', 'backgroundAssetId', 'backgroundFit', 'backgroundPadding', 'borderRadius', 'opacity']);
 const PROPERTIES_FIELDS = Object.freeze(['space', 'shape', 'typography', 'lifecycle', 'interaction', 'resource']);
 const SPACE_FIELDS = Object.freeze(['size', 'anchor', 'aspectRatio', 'gap', 'margin', 'marginLeft', 'marginRight', 'marginTop', 'marginBottom', 'layout', 'offset', 'screenPadding', 'zIndex']);
@@ -39,7 +41,6 @@ const SKIN_ID_PATTERN = /^[a-z0-9][a-z0-9._-]{0,79}$/i;
 const EFFECT_CONFIG_ID_PATTERN = /^[a-z0-9][a-z0-9._-]{0,79}$/i;
 
 export const MINIMAL_CARD_DEFAULTS = Object.freeze({
-  behavior: Object.freeze({ layout: 'simple', boundary: 'work-area' }),
   appearance: Object.freeze({
     size: 'medium',
     aspectRatio: 'default',
@@ -52,15 +53,7 @@ export const MINIMAL_CARD_DEFAULTS = Object.freeze({
 });
 
 export const CARD_TYPE_DEFAULTS = Object.freeze({
-  minimal: MINIMAL_CARD_DEFAULTS,
-  danmaku: Object.freeze({
-    behavior: Object.freeze({ layout: 'simple', boundary: 'work-area', anchor: 'top-right', gap: 12, margin: 18 }),
-    appearance: Object.freeze({ size: 'small', aspectRatio: 'wide', width: 520, height: 96, backgroundColor: '#10221e', backgroundFit: 'fill', backgroundPadding: 0, borderRadius: 12, opacity: 0.98 })
-  }),
-  popup: Object.freeze({
-    behavior: Object.freeze({ layout: 'simple', boundary: 'work-area', anchor: 'bottom-right', gap: 16, margin: 24 }),
-    appearance: Object.freeze({ size: 'large', aspectRatio: 'default', width: 500, height: 280, backgroundColor: '#201817', backgroundFit: 'fill', backgroundPadding: 0, borderRadius: 24, opacity: 0.99 })
-  })
+  minimal: MINIMAL_CARD_DEFAULTS
 });
 
 export const PROPERTIES_DEFAULTS = Object.freeze({
@@ -134,17 +127,6 @@ function validateColor(value, field) {
 }
 function validateNullableAssetId(value, field) {
   if (value !== null && (typeof value !== 'string' || !ASSET_ID.test(value))) throw fail('CARD_VISUAL_ASSET_ID_INVALID', `${field} is invalid`, { field });
-}
-
-// ── Behavior ──
-
-function validateBehavior(value, field) {
-  assertKnownFields(value, BEHAVIOR_FIELDS, field);
-  if ('layout' in value && !CARD_LAYOUTS.includes(value.layout)) throw fail('CARD_VISUAL_LAYOUT_INVALID', `${field}.layout is unsupported`, { field: `${field}.layout` });
-  if ('boundary' in value && !CARD_BOUNDARIES.includes(value.boundary)) throw fail('CARD_VISUAL_BOUNDARY_INVALID', `${field}.boundary is unsupported`, { field: `${field}.boundary` });
-  if ('anchor' in value && !CARD_ANCHORS.includes(value.anchor)) throw fail('CARD_VISUAL_ANCHOR_INVALID', `${field}.anchor is unsupported`, { field: `${field}.anchor` });
-  if ('dismissMode' in value && !CARD_DISMISS_MODES.includes(value.dismissMode)) throw fail('CARD_VISUAL_PROPERTY_INVALID', `${field}.dismissMode is unsupported`, { field: `${field}.dismissMode` });
-  for (const key of ['gap', 'margin', 'marginLeft', 'marginRight', 'marginTop', 'marginBottom']) if (key in value && (!Number.isInteger(value[key]) || value[key] < 0 || value[key] > (key === 'gap' ? 48 : 96))) throw fail('CARD_VISUAL_SPACING_INVALID', `${field}.${key} is out of range`, { field: `${field}.${key}` });
 }
 
 // ── Appearance ──
@@ -289,18 +271,16 @@ function validateEffects(value, field) {
 
 function normalizeType(value, type) {
   assertKnownFields(value, TYPE_FIELDS, `card.types.${type}`);
-  if ('behavior' in value) validateBehavior(value.behavior, `card.types.${type}.behavior`);
   if ('appearance' in value) validateAppearance(value.appearance, `card.types.${type}.appearance`);
   if ('properties' in value) validatePropertiesSub(value.properties, `card.types.${type}.properties`);
   if ('skin' in value) validateSkin(value.skin, `card.types.${type}.skin`);
   if ('effects' in value) validateEffects(value.effects, `card.types.${type}.effects`);
   const defaults = CARD_TYPE_DEFAULTS[type] ?? MINIMAL_CARD_DEFAULTS;
-  const behavior = { ...clone(defaults.behavior), ...clone(value.behavior ?? {}) };
   const appearance = { ...clone(defaults.appearance), ...clone(value.appearance ?? {}) };
   const properties = { ...clone(PROPERTIES_DEFAULTS), ...clone(value.properties ?? {}) };
   const skin = { ...clone(SKIN_DEFAULTS), ...clone(value.skin ?? {}) };
   const effects = { ...clone(EFFECT_DEFAULTS), ...clone(value.effects ?? {}) };
-  return { behavior, appearance, properties, skin, effects };
+  return { appearance, properties, skin, effects };
 }
 
 // ── Public API ──

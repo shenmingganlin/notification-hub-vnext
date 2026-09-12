@@ -1867,7 +1867,7 @@ test('vNext notification scene carries one resolved visual decision', async () =
   await plugin.updateVisualSettings({ profile: {
     global: { enabled: true, preset: 'minimal', intensity: 'balanced' },
     categories: { error: { enabled: true, preset: 'warning', intensity: 'expressive' } },
-    card: { types: { minimal: { behavior: { layout: 'simple', boundary: 'work-area', anchor: 'top-right', gap: 20, margin: 24 }, appearance: { size: 'large', aspectRatio: 'wide', width: 600, backgroundColor: '#123456', backgroundAssetId: null, borderRadius: 24, opacity: 0.82 } } } }
+    card: { types: { minimal: { properties: { space: { anchor: 'top-right', gap: 20, margin: 24 } }, appearance: { size: 'large', aspectRatio: 'wide', width: 600, backgroundColor: '#123456', backgroundAssetId: null, borderRadius: 24, opacity: 0.82 } } } }
   } });
   const record = plugin.notificationApi.createNotification({
     notificationId: 'notification-visual-critical',

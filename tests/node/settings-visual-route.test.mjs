@@ -16,15 +16,17 @@ test('visual settings page renders hierarchical pipeline layout', () => {
   });
   // Pipeline hierarchy
   assert.match(html, /通知视觉/);
-  assert.match(html, /卡片行为/);
+  assert.match(html, /出现方式/);
   assert.match(html, /pipeline-behavior/);
-  assert.match(html, /stack.*堆叠/);
+  assert.match(html, /axis-chip/);
+  assert.match(html, /堆叠/);
+  assert.match(html, /未实现/);
   assert.match(html, /卡片种类/);
   assert.match(html, /pipeline-type/);
-  assert.match(html, /minimal.*极简/);
-  assert.match(html, /极简卡片外观/);
-  assert.match(html, /卡片属性/);
-  assert.match(html, /卡片属性[\s\S]*皮肤/);
+  assert.match(html, /极简/);
+  assert.match(html, /卡片外观编辑器/);
+  assert.match(html, /出现方式设置/);
+  assert.match(html, /卡片外观设置/);
   assert.match(html, /皮肤/);
   assert.match(html, /skin-bg-color/);
   assert.match(html, /管理视觉素材/);
@@ -68,9 +70,11 @@ test('visual settings page renders hierarchical pipeline layout', () => {
   assert.match(html, /正在发送\/更新/);
   assert.match(html, /visual-preview-confirmation/);
   assert.match(html, /后端已确认/);
-  assert.match(html, /data-visual-mode="minimal"[^>]*aria-pressed="true"/);
-  assert.match(html, /data-visual-mode="danmaku"[^>]*aria-pressed="false"/);
-  assert.match(html, /data-visual-mode="popup"[^>]*aria-pressed="false"/);
+  assert.match(html, /data-axis="behavior" data-value="stack"[^>]*aria-pressed="true"/);
+  assert.match(html, /data-axis="behavior" data-value="ticker"[^>]*aria-disabled="true"/);
+  assert.match(html, /data-axis="behavior" data-value="popup"[^>]*aria-disabled="true"/);
+  assert.match(html, /起步预设/);
+  assert.doesNotMatch(html, /data-visual-mode/);
   assert.match(html, /if\(window.__notificationHubVisualDispose\)window.__notificationHubVisualDispose\(\)/);
   assert.match(html, /previewGeneration/);
   assert.match(html, /previewPending&&previewOpen/);
@@ -102,8 +106,8 @@ test('visual mode editor drives the active type and keeps preview in document fl
   const html = renderVisualSettingsPage('/settings-visual', {
     profile: { global: { enabled: true }, card: { activeType: 'popup', types: { popup: { appearance: { width: 480, height: 260 } } } } }
   });
-  assert.match(html, /data-editor-mode="popup"/);
-  assert.match(html, /id="pipeline-behavior"[^>]*>[\s\S]*popup/);
+  assert.match(html, /data-editor-mode="minimal"/);
+  assert.match(html, /id="pipeline-behavior"[\s\S]*?value="popup" selected/);
   assert.match(html, /id="prop-width"[^>]*value="480"/);
   assert.match(html, /id="prop-height"[^>]*value="260"/);
   assert.match(html, /id="visual-preview-floating"/);
@@ -126,7 +130,7 @@ test('visual mode editor drives the active type and keeps preview in document fl
   assert.match(html, /grid-template-areas:"preview" "sidebar" "editor"/);
   assert.match(html, /stage-popup\{top:auto;right:10px;bottom:10px;left:auto;transform:none\}/);
   assert.doesNotMatch(html, /visual-preview-drag-handle|previewDragHandle/);
-  assert.match(html, /button\.setAttribute\("aria-pressed",active\?"true":"false"\)/);
+  assert.match(html, /setAttribute\("aria-pressed",active\?"true":"false"\)/);
   assert.match(html, /bindStageDrag/);
   assert.match(html, /pointerdown/);
 });
@@ -251,9 +255,9 @@ test('visual settings fragment passes pipeline structure', () => {
     status: 'saved'
   });
   assert.match(fragment, /visual-workbench/);
-  assert.match(fragment, /卡片行为/);
+  assert.match(fragment, /出现方式/);
   assert.match(fragment, /卡片种类/);
-  assert.match(fragment, /卡片属性/);
+  assert.match(fragment, /卡片外观设置/);
   assert.match(fragment, /皮肤/);
   assert.match(fragment, /pipeline-type/);
   assert.match(fragment, /pipeline-behavior/);
@@ -264,7 +268,7 @@ test('visual settings fragment passes pipeline structure', () => {
   assert.match(fragment, /visual-settings-save/);
   assert.match(fragment, /visual-assets-open/);
   assert.match(fragment, /<details/);
-  assert.match(fragment, /<details class="editor-accordion" open>[\s\S]*id="prop-size"/);
+  assert.match(fragment, /<details class="editor-accordion" open>[\s\S]*id="prop-anchor"/);
   assert.match(fragment, /<details class="editor-accordion"[\s\S]*id="visual-assets-open"/);
   assert.doesNotMatch(fragment, /<[^>]+visibility:hidden/);
   assert.doesNotMatch(fragment, /<\/main>/);
