@@ -119,7 +119,7 @@ export * from './domain/notification-store-snapshot.js';
 export * from './domain/notification-store-store.js';
 export * from './domain/notification-store-persistence.js';
 
-export const pluginVersion = '0.1.4';
+export const pluginVersion = '0.1.5';
 export const pluginName = 'notification-hub-vnext';
 export const RUNTIME_TEST_CARD_PREFIX = 'nh-vnext-test-';
 export const VISUAL_WORKBENCH_CARD_PREFIX = 'nh-visual-workbench-';
