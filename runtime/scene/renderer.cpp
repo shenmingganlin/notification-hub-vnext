@@ -20,6 +20,8 @@
 #include <cctype>
 #include <cstdint>
 #include <cstdlib>
+#include <string>
+#include <string_view>
 #include <vector>
 
 namespace notification_hub::scene {
@@ -42,6 +44,32 @@ D2D1_COLOR_F hex_color(std::string_view value, float alpha) {
     return color(static_cast<float>((rgb >> 16) & 0xff) / 255.0f,
         static_cast<float>((rgb >> 8) & 0xff) / 255.0f,
         static_cast<float>(rgb & 0xff) / 255.0f, alpha);
+}
+
+void draw_outlined_text(
+    ID2D1DeviceContext* context,
+    std::wstring_view text,
+    IDWriteTextFormat* format,
+    const D2D1_RECT_F& rect,
+    ID2D1Brush* fill,
+    ID2D1Brush* stroke) {
+    if (context == nullptr || format == nullptr || fill == nullptr || text.empty()) return;
+    constexpr float offset = 1.35f;
+    if (stroke != nullptr) {
+        const float deltas[] = {-offset, 0.0f, offset};
+        for (const auto dx : deltas) {
+            for (const auto dy : deltas) {
+                if (dx == 0.0f && dy == 0.0f) continue;
+                context->DrawText(
+                    text.data(), static_cast<UINT32>(text.size()), format,
+                    D2D1::RectF(rect.left + dx, rect.top + dy, rect.right + dx, rect.bottom + dy),
+                    stroke, D2D1_DRAW_TEXT_OPTIONS_ENABLE_COLOR_FONT);
+            }
+        }
+    }
+    context->DrawText(
+        text.data(), static_cast<UINT32>(text.size()), format, rect,
+        fill, D2D1_DRAW_TEXT_OPTIONS_ENABLE_COLOR_FONT);
 }
 
 HRESULT create_d3d_device(ComPtr<ID3D11Device>& device, ComPtr<ID3D11DeviceContext>& context) {
@@ -100,6 +128,7 @@ struct CardRenderer::Impl {
     ComPtr<ID2D1SolidColorBrush> body_brush;
     ComPtr<ID2D1SolidColorBrush> close_background_brush;
     ComPtr<ID2D1SolidColorBrush> close_icon_brush;
+    ComPtr<ID2D1SolidColorBrush> text_stroke_brush;
     ComPtr<ID2D1Bitmap1> cpu_readback_bitmap;
     ComPtr<IWICImagingFactory> wic_factory;
     ComPtr<ID2D1Bitmap> background_bitmap;
@@ -183,6 +212,9 @@ bool CardRenderer::initialize(void* native_window, int width, int height) {
     if (FAILED(result)) return false;
     result = impl_->d2d_context->CreateSolidColorBrush(
         color(0.82f, 0.88f, 0.88f, 1.0f), &impl_->close_icon_brush);
+    if (FAILED(result)) return false;
+    result = impl_->d2d_context->CreateSolidColorBrush(
+        color(0.04f, 0.05f, 0.05f, 0.92f), &impl_->text_stroke_brush);
     if (FAILED(result)) return false;
 
     impl_->ready = true;
@@ -382,7 +414,7 @@ bool CardRenderer::capture_offscreen(std::wstring_view title, std::wstring_view 
     auto bounds = card_bounds(width, height);
     if (visual.specified) {
         bounds.radius = static_cast<float>(visual.border_radius);
-        if (visual.card_type == "danmaku") bounds.radius = (std::min)(bounds.radius, 12.0f);
+        if (visual.card_type == "danmaku" || visual.ticker_specified) bounds.radius = (std::min)(bounds.radius, 12.0f);
         if (visual.card_type == "popup") bounds.radius = (std::max)(bounds.radius, 22.0f);
     }
     auto* surface_brush = impl_->surface_brush.Get();
@@ -442,9 +474,10 @@ bool CardRenderer::capture_offscreen(std::wstring_view title, std::wstring_view 
         }
         impl_->d2d_context->DrawBitmap(impl_->background_bitmap.Get(), dest, visual.opacity, D2D1_INTERPOLATION_MODE_LINEAR, nullptr);
     }
-    if (visual.card_type == "danmaku") {
+    const bool ticker_card = visual.ticker_specified || visual.card_type == "danmaku";
+    if (visual.card_type == "danmaku" || ticker_card) {
         impl_->d2d_context->FillRectangle(
-            D2D1::RectF(bounds.left, bounds.bottom - 5.0f, (std::max)(20.0f, bounds.right), bounds.bottom),
+            D2D1::RectF(bounds.left, bounds.bottom - 4.0f, (std::max)(20.0f, bounds.right), bounds.bottom),
             accent_brush);
     } else {
         impl_->d2d_context->FillRectangle(
@@ -452,34 +485,55 @@ bool CardRenderer::capture_offscreen(std::wstring_view title, std::wstring_view 
             accent_brush);
     }
 
-    const auto close_button = close_button_bounds(width, height);
-    const auto close_center_x = (close_button.left + close_button.right) * 0.5f;
-    const auto close_center_y = (close_button.top + close_button.bottom) * 0.5f;
-    const auto close_radius = (close_button.right - close_button.left) * 0.5f;
-    impl_->d2d_context->FillEllipse(
-        D2D1::Ellipse(D2D1::Point2F(close_center_x, close_center_y), close_radius, close_radius),
-        impl_->close_background_brush.Get());
-    constexpr float icon_padding = 8.0f;
-    impl_->d2d_context->DrawLine(
-        D2D1::Point2F(close_button.left + icon_padding, close_button.top + icon_padding),
-        D2D1::Point2F(close_button.right - icon_padding, close_button.bottom - icon_padding),
-        impl_->close_icon_brush.Get(), 1.5f);
-    impl_->d2d_context->DrawLine(
-        D2D1::Point2F(close_button.right - icon_padding, close_button.top + icon_padding),
-        D2D1::Point2F(close_button.left + icon_padding, close_button.bottom - icon_padding),
-        impl_->close_icon_brush.Get(), 1.5f);
+    if (ticker_card) {
+        const float text_left = bounds.left + 14.0f;
+        const float text_right = (std::max)(text_left + 24.0f, bounds.right - 14.0f);
+        const bool two_lines = !body.empty() && height >= 70.0f;
+        if (two_lines) {
+            draw_outlined_text(
+                impl_->d2d_context.Get(), title, impl_->title_format.Get(),
+                D2D1::RectF(text_left, bounds.top + 6.0f, text_right, bounds.top + 34.0f),
+                impl_->title_brush.Get(), impl_->text_stroke_brush.Get());
+            draw_outlined_text(
+                impl_->d2d_context.Get(), body, impl_->body_format.Get(),
+                D2D1::RectF(text_left, bounds.top + 34.0f, text_right, bounds.bottom - 6.0f),
+                impl_->title_brush.Get(), impl_->text_stroke_brush.Get());
+        } else {
+            draw_outlined_text(
+                impl_->d2d_context.Get(), title.empty() ? body : title, impl_->title_format.Get(),
+                D2D1::RectF(text_left, bounds.top + 8.0f, text_right, bounds.bottom - 8.0f),
+                impl_->title_brush.Get(), impl_->text_stroke_brush.Get());
+        }
+    } else {
+        const auto close_button = close_button_bounds(width, height);
+        const auto close_center_x = (close_button.left + close_button.right) * 0.5f;
+        const auto close_center_y = (close_button.top + close_button.bottom) * 0.5f;
+        const auto close_radius = (close_button.right - close_button.left) * 0.5f;
+        impl_->d2d_context->FillEllipse(
+            D2D1::Ellipse(D2D1::Point2F(close_center_x, close_center_y), close_radius, close_radius),
+            impl_->close_background_brush.Get());
+        constexpr float icon_padding = 8.0f;
+        impl_->d2d_context->DrawLine(
+            D2D1::Point2F(close_button.left + icon_padding, close_button.top + icon_padding),
+            D2D1::Point2F(close_button.right - icon_padding, close_button.bottom - icon_padding),
+            impl_->close_icon_brush.Get(), 1.5f);
+        impl_->d2d_context->DrawLine(
+            D2D1::Point2F(close_button.right - icon_padding, close_button.top + icon_padding),
+            D2D1::Point2F(close_button.left + icon_padding, close_button.bottom - icon_padding),
+            impl_->close_icon_brush.Get(), 1.5f);
 
-    const float text_left = visual.card_type == "popup" ? 36.0f : 30.0f;
-    const float title_top = visual.card_type == "danmaku" ? 18.0f : 24.0f;
-    const float body_top = visual.card_type == "danmaku" ? 46.0f : 62.0f;
-    impl_->d2d_context->DrawText(
-        title.data(), static_cast<UINT32>(title.size()), impl_->title_format.Get(),
-        D2D1::RectF(text_left, title_top, (std::max)(36.0f, close_button.left - 8.0f), body_top - 4.0f),
-        impl_->title_brush.Get(), D2D1_DRAW_TEXT_OPTIONS_ENABLE_COLOR_FONT);
-    impl_->d2d_context->DrawText(
-        body.data(), static_cast<UINT32>(body.size()), impl_->body_format.Get(),
-        D2D1::RectF(text_left, body_top, (std::max)(36.0f, width - 24.0f), (std::max)(72.0f, height - (visual.card_type == "danmaku" ? 18.0f : 22.0f))),
-        impl_->body_brush.Get(), D2D1_DRAW_TEXT_OPTIONS_ENABLE_COLOR_FONT);
+        const float text_left = visual.card_type == "popup" ? 36.0f : 30.0f;
+        const float title_top = 24.0f;
+        const float body_top = 62.0f;
+        impl_->d2d_context->DrawText(
+            title.data(), static_cast<UINT32>(title.size()), impl_->title_format.Get(),
+            D2D1::RectF(text_left, title_top, (std::max)(36.0f, close_button.left - 8.0f), body_top - 4.0f),
+            impl_->title_brush.Get(), D2D1_DRAW_TEXT_OPTIONS_ENABLE_COLOR_FONT);
+        impl_->d2d_context->DrawText(
+            body.data(), static_cast<UINT32>(body.size()), impl_->body_format.Get(),
+            D2D1::RectF(text_left, body_top, (std::max)(36.0f, width - 24.0f), (std::max)(72.0f, height - 22.0f)),
+            impl_->body_brush.Get(), D2D1_DRAW_TEXT_OPTIONS_ENABLE_COLOR_FONT);
+    }
 
     result = impl_->d2d_context->EndDraw();
     impl_->d2d_context->SetTarget(nullptr);

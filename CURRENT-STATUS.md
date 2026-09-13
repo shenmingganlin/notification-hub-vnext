@@ -1,5 +1,36 @@
 # 当前状态快照（2026-08-15，Windows）
 
+## 2026-09-13 0.1.6 冻结
+
+真机确认弹幕工作室「帅呆」后封口。版本停在 0.1.6，不升号。工作室排版、协议、Native 声音、通知历史不再改。
+
+- 验收包：`dist/notification-hub-vnext-0.1.6.zip`
+- SHA256：`2BD878DEF7D8CCFCD47FA0482E8444BC0D1B967AC0FBBA201B3F226A7BB54D88`
+- 已验收：默认安静、事件自选飞或叠、弹幕怎么流竖读、随机可点、异轨间距、试一条走草稿
+- 真机还需摸：标题旁「清除屏幕上的视觉卡」（清屏幕卡，不动通知历史）
+- 下一刀产品：皮肤（背景素材 / 裁切）。突脸、悬停暂停、溢出策略不做
+
+## 2026-09-12 通知视觉页 · 试一条贴标题、走草稿
+
+真机发现试一条在设置壳里掉到折页下，且测的是事件已绑定配置包，不是当前工作室。
+
+- 试一条挪到标题行，贴着保存
+- `POST /visual-try-one` 用 `collect()` 草稿出一张真实卡，不要求绑定事件，不写历史
+- 弹幕草稿带 `behavior.ticker` + `visual.ticker`；折叠区「实验细节」仍测已绑定事件
+- 测试：`settings-visual-route` + `plugin-visual-api` 全绿
+- 版本仍 0.1.6；已拷到 `~/.hanako/plugins/notification-hub-vnext`，需重载插件后真机才吃到
+
+## 2026-09-12 通知视觉页 · 卡片工作室落地
+
+用户确认静态稿后，生产页从工程工作台收成卡片工作室。
+
+- 规格：`docs/superpowers/specs/2026-09-12-visual-studio-elegance.md`
+- 静态稿：`docs/superpowers/prototypes/visual-studio-elegance.html`
+- 生产：`plugin/routes/settings-visual.js`；测试 `tests/node/settings-visual-route.test.mjs`
+- 第一屏：出现方式芯片 → 当前旋钮 → 卡片外观 → 单通道预览 + 保存
+- 配置包 / 应用到事件 / 实验细节 / 诊断默认折叠
+- Native、声音、协议未改；版本仍 0.1.6
+
 ## 2026-09-12 卡片两轴分离（根修复）+ 设置页两轴重构
 
 背景：`CARD_TYPES` 在不同文件里有两个矛盾定义——`card-composition-contract.js` 把卡片种类定义为内容结构（未接线），而运行时 `card-visual-settings.js` 把「外观＋出现方式」揉成 `minimal/danmaku/popup`。同时系统里另有一条真实行为轴（表现绑定的 `behaviorProfileId`）。

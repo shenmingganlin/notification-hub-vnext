@@ -24,6 +24,19 @@ const DEFAULT_BEHAVIOR = Object.freeze({
 const NATIVE_VISUAL_CATEGORIES = new Set(['chat', 'channel', 'tool', 'error', 'plugin', 'model_service']);
 const NATIVE_DISMISS_MODES = new Set(['closeButton', 'anywhere', 'timeout', 'buttonOnly']);
 
+// Ticker 行为参数（ticker 契约 §2）。Native 侧只接受已实现的值域。
+const NATIVE_TICKER_BANDS = new Set(['top', 'bottom']);
+const NATIVE_TICKER_OVERFLOWS = new Set(['avoid', 'queue']);
+const NATIVE_TICKER_LIMITS = Object.freeze({ speed: [150, 800], bandRatio: [0.15, 1], minGap: [24, 160], trackGap: [0, 48] });
+function clampInteger(value, fallback, bounds) {
+  if (!Number.isInteger(value)) return fallback;
+  return Math.max(bounds[0], Math.min(bounds[1], value));
+}
+function clampNumber(value, fallback, bounds) {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return fallback;
+  return Math.max(bounds[0], Math.min(bounds[1], value));
+}
+
 const DEFAULT_APPEARANCE = Object.freeze({
   size: 'medium',
   aspectRatio: 'default',
@@ -125,6 +138,24 @@ export function projectNativeVisualPayload(visual = {}) {
   };
   if (typeof appearance.backgroundAssetId === 'string' && appearance.backgroundAssetId.length > 0) {
     projected.appearance.backgroundAssetId = appearance.backgroundAssetId;
+  }
+  // Ticker 参数只在卡片确实携带时下发；缺省时 Native 用自己的默认值，
+  // 因此旧客户端不发这个字段时行为与今日一致（向后兼容）。
+  const ticker = visual.ticker;
+  if (ticker && typeof ticker === 'object' && !Array.isArray(ticker)) {
+    projected.ticker = {
+      speedPxPerSec: clampInteger(ticker.speedPxPerSec, 400, NATIVE_TICKER_LIMITS.speed),
+      band: NATIVE_TICKER_BANDS.has(ticker.band) ? ticker.band : 'top',
+      bandRatio: clampNumber(ticker.bandRatio, 0.28, NATIVE_TICKER_LIMITS.bandRatio),
+      trackCount: Number.isInteger(ticker.trackCount) && ticker.trackCount >= 0 ? ticker.trackCount : 0,
+      trackGapPx: clampInteger(ticker.trackGapPx, 8, NATIVE_TICKER_LIMITS.trackGap),
+      minGapPx: clampInteger(ticker.minGapPx, 64, NATIVE_TICKER_LIMITS.minGap),
+      clickThrough: ticker.clickThrough !== false,
+      hoverPause: ticker.hoverPause === true,
+      overflow: NATIVE_TICKER_OVERFLOWS.has(ticker.overflow) ? ticker.overflow : 'avoid'
+    };
+    // 弹幕只做出屏回收，不用堆叠的 timeout 中途掐掉。
+    if (projected.interaction.dismissMode === 'timeout') projected.interaction.dismissMode = 'closeButton';
   }
   return projected;
 }

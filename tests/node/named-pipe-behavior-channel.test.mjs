@@ -137,10 +137,32 @@ test('Native Runtime isolates behavior-channel layout and lifecycle', async (t) 
   const a2 = card(snapshot, 'channel-a-2');
   const b1 = card(snapshot, 'channel-b-1');
   const b2 = card(snapshot, 'channel-b-2');
+  // stack 通道仍走静态布局 → 精确断言（ADR-003 红线，不得改变）
   assert.deepEqual([a1.x, a1.y], [0, 0]);
   assert.deepEqual([a2.x, a2.y], [0, 180]);
-  assert.deepEqual([b1.x, b1.y], [600, 0]);
-  assert.deepEqual([b2.x, b2.y], [600, 180]);
+  // ticker 通道改为「时间驱动」的弹幕模型（ADR-003 / ticker 契约 §2.1）：
+  // 位置是挂钟时间的函数，因此精确 x 不可断言；此处只断言确定性的轨道不变量。
+  // 本用例 band = 800 × 0.28 = 224，卡高 160 + 轨内 8 = 168 → 恰好 1 条轨道。
+  assert.equal(b1.y, 0, 'ticker card sits on the lane-top auto track');
+  assert.equal(b2.y, 0, 'a 224px band yields exactly one auto track');
+  assert.ok(Number.isFinite(b1.x) && Number.isFinite(b2.x));
+  // overlay lane：弹幕从 1200 右缘出生，不再被切到半屏中线（旧行为约 x=600）。
+  assert.ok(b1.x > 900, `ticker spawn x should be near the 1200px work-area right edge, got ${b1.x}`);
+
+  // 心跳验证：弹幕位置随时间左移——这是本 slice 的核心能力。
+  const tickerAdvanced = async () => {
+    const readX = async () => card(
+      (await client.request('health', {}, { retryable: false })).payload.result.sceneStateSnapshot,
+      'channel-b-1').x;
+    const before = await readX();
+    const deadline = Date.now() + 1200;
+    while (Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 80));
+      if ((await readX()) < before) return true;
+    }
+    return false;
+  };
+  assert.ok(await tickerAdvanced(), 'ticker card must advance left over time (heartbeat)');
 
   await client.request('scene.dismiss', { id: 'channel-a-1' }, { retryable: false });
   const reflowed = await client.request('health', {}, { retryable: false });
@@ -151,8 +173,9 @@ test('Native Runtime isolates behavior-channel layout and lifecycle', async (t) 
     { channelId: 'ticker.main', profileId: 'ticker', cardOrder: ['channel-b-1', 'channel-b-2'] }
   ]);
   assert.deepEqual([card(reflowedSnapshot, 'channel-a-2').x, card(reflowedSnapshot, 'channel-a-2').y], [0, 0]);
-  assert.deepEqual([card(reflowedSnapshot, 'channel-b-1').x, card(reflowedSnapshot, 'channel-b-1').y], [600, 0]);
-  assert.deepEqual([card(reflowedSnapshot, 'channel-b-2').x, card(reflowedSnapshot, 'channel-b-2').y], [600, 180]);
+  // ticker 卡片不受 stack 通道重排影响，仍留在自己的弹幕带轨道上。
+  assert.equal(card(reflowedSnapshot, 'channel-b-1').y, 0);
+  assert.equal(card(reflowedSnapshot, 'channel-b-2').y, 0);
 
   await client.request('scene.dismiss', { id: 'channel-a-2' }, { retryable: false });
   const isolated = await client.request('health', {}, { retryable: false });
@@ -161,14 +184,15 @@ test('Native Runtime isolates behavior-channel layout and lifecycle', async (t) 
   assert.deepEqual(isolatedSnapshot.behaviorChannels, [
     { channelId: 'ticker.main', profileId: 'ticker', cardOrder: ['channel-b-1', 'channel-b-2'] }
   ]);
-  assert.deepEqual([card(isolatedSnapshot, 'channel-b-1').x, card(isolatedSnapshot, 'channel-b-1').y], [0, 0]);
-  assert.deepEqual([card(isolatedSnapshot, 'channel-b-2').x, card(isolatedSnapshot, 'channel-b-2').y], [340, 0]);
+  // 只剩 ticker 通道时 lane 扩为全宽，但弹幕位置仍是时间函数 → 断轨道不变量。
+  assert.equal(card(isolatedSnapshot, 'channel-b-1').y, 0);
+  assert.equal(card(isolatedSnapshot, 'channel-b-2').y, 0);
 
   await client.request('scene.dismiss', { id: 'channel-b-1' }, { retryable: false });
   const finalState = await client.request('health', {}, { retryable: false });
   const finalSnapshot = finalState.payload.result.sceneStateSnapshot;
   assert.deepEqual(finalSnapshot.cardOrder, ['channel-b-2']);
-  assert.deepEqual([card(finalSnapshot, 'channel-b-2').x, card(finalSnapshot, 'channel-b-2').y], [0, 0]);
+  assert.equal(card(finalSnapshot, 'channel-b-2').y, 0);
 
   const shutdown = await client.request('shutdown');
   assert.equal(shutdown.type, 'ack');

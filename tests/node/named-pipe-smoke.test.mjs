@@ -147,7 +147,9 @@ test('Node client completes hello, health, and shutdown over Named Pipe', async 
     category: 'error',
     cardType: 'minimal',
     behavior: { layout: 'simple', boundary: 'work-area' },
-    appearance: { size: 'large', aspectRatio: 'wide', backgroundColor: '#123456', backgroundFit: 'fill', backgroundPadding: 0, borderRadius: 24, opacity: 0.82 }
+    appearance: { size: 'large', aspectRatio: 'wide', backgroundColor: '#123456', backgroundFit: 'fill', backgroundPadding: 0, borderRadius: 24, opacity: 0.82 },
+    // Runtime 始终回显已解析的交互设置（dismissMode 已在视觉页解锁，见收敛轮次）。
+    interaction: { dismissMode: 'closeButton', closeButtonPosition: 'top-right', timeoutMs: 30000 }
   });
   assert.deepEqual(firstCard.payload.result.workArea, initialWorkArea);
 

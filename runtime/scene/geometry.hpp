@@ -20,7 +20,10 @@ struct CloseButtonBounds {
 };
 
 inline CardBounds card_bounds(float width, float height) noexcept {
-    return CardBounds{10.0f, 10.0f, width - 10.0f, height - 10.0f, 14.0f};
+    // 76px 弹幕条用 10px inset 会把字挤进 56px；矮卡收成 4px。
+    const float inset = height < 96.0f ? 4.0f : 10.0f;
+    const float radius = height < 96.0f ? 10.0f : 14.0f;
+    return CardBounds{inset, inset, width - inset, height - inset, radius};
 }
 
 inline CloseButtonBounds close_button_bounds(float width, float height) noexcept {

@@ -253,7 +253,7 @@ bool parse_visual_style(std::string_view payload, size_t& position, scene::Visua
         while (true) { skip(); if (position < payload.size() && payload[position] == '}') { ++position; return true; } std::string key; if (!parse_json_string_token(payload, position, key) || !consume(':') || !parser(key)) return false; skip(); if (position < payload.size() && payload[position] == ',') { ++position; continue; } if (position < payload.size() && payload[position] == '}') { ++position; return true; } return false; }
     };
     if (!consume('{')) return false;
-    bool seen_enabled = false, seen_preset = false, seen_intensity = false, seen_category = false, seen_card_type = false, seen_behavior = false, seen_appearance = false, seen_interaction = false;
+    bool seen_enabled = false, seen_preset = false, seen_intensity = false, seen_category = false, seen_card_type = false, seen_behavior = false, seen_appearance = false, seen_interaction = false, seen_ticker = false;
     visual.specified = true;
     while (true) {
         skip(); if (position < payload.size() && payload[position] == '}') { ++position; break; }
@@ -269,6 +269,9 @@ bool parse_visual_style(std::string_view payload, size_t& position, scene::Visua
             if (!parse_object([&](const std::string& nested) { double number{}; if (nested == "size") return parse_json_string_token(payload, position, visual.size); if (nested == "aspectRatio") return parse_json_string_token(payload, position, visual.aspect_ratio); if (nested == "backgroundColor") return parse_json_string_token(payload, position, visual.background_color); if (nested == "backgroundAssetId") return parse_json_string_token(payload, position, visual.background_asset_id); if (nested == "backgroundFit") return parse_json_string_token(payload, position, visual.background_fit); if (nested == "backgroundPadding") { if (!parse_number(number)) return false; visual.background_padding = static_cast<float>(number); return true; } if (nested == "borderRadius") { if (!parse_number(number)) return false; visual.border_radius = static_cast<int>(number); return true; } if (nested == "opacity") { if (!parse_number(number)) return false; visual.opacity = static_cast<float>(number); return true; } return false; })) return false; seen_appearance = true;
         } else if (key == "interaction" && !seen_interaction) {
             if (!parse_object([&](const std::string& nested) { double number{}; if (nested == "dismissMode") return parse_json_string_token(payload, position, visual.dismiss_mode); if (nested == "closeButtonPosition") return parse_json_string_token(payload, position, visual.close_button_position); if (nested == "timeoutMs") { if (!parse_number(number)) return false; visual.dismiss_timeout_ms = static_cast<int>(number); return true; } return false; })) return false; seen_interaction = true;
+        } else if (key == "ticker" && !seen_ticker) {
+            if (!parse_object([&](const std::string& nested) { double number{}; if (nested == "speedPxPerSec") { if (!parse_number(number)) return false; visual.ticker_speed_px_per_second = static_cast<int>(number); return true; } if (nested == "band") return parse_json_string_token(payload, position, visual.ticker_band); if (nested == "bandRatio") { if (!parse_number(number)) return false; visual.ticker_band_ratio = number; return true; } if (nested == "trackCount") { if (!parse_number(number)) return false; visual.ticker_track_count = static_cast<int>(number); return true; } if (nested == "trackGapPx") { if (!parse_number(number)) return false; visual.ticker_track_gap_px = static_cast<int>(number); return true; } if (nested == "minGapPx") { if (!parse_number(number)) return false; visual.ticker_min_gap_px = static_cast<int>(number); return true; } if (nested == "clickThrough") return parse_json_bool_token(payload, position, visual.ticker_click_through); if (nested == "hoverPause") return parse_json_bool_token(payload, position, visual.ticker_hover_pause); if (nested == "overflow") return parse_json_string_token(payload, position, visual.ticker_overflow); return false; })) return false;
+            visual.ticker_specified = true; seen_ticker = true;
         } else return false;
         skip(); if (position < payload.size() && payload[position] == ',') { ++position; continue; } if (position < payload.size() && payload[position] == '}') { ++position; break; } return false;
     }
@@ -660,6 +663,8 @@ int run_named_pipe_server(std::string_view pipe_name, bool drop_after_health, bo
                     return 12;
                 }
             }
+            // 心跳：仅在存在 ticker 卡片时推进动画；无卡片时立即返回（空闲零开销）。
+            scene_controller.tick_animation();
             DWORD bytes_available = 0;
             if (!PeekNamedPipe(pipe, nullptr, 0, nullptr, &bytes_available, nullptr)) {
                 const auto error = GetLastError();

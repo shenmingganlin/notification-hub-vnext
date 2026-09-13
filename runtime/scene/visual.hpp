@@ -28,6 +28,18 @@ struct VisualStyle {
     float background_padding{0.0f};
     int border_radius{16};
     float opacity{0.96f};
+    // Ticker（弹幕）行为参数（ticker 契约 §2）。仅当卡片确实携带时生效；
+    // 参数属行为/通道，此处随卡片下发，通道取用同一份。
+    bool ticker_specified{};
+    int ticker_speed_px_per_second{400};
+    std::string ticker_band{"top"};
+    double ticker_band_ratio{0.28};
+    int ticker_track_count{0};
+    int ticker_track_gap_px{8};
+    int ticker_min_gap_px{64};
+    bool ticker_click_through{true};
+    bool ticker_hover_pause{};
+    std::string ticker_overflow{"avoid"};
 };
 
 inline bool valid_visual_style(const VisualStyle& style) {
@@ -58,6 +70,16 @@ inline bool valid_visual_style(const VisualStyle& style) {
     }
     if (style.border_radius < 0 || style.border_radius > 48) return false;
     if (style.opacity < 0.0f || style.opacity > 1.0f) return false;
+    if (style.ticker_specified) {
+        if (style.ticker_speed_px_per_second < 150 || style.ticker_speed_px_per_second > 800) return false;
+        if (style.ticker_band != "top" && style.ticker_band != "bottom") return false;
+        if (!(style.ticker_band_ratio >= 0.15 && style.ticker_band_ratio <= 1.0)) return false;
+        // 0 = 自动；显式条数只设下限，**不设上限**（满屏弹幕）。
+        if (style.ticker_track_count < 0) return false;
+        if (style.ticker_track_gap_px < 0 || style.ticker_track_gap_px > 48) return false;
+        if (style.ticker_min_gap_px < 24 || style.ticker_min_gap_px > 160) return false;
+        if (style.ticker_overflow != "avoid" && style.ticker_overflow != "queue") return false;
+    }
     return true;
 }
 

@@ -5,14 +5,36 @@ export const VISUAL_PROFILE_VERSION = 2;
 // 出现方式（行为）轴词表。VISUAL_BEHAVIOR_IDS 是可表示的已知行为（含尚未实现者，用于载入旧数据）；
 // IMPLEMENTED_VISUAL_BEHAVIOR_IDS 是当前真实可用的行为，UI 只允许选择它。
 export const VISUAL_BEHAVIOR_IDS = Object.freeze(['stack', 'ticker', 'popup']);
-export const IMPLEMENTED_VISUAL_BEHAVIOR_IDS = Object.freeze(['stack']);
+export const IMPLEMENTED_VISUAL_BEHAVIOR_IDS = Object.freeze(['stack', 'ticker']);
 export const DEFAULT_VISUAL_BEHAVIOR_ID = 'stack';
+
+// Ticker（弹幕）行为参数（ticker 契约 §2，Lumen 定稿）。
+// 参数归**行为轴**而非卡片种类，所以放在 profile 顶层，不放进 card.types。
+export const TICKER_DEFAULTS = Object.freeze({
+  speedPxPerSec: 400,
+  band: 'top',
+  bandRatio: 0.28,
+  trackCount: 3, // 工作室默认显式条数；0 = 旧自动档（按 bandRatio）
+  trackGapPx: 8, // 异轨纵向间距；缺省保持旧观感
+  minGapPx: 64,
+  speedRandom: false,
+  clickThrough: true,
+  hoverPause: false,
+  overflow: 'avoid'
+});
+export const TICKER_BANDS = Object.freeze(['top', 'bottom']);
+export const TICKER_OVERFLOWS = Object.freeze(['avoid', 'queue']);
+export const TICKER_SPEED_BOUNDS = Object.freeze({ min: 150, max: 800 });
+export const TICKER_BAND_RATIO_BOUNDS = Object.freeze({ min: 0.15, max: 1 });
+export const TICKER_MIN_GAP_BOUNDS = Object.freeze({ min: 24, max: 160 });
+export const TICKER_TRACK_GAP_BOUNDS = Object.freeze({ min: 0, max: 48 });
+const TICKER_FIELDS = Object.freeze(['speedPxPerSec', 'band', 'bandRatio', 'trackCount', 'trackGapPx', 'minGapPx', 'speedRandom', 'clickThrough', 'hoverPause', 'overflow']);
 export { createCardVisualSettings, cardVisualDefaults, createCardProperties, createCardSkin, createCardEffect } from './card-visual-settings.js';
 export const VISUAL_CATEGORIES = Object.freeze(['chat', 'channel', 'tool', 'error', 'plugin', 'model_service']);
 export const VISUAL_PRESETS = Object.freeze(['minimal', 'soft', 'accent', 'warning', 'critical']);
 export const VISUAL_INTENSITIES = Object.freeze(['reduced', 'balanced', 'expressive']);
 
-const PROFILE_FIELDS = Object.freeze(['version', 'global', 'categories', 'visualProfiles', 'rules', 'card', 'behaviorId', 'propertiesId', 'skinId', 'effectConfigId']);
+const PROFILE_FIELDS = Object.freeze(['version', 'global', 'categories', 'visualProfiles', 'rules', 'card', 'behaviorId', 'ticker', 'propertiesId', 'skinId', 'effectConfigId']);
 const POLICY_FIELDS = Object.freeze(['enabled', 'preset', 'intensity', 'defaultMode']);
 const VISUAL_PROFILE_ID_PATTERN = /^[a-z0-9][a-z0-9._-]{0,79}$/i;
 const CATEGORY_DEFAULTS = Object.freeze({
@@ -24,6 +46,7 @@ const CATEGORY_DEFAULTS = Object.freeze({
   model_service: 'warning'
 });
 const DEFAULT_GLOBAL = Object.freeze({ enabled: true, preset: 'minimal', intensity: 'balanced', defaultMode: 'off' });
+export const VALID_DEFAULT_MODES = Object.freeze(['off', 'stack', 'ticker']);
 
 function fail(code, message, details = {}) {
   return Object.assign(new Error(message), { code, details });
@@ -74,6 +97,61 @@ function validateVisualProfiles(value) {
   }));
 }
 
+export function createTickerSettings(input = {}) {
+  if (!plain(input)) throw fail('VISUAL_PROFILE_FIELD_INVALID', 'ticker must be a plain object', { field: 'ticker' });
+  for (const key of Object.keys(input)) {
+    if (!TICKER_FIELDS.includes(key)) throw fail('VISUAL_PROFILE_FIELD_UNKNOWN', `Unknown ticker field: ${key}`, { field: `ticker.${key}` });
+  }
+  const band = input.band ?? TICKER_DEFAULTS.band;
+  if (!TICKER_BANDS.includes(band)) throw fail('VISUAL_PROFILE_TICKER_INVALID', 'ticker.band must be "top" or "bottom"', { field: 'ticker.band' });
+  const bandRatio = input.bandRatio ?? TICKER_DEFAULTS.bandRatio;
+  if (typeof bandRatio !== 'number' || !Number.isFinite(bandRatio)
+    || bandRatio < TICKER_BAND_RATIO_BOUNDS.min || bandRatio > TICKER_BAND_RATIO_BOUNDS.max) {
+    throw fail('VISUAL_PROFILE_TICKER_INVALID', 'ticker.bandRatio must be a number between 0.15 and 1', { field: 'ticker.bandRatio' });
+  }
+  const speedPxPerSec = input.speedPxPerSec ?? TICKER_DEFAULTS.speedPxPerSec;
+  if (!Number.isInteger(speedPxPerSec)
+    || speedPxPerSec < TICKER_SPEED_BOUNDS.min || speedPxPerSec > TICKER_SPEED_BOUNDS.max) {
+    throw fail('VISUAL_PROFILE_TICKER_INVALID', 'ticker.speedPxPerSec must be an integer between 150 and 800', { field: 'ticker.speedPxPerSec' });
+  }
+  const minGapPx = input.minGapPx ?? TICKER_DEFAULTS.minGapPx;
+  if (!Number.isInteger(minGapPx)
+    || minGapPx < TICKER_MIN_GAP_BOUNDS.min || minGapPx > TICKER_MIN_GAP_BOUNDS.max) {
+    throw fail('VISUAL_PROFILE_TICKER_INVALID', 'ticker.minGapPx must be an integer between 24 and 160', { field: 'ticker.minGapPx' });
+  }
+  const trackGapPx = input.trackGapPx ?? TICKER_DEFAULTS.trackGapPx;
+  if (!Number.isInteger(trackGapPx)
+    || trackGapPx < TICKER_TRACK_GAP_BOUNDS.min || trackGapPx > TICKER_TRACK_GAP_BOUNDS.max) {
+    throw fail('VISUAL_PROFILE_TICKER_INVALID', 'ticker.trackGapPx must be an integer between 0 and 48', { field: 'ticker.trackGapPx' });
+  }
+  // trackCount 只设下限：0 = 自动，显式条数**不设上限**（甘霖：不要上限，要满屏弹幕）。
+  const trackCount = input.trackCount ?? TICKER_DEFAULTS.trackCount;
+  if (!Number.isInteger(trackCount) || trackCount < 0) {
+    throw fail('VISUAL_PROFILE_TICKER_INVALID', 'ticker.trackCount must be a non-negative integer (0 = auto)', { field: 'ticker.trackCount' });
+  }
+  const speedRandom = input.speedRandom ?? TICKER_DEFAULTS.speedRandom;
+  if (typeof speedRandom !== 'boolean') throw fail('VISUAL_PROFILE_TICKER_INVALID', 'ticker.speedRandom must be boolean', { field: 'ticker.speedRandom' });
+  const clickThrough = input.clickThrough ?? TICKER_DEFAULTS.clickThrough;
+  if (typeof clickThrough !== 'boolean') throw fail('VISUAL_PROFILE_TICKER_INVALID', 'ticker.clickThrough must be boolean', { field: 'ticker.clickThrough' });
+  const hoverPause = input.hoverPause ?? TICKER_DEFAULTS.hoverPause;
+  if (typeof hoverPause !== 'boolean') throw fail('VISUAL_PROFILE_TICKER_INVALID', 'ticker.hoverPause must be boolean', { field: 'ticker.hoverPause' });
+  const overflow = input.overflow ?? TICKER_DEFAULTS.overflow;
+  if (!TICKER_OVERFLOWS.includes(overflow)) throw fail('VISUAL_PROFILE_TICKER_INVALID', 'ticker.overflow must be "avoid" or "queue"', { field: 'ticker.overflow' });
+  return freeze({ speedPxPerSec, band, bandRatio, trackCount, trackGapPx, minGapPx, speedRandom, clickThrough, hoverPause, overflow });
+}
+
+export function rollTickerSpeed(random = Math.random) {
+  const step = 10;
+  const span = Math.floor((TICKER_SPEED_BOUNDS.max - TICKER_SPEED_BOUNDS.min) / step);
+  return TICKER_SPEED_BOUNDS.min + Math.floor(random() * (span + 1)) * step;
+}
+
+export function resolveTickerMotion(ticker, random = Math.random) {
+  if (!plain(ticker)) return ticker;
+  if (ticker.speedRandom !== true) return ticker;
+  return { ...ticker, speedPxPerSec: rollTickerSpeed(random) };
+}
+
 export function createVisualProfile(input = {}) {
   if (!plain(input)) throw fail('VISUAL_PROFILE_FIELD_INVALID', 'profile must be a plain object', { field: 'profile' });
   // 旧版本（v1）先升级为两轴形态，再做严格校验。
@@ -96,9 +174,9 @@ export function createVisualProfile(input = {}) {
   if ('skinId' in input && input.skinId !== null && typeof input.skinId !== 'string') throw fail('VISUAL_PROFILE_FIELD_INVALID', 'skinId must be a string or null', { field: 'skinId' });
   if ('effectConfigId' in input && input.effectConfigId !== null && typeof input.effectConfigId !== 'string') throw fail('VISUAL_PROFILE_FIELD_INVALID', 'effectConfigId must be a string or null', { field: 'effectConfigId' });
   const global = { ...DEFAULT_GLOBAL, ...clone(input.global ?? {}) };
-  const VALID_DEFAULT_MODES = ['off', 'minimal'];
+  if (global.defaultMode === 'minimal') global.defaultMode = 'stack';
   if (global.defaultMode && !VALID_DEFAULT_MODES.includes(global.defaultMode)) {
-    throw fail('VISUAL_PROFILE_FIELD_INVALID', 'global.defaultMode must be "off" or "minimal"', { field: 'global.defaultMode' });
+    throw fail('VISUAL_PROFILE_FIELD_INVALID', 'global.defaultMode must be "off", "stack" or "ticker"', { field: 'global.defaultMode' });
   }
   const categories = Object.fromEntries(VISUAL_CATEGORIES.map((category) => [category, {
     enabled: true,
@@ -113,6 +191,8 @@ export function createVisualProfile(input = {}) {
     visualProfiles: freeze(visualProfiles),
     rules: clone(input.rules ?? []),
     behaviorId,
+    // 仅在显式携带时出现：保持既有 profile 形状稳定，旧数据不受影响。
+    ...(input.ticker === undefined ? {} : { ticker: createTickerSettings(input.ticker) }),
     card: createCardVisualSettings(input.card ?? {}),
     propertiesId: input.propertiesId ?? null,
     skinId: input.skinId ?? null,

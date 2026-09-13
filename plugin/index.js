@@ -55,7 +55,7 @@ import {
 } from './domain/sidebar-display-settings.js';
 import { createSidebarDisplaySettingsPersistence } from './domain/sidebar-display-settings-persistence.js';
 import { VisualSettingsStore } from './domain/visual-settings-store.js';
-import { createVisualProfile } from './domain/visual-settings.js';
+import { createVisualProfile, resolveTickerMotion } from './domain/visual-settings.js';
 import { CARD_ANCHORS, CARD_ASPECT_RATIOS, CARD_BOUNDARIES, CARD_LAYOUTS, CARD_SIZES, MINIMAL_CARD_DEFAULTS, PROPERTIES_DEFAULTS } from './domain/card-visual-settings.js';
 import { createBehaviorManager } from './domain/notification-behavior-manager.js';
 import { createBehaviorProfile } from './domain/notification-behavior.js';
@@ -100,6 +100,14 @@ import { createEventBindingRegistry } from './domain/event-binding-registry.js';
 import { createVisualRegistrySnapshot, projectVisualRegistryToEventSettings } from './domain/visual-registry-persistence.js';
 import { VisualRegistryPersistenceCoordinator } from './domain/visual-registry-persistence-coordinator.js'
 import { createVisualEventSettingsApi } from './domain/visual-event-settings-api.js';
+import {
+  hasExplicitVisualBinding,
+  resolveVisualEventNativeBehavior,
+  resolveVisualEventCardIntent as resolveVisualEventCardIntentFromState,
+  classifyVisualDiagnosticLevel,
+  visualPreviewFingerprint,
+  TEST_EVENT_PRESENTATION_IDS
+} from './domain/visual-event-native-behavior.js';
 import { createVisualAssetLibrary } from './domain/visual-asset-library.js';
 import { createVisualAssetStorage } from './domain/visual-asset-storage.js';
 import { loadVisualAssetSnapshot, saveVisualAssetSnapshot } from './domain/visual-asset-persistence.js';
@@ -119,19 +127,13 @@ export * from './domain/notification-store-snapshot.js';
 export * from './domain/notification-store-store.js';
 export * from './domain/notification-store-persistence.js';
 
-export const pluginVersion = '0.1.5';
+export const pluginVersion = '0.1.6';
 export const pluginName = 'notification-hub-vnext';
 export const RUNTIME_TEST_CARD_PREFIX = 'nh-vnext-test-';
 export const VISUAL_WORKBENCH_CARD_PREFIX = 'nh-visual-workbench-';
 export const VISUAL_PREVIEW_CARD_PREFIX = 'nh-visual-preview-';
-const TEST_EVENT_PRESENTATION_IDS = Object.freeze({
-  chat_message: 'chat.assistant_reply.completed',
-  channel_message: 'channel.message.received',
-  tool_completed: 'tool.execution.succeeded',
-  tool_error: 'tool.execution.failed',
-  timeout: 'tool.execution.timed_out',
-  system_warning: 'session.health.degraded'
-});
+export const VISUAL_TRY_CARD_PREFIX = 'nh-visual-try-';
+export const VISUAL_EVENT_TEST_CARD_PREFIX = 'nh-visual-event-test-';
 export const RUNTIME_NOTIFICATION_CARD_PREFIX = 'nh-vnext-notification-';
 const RUNTIME_TEST_CARD_SIZE = Object.freeze({ width: 360, height: 180 });
 const RUNTIME_NOTIFICATION_CARD_SIZE = Object.freeze({ width: 420, height: 220 });
@@ -310,7 +312,17 @@ function notificationCardText(value, fallback, maxLength) {
   return nonEmptyText(value, fallback, maxLength);
 }
 
-function notificationCardDimensions(appearance = {}, cardType = 'minimal') {
+function isTickerBehavior(behaviorId) {
+  return behaviorId === 'ticker' || behaviorId === 'danmaku';
+}
+
+function notificationCardDimensions(appearance = {}, cardType = 'minimal', behaviorId = 'stack') {
+  // 弹幕卡锁 480×76（契约 §2.2），不复用堆叠的 420×220，也不被 wide 抬到 160。
+  if (isTickerBehavior(behaviorId)) {
+    const width = Number.isInteger(appearance.width) ? Math.max(240, Math.min(720, appearance.width)) : 480;
+    const height = Number.isInteger(appearance.height) ? Math.max(56, Math.min(120, appearance.height)) : 76;
+    return { width, height };
+  }
   const sizeSets = {
     minimal: { small: { width: 360, height: 180 }, medium: { width: 420, height: 220 }, large: { width: 500, height: 260 } },
     danmaku: { small: { width: 520, height: 96 }, medium: { width: 520, height: 96 }, large: { width: 520, height: 96 } },
@@ -396,17 +408,7 @@ function visualFingerprint(visual) {
 }
 
 function visualPlacementFingerprint(profile = {}) {
-  const activeType = profile?.card?.types?.[profile?.card?.activeType ?? 'minimal'] ?? {};
-  const space = activeType.properties?.space ?? {};
-  const legacyMargin = space.margin ?? 18;
-  return JSON.stringify({
-    behaviorId: profile?.behaviorId ?? 'stack',
-    anchor: space.anchor ?? 'bottom-right',
-    marginLeft: space.marginLeft ?? legacyMargin,
-    marginRight: space.marginRight ?? legacyMargin,
-    marginTop: space.marginTop ?? legacyMargin,
-    marginBottom: space.marginBottom ?? legacyMargin
-  });
+  return visualPreviewFingerprint(profile);
 }
 
 function visualPreviewHandshake({ receivedDraft, updated, recreated, cardId, draft, nativeVisual }) {
@@ -422,9 +424,12 @@ function visualPreviewHandshake({ receivedDraft, updated, recreated, cardId, dra
 
 function notificationCardPayload(record, index, workArea, layout, visual, presentation = null, behavior = null) {
   const cardType = visual?.cardType ?? 'minimal';
+  const behaviorId = isTickerBehavior(visual?.behaviorId) || isTickerBehavior(behavior?.behaviorProfileId)
+    ? 'ticker'
+    : (visual?.behaviorId ?? 'stack');
   const space = visual?.space ?? {};
   const dimensions = {
-    ...notificationCardDimensions(visual?.appearance, cardType),
+    ...notificationCardDimensions(visual?.appearance, cardType, behaviorId),
     gap: space.gap,
     margin: space.margin,
     marginLeft: space.marginLeft,
@@ -434,11 +439,14 @@ function notificationCardPayload(record, index, workArea, layout, visual, presen
     anchor: space.anchor ?? 'bottom-right'
   };
   const position = notificationCardPosition(index, workArea, layout, dimensions, cardType);
+  const visualForNative = isTickerBehavior(behaviorId) && visual?.ticker
+    ? { ...visual, ticker: resolveTickerMotion(visual.ticker) }
+    : (visual?.ticker ? (({ ticker, ...rest }) => rest)(visual) : visual);
   return {
     id: notificationCardId(record.notificationId),
     title: notificationCardText(record.title, '新通知', 120),
     body: notificationCardText(record.content, record.summary || '', 2000),
-    visual: projectNativeVisualPayload(visual),
+    visual: projectNativeVisualPayload(visualForNative),
     ...(presentation ? { presentation } : {}),
     ...(behavior ? { behavior } : {}),
     ...position,
@@ -655,7 +663,9 @@ export default class NotificationHubVNextPlugin {
       openVisualPreviewCard: this.openVisualPreviewCard.bind(this),
       updateVisualPreviewCard: this.updateVisualPreviewCard.bind(this),
       closeVisualPreviewCard: this.closeVisualPreviewCard.bind(this),
+      runVisualDraftSample: this.runVisualDraftSample.bind(this),
       runVisualEventExperiment: this.runVisualEventExperiment.bind(this),
+      clearVisualStudioCards: this.clearVisualStudioCards.bind(this),
       listVisualProfiles: this.listVisualProfiles.bind(this),
       saveVisualProfile: this.saveVisualProfile.bind(this),
       removeVisualProfile: this.removeVisualProfile.bind(this),
@@ -1154,6 +1164,7 @@ export default class NotificationHubVNextPlugin {
       code: error?.code ?? 'VISUAL_OPERATION_FAILED',
       message: error?.message ?? String(error),
       stage,
+      level: classifyVisualDiagnosticLevel(error, stage),
       details: { ...(error?.details ?? {}), ...details },
       timestamp: new Date().toISOString()
     };
@@ -1205,6 +1216,14 @@ export default class NotificationHubVNextPlugin {
     try {
       const snapshot = this.visualSettingsStore.updateVisualSettings(patch);
       this.visualSettingsStore.markApplied(snapshot.revision);
+      const defaultRecord = this.visualProfileRegistry.get('visual.default');
+      if (defaultRecord) {
+        this.visualProfileRegistry.replace('visual.default', {
+          name: defaultRecord.name,
+          profile: snapshot.settings.profile,
+          source: defaultRecord.source ?? 'builtin'
+        });
+      }
       if (previous && previous !== nextAssetId) this.visualAssetLibrary.removeReference(previous, { ownerType: 'profile', ownerId: 'visual.default', slot: 'card.minimal.background' });
       await this.saveVisualAssets();
       return this.getVisualSettingsStatus();
@@ -1318,7 +1337,7 @@ export default class NotificationHubVNextPlugin {
           this.visualProfileRegistry.register({ profileId: 'visual.default', name: '默认视觉方案', profile: this.visualSettingsStore.getSnapshot().settings.profile, source: 'builtin' });
         }
         if (this.visualBindingRegistry.list().length > 0) {
-          const projected = projectVisualRegistryToEventSettings({ settings: this.eventPresentationSettingsStore.getSnapshot().settings, bindingRegistry: this.visualBindingRegistry });
+          const projected = projectVisualRegistryToEventSettings({ settings: this.eventPresentationSettingsStore.getSnapshot().settings, bindingRegistry: this.visualBindingRegistry, profileRegistry: this.visualProfileRegistry });
           const settingsSnapshot = this.eventPresentationSettingsStore.updateSettings({ events: projected.events });
           this.notificationApi.setPresentationProfile(createPresentationProfileFromSettings(settingsSnapshot.settings));
           this.eventPresentationSettingsStore.markApplied(settingsSnapshot.revision);
@@ -1411,7 +1430,7 @@ export default class NotificationHubVNextPlugin {
       await this.applyVisualAssetManifest();
     }
     if (report.bindings.imported.length > 0) {
-      const projected = projectVisualRegistryToEventSettings({ settings: this.eventPresentationSettingsStore.getSnapshot().settings, bindingRegistry: this.visualBindingRegistry });
+      const projected = projectVisualRegistryToEventSettings({ settings: this.eventPresentationSettingsStore.getSnapshot().settings, bindingRegistry: this.visualBindingRegistry, profileRegistry: this.visualProfileRegistry });
       const snapshot = this.eventPresentationSettingsStore.updateSettings({ events: projected.events });
       this.notificationApi.setPresentationProfile(createPresentationProfileFromSettings(snapshot.settings));
       this.eventPresentationSettingsStore.markApplied(snapshot.revision);
@@ -1509,6 +1528,9 @@ export default class NotificationHubVNextPlugin {
     try {
       if (profileId === 'visual.default') throw Object.assign(new Error('默认视觉方案不可删除'), { code: 'VISUAL_PROFILE_REGISTRY_PROTECTED' });
       const record = this.visualProfileRegistry.get(profileId);
+      if (!record) throw Object.assign(new Error(`Unknown profile: ${profileId}`), { code: 'VISUAL_PROFILE_REGISTRY_NOT_FOUND' });
+      const unboundEventIds = [...this.visualProfileRegistry.references(profileId)];
+      for (const eventId of unboundEventIds) this.visualEventSettingsApi.restoreDefault(eventId);
       const removed = this.visualProfileRegistry.remove(profileId);
       if (!removed) throw Object.assign(new Error(`Unknown profile: ${profileId}`), { code: 'VISUAL_PROFILE_REGISTRY_NOT_FOUND' });
       for (const reference of collectVisualProfileAssetReferences(record?.profile)) {
@@ -1516,8 +1538,11 @@ export default class NotificationHubVNextPlugin {
       }
       void this.saveVisualAssets();
       this.visualRegistryRevision += 1;
+      const snapshot = this.eventPresentationSettingsStore.getSnapshot();
+      this.notificationApi.setPresentationProfile(createPresentationProfileFromSettings(snapshot.settings));
+      this.eventPresentationSettingsStore.markApplied(snapshot.revision);
       this.queueVisualRegistryPersistence();
-      return { removed: true, visualRevision: this.visualRegistryRevision };
+      return { removed: true, unboundEventIds, visualRevision: this.visualRegistryRevision };
     } catch (error) {
       this.recordVisualDiagnostic(error, 'CONFIG_RESOLVE', { profileId: profileId ?? null });
       throw error;
@@ -2476,7 +2501,7 @@ export default class NotificationHubVNextPlugin {
     }
   }
 
-  presentationProfileForRecord(record) {
+  resolveNotificationEventId(record) {
     let eventId = record?.presentation?.eventId
       ?? record?.metadata?.semantic?.eventId
       ?? TEST_EVENT_PRESENTATION_IDS[record?.metadata?.testEvent]
@@ -2489,28 +2514,62 @@ export default class NotificationHubVNextPlugin {
         eventId = null;
       }
     }
-    const settings = this.eventPresentationSettingsStore.getSnapshot().settings;
-    const hasExplicitBinding = Boolean(eventId && (this.visualBindingRegistry.get(eventId) || settings.events?.[eventId]));
-    return hasExplicitBinding ? createPresentationProfileFromSettings(settings) : null;
+    return eventId;
+  }
+
+  resolveVisualEventCardIntent(record) {
+    const eventId = this.resolveNotificationEventId(record);
+    const storeProfile = this.visualSettingsStore.getSnapshot().settings.profile;
+    const binding = hasExplicitVisualBinding(this.visualBindingRegistry, eventId)
+      ? this.visualBindingRegistry.get(eventId)
+      : null;
+    const boundProfile = binding ? (this.visualProfileRegistry.get(binding.visualProfileId)?.profile ?? null) : null;
+    const intent = resolveVisualEventCardIntentFromState({
+      eventId,
+      globalEnabled: storeProfile?.global?.enabled !== false,
+      defaultMode: storeProfile?.global?.defaultMode ?? 'off',
+      binding,
+      boundProfile,
+      storeProfile
+    });
+    if (intent.reason === 'missing-profile' && binding) {
+      this.recordVisualDiagnostic(
+        Object.assign(new Error(`绑定配置包不存在：${binding.visualProfileId}`), { code: 'VISUAL_EVENT_BINDING_PROFILE_MISSING' }),
+        'EVENT_CARD',
+        { eventId, visualProfileId: binding.visualProfileId, profileId: binding.visualProfileId }
+      );
+    }
+    if (intent.showCard && intent.reason === 'default-mode') {
+      try {
+        intent.visualProfile = createVisualProfile({
+          ...intent.visualProfile,
+          behaviorId: storeProfile?.global?.defaultMode,
+          ...(storeProfile?.global?.defaultMode === 'ticker' ? { ticker: storeProfile.ticker ?? intent.visualProfile?.ticker ?? {} } : {})
+        });
+        intent.nativeBehavior = resolveVisualEventNativeBehavior(intent.visualProfile);
+      } catch {
+        /* keep the unfrozen default-mode profile if studio draft is incomplete */
+      }
+    }
+    return intent;
+  }
+
+  presentationProfileForRecord(record) {
+    const intent = this.resolveVisualEventCardIntent(record);
+    if (!intent.showCard) return null;
+    if (!intent.binding) return null;
+    return createPresentationProfileFromSettings(this.eventPresentationSettingsStore.getSnapshot().settings);
   }
 
   notificationSceneChannelForRecord(record) {
-    try {
-      const presentationProfile = this.presentationProfileForRecord(record);
-      const presentationInput = createNotificationPresentationInput(
-        record,
-        projectNotificationCategories(record),
-        presentationProfile
-      );
-      return presentationInput.selector?.behavior?.channelId ?? '__legacy__';
-    } catch (error) {
-      this.recordNotificationDiagnostic(error, 'scene-channel');
-      return '__legacy__';
-    }
+    const intent = this.resolveVisualEventCardIntent(record);
+    if (!intent.showCard) return '__legacy__';
+    return intent.nativeBehavior.behaviorChannelId;
   }
 
   enqueueNotificationScene(record, options = {}) {
     if (!record) return;
+    if (!this.resolveVisualEventCardIntent(record).showCard) return;
     const channelId = this.notificationSceneChannelForRecord(record);
     const queue = this.notificationSceneQueues.get(channelId) ?? [];
     if (queue.some((queued) => queued.notificationId === record.notificationId)) return;
@@ -2606,6 +2665,8 @@ export default class NotificationHubVNextPlugin {
   }
 
   async promoteNotificationScene(record, promotedCard, channelId, { commit = true } = {}) {
+    const intent = this.resolveVisualEventCardIntent(record);
+    if (!intent.showCard) return { card: null, response: null, skipped: true, channelId, promotedCard, record };
     const host = this.runtimeHost;
     if (!host || host.state !== 'running' || typeof host.client?.request !== 'function') {
       const error = new Error('Native Runtime is not running; promoted notification scene was not created');
@@ -2619,18 +2680,20 @@ export default class NotificationHubVNextPlugin {
     const retainedNotificationCards = existing.filter((card) => notificationIdFromCardId(card?.id));
     const draftVisualProfile = this.visualSettingsStore.getSnapshot().settings.profile;
     const projectedVisual = draftVisualProfile.card?.types?.[draftVisualProfile.card.activeType ?? 'minimal'] ?? {};
-    const projectedCardDimensions = notificationCardDimensions(projectedVisual.appearance);
+    const projectedCardDimensions = notificationCardDimensions(projectedVisual.appearance, draftVisualProfile.card?.activeType ?? 'minimal', draftVisualProfile.behaviorId);
     const presentationProfile = this.presentationProfileForRecord(record);
     const presentationInput = createNotificationPresentationInput(record, projectNotificationCategories(record), presentationProfile);
     const selector = presentationInput.selector ?? null;
-    const behavior = selector ? this.resolveNotificationBehavior(selector, record) : null;
-    const explicitVisualBinding = selector ? this.visualBindingRegistry.get(selector.eventId) : null;
-    const visualProfile = explicitVisualBinding
-      ? (this.visualProfileRegistry.get(explicitVisualBinding.visualProfileId)?.profile ?? draftVisualProfile)
-      : draftVisualProfile;
+    const behavior = this.resolveNotificationBehavior(selector, record, intent.nativeBehavior);
+    const visualProfile = intent.visualProfile;
     const visual = resolveVisualRuleSafe({ visualInput: presentationInput.visualInput, profile: visualProfile, context: { globalEnabled: visualProfile.global.enabled } });
-    const visualPayload = { enabled: visual.enabled, preset: visual.preset, intensity: visual.intensity, category: visual.category, cardType: visual.cardType, behaviorId: visual.behaviorId, space: visual.space, appearance: visual.appearance };
-    const presentation = selector ? { eventId: selector.eventId, categoryId: selector.categoryId, eventTypeId: selector.eventTypeId, visualProfileId: selector.visual.visualProfileId } : null;
+    const visualPayload = { enabled: visual.enabled, preset: visual.preset, intensity: visual.intensity, category: visual.category, cardType: visual.cardType, behaviorId: visual.behaviorId, space: visual.space, appearance: visual.appearance, ...(visual.ticker ? { ticker: visual.ticker } : {}) };
+    const presentation = selector ? { eventId: selector.eventId, categoryId: selector.categoryId, eventTypeId: selector.eventTypeId, visualProfileId: selector.visual.visualProfileId } : {
+      eventId: intent.eventId,
+      categoryId: intent.binding?.categoryId ?? 'chat',
+      eventTypeId: intent.eventId,
+      visualProfileId: intent.binding?.visualProfileId ?? 'visual.default'
+    };
     const card = this.buildNotificationScenePayload({ record, health, layout, retainedNotificationCards, visualPayload, presentation, behavior });
     this.recordNotificationLifecycle(record.notificationId, 'scene.create.request', { channelId: behavior?.behaviorChannelId, reason: 'promotion' });
     const response = await this.createNotificationSceneNative({ record, card, selector, behavior });
@@ -2663,6 +2726,8 @@ export default class NotificationHubVNextPlugin {
   }
 
   async showNotificationScene(record) {
+    const intent = this.resolveVisualEventCardIntent(record);
+    if (!intent.showCard) return { card: null, response: null, skipped: true };
     const host = this.runtimeHost;
     if (!host || host.state !== 'running' || typeof host.client?.request !== 'function') {
       const error = new Error('Native Runtime is not running; notification scene was not created');
@@ -2673,16 +2738,12 @@ export default class NotificationHubVNextPlugin {
     const health = healthResponse?.payload?.result ?? {};
     const existing = Array.isArray(health.sceneCards) ? health.sceneCards : [];
     const layout = health.layout ?? { direction: 'right', anchor: 'bottom-left', spacing: 12 };
-    const draftVisualProfile = this.visualSettingsStore.getSnapshot().settings.profile;
     const notificationCards = existing.filter((card) => notificationIdFromCardId(card?.id));
     const presentationProfile = this.presentationProfileForRecord(record);
     const presentationInput = createNotificationPresentationInput(record, projectNotificationCategories(record), presentationProfile);
     const selector = presentationInput.selector ?? null;
-    const behavior = selector ? this.resolveNotificationBehavior(selector, record) : null;
-    const explicitVisualBinding = selector ? this.visualBindingRegistry.get(selector.eventId) : null;
-    const visualProfile = explicitVisualBinding
-      ? (this.visualProfileRegistry.get(explicitVisualBinding.visualProfileId)?.profile ?? draftVisualProfile)
-      : draftVisualProfile;
+    const behavior = this.resolveNotificationBehavior(selector, record, intent.nativeBehavior);
+    const visualProfile = intent.visualProfile;
     const behaviorBefore = behavior?.manager?.snapshot?.() ?? null;
     const behaviorPolicy = selector?.behavior?.channelPolicy ?? null;
     const oldestBehaviorCard = behaviorBefore?.cards?.[0] ?? null;
@@ -2716,7 +2777,8 @@ export default class NotificationHubVNextPlugin {
       cardType: visual.cardType,
       behaviorId: visual.behaviorId,
       space: visual.space,
-      appearance: visual.appearance
+      appearance: visual.appearance,
+      ...(visual.ticker ? { ticker: visual.ticker } : {})
     };
     const channelId = behavior?.behaviorChannelId ?? '__legacy__';
     const retainedNotificationCards = notificationCards.filter((card) => {
@@ -2725,7 +2787,7 @@ export default class NotificationHubVNextPlugin {
     });
     const workAreaWidth = Number.isFinite(health.workArea?.width) && health.workArea.width > 0 ? health.workArea.width : null;
     const spacing = Number.isInteger(layout.spacing) && layout.spacing >= 0 ? layout.spacing : 12;
-    const projectedCard = { width: notificationCardDimensions(visualPayload.appearance, visualPayload.cardType).width };
+    const projectedCard = { width: notificationCardDimensions(visualPayload.appearance, visualPayload.cardType, visualPayload.behaviorId).width };
     while (retainedNotificationCards.length >= RUNTIME_NOTIFICATION_MAX_VISIBLE
       || (workAreaWidth !== null && shelfExtent([...retainedNotificationCards, projectedCard], spacing) > workAreaWidth)) {
       const oldest = retainedNotificationCards.shift();
@@ -2749,7 +2811,12 @@ export default class NotificationHubVNextPlugin {
       categoryId: selector.categoryId,
       eventTypeId: selector.eventTypeId,
       visualProfileId: selector.visual.visualProfileId
-    } : null;
+    } : {
+      eventId: intent.eventId,
+      categoryId: intent.binding?.categoryId ?? 'chat',
+      eventTypeId: intent.eventId,
+      visualProfileId: intent.binding?.visualProfileId ?? 'visual.default'
+    };
     const card = this.buildNotificationScenePayload({
       record,
       health,
@@ -2791,24 +2858,25 @@ export default class NotificationHubVNextPlugin {
     return { ...result, channelId };
   }
 
-  resolveNotificationBehavior(selector, record) {
-    const behaviorProfileId = selector.behavior.behaviorProfileId;
-    const behaviorChannelId = selector.behavior.channelId;
+  resolveNotificationBehavior(selector, record, nativeBehavior = null) {
+    const behaviorProfileId = nativeBehavior?.behaviorProfileId ?? selector?.behavior?.behaviorProfileId;
+    const behaviorChannelId = nativeBehavior?.behaviorChannelId ?? selector?.behavior?.channelId;
+    if (!behaviorProfileId || !behaviorChannelId) return null;
     let manager = this.notificationBehaviorManagers.get(behaviorChannelId);
     if (!manager) {
       manager = createBehaviorManager({
         channelId: behaviorChannelId,
         profile: createBehaviorProfile({ mode: behaviorProfileId, profileId: behaviorProfileId, channelId: behaviorChannelId }),
-        policy: selector.behavior.channelPolicy ?? { policyId: selector.behavior.channelPolicyId }
+        policy: selector?.behavior?.channelPolicy ?? { policyId: selector?.behavior?.channelPolicyId ?? `${behaviorProfileId}.default` }
       });
       this.notificationBehaviorManagers.set(behaviorChannelId, manager);
     }
     return Object.freeze({
       behaviorProfileId,
       behaviorChannelId,
-      eventId: selector.eventId,
-      visualProfileId: selector.visual.visualProfileId,
-      channelPolicyId: selector.behavior.channelPolicyId,
+      eventId: selector?.eventId ?? record?.presentation?.eventId ?? record?.notificationId,
+      visualProfileId: selector?.visual?.visualProfileId ?? nativeBehavior?.visualProfileId ?? 'visual.default',
+      channelPolicyId: selector?.behavior?.channelPolicyId ?? `${behaviorProfileId}.default`,
       manager,
       notificationId: record.notificationId
     });
@@ -3356,32 +3424,33 @@ export default class NotificationHubVNextPlugin {
     };
   }
 
-  async runParallelCardSample({ count = 1, createCards = true } = {}) {
-    if (!Number.isInteger(count) || count < 1 || count > 10) throw Object.assign(new Error('并行卡片样板数量必须是 1 到 10'), { code: 'PARALLEL_CARD_SAMPLE_COUNT_INVALID' });
+  async runParallelCardSample({ count = 1, createCards = true, intervalMs = 0 } = {}) {
+    if (!Number.isInteger(count) || count < 1 || count > 50) throw Object.assign(new Error('并行卡片样板数量必须是 1 到 50'), { code: 'PARALLEL_CARD_SAMPLE_COUNT_INVALID' });
+    const gap = Number.isInteger(intervalMs) && intervalMs >= 0 && intervalMs <= 5000 ? intervalMs : 0;
     const host = createCards ? this.requireRuntimeTestHost() : null;
     const health = host
       ? ((await host.client.request('health', {}, { retryable: true, maxAttempts: 2 }))?.payload?.result ?? {})
       : { workArea: { left: 0, top: 0, width: 1920, height: 1080 }, layout: { direction: 'right', anchor: 'bottom-right', spacing: 12 } };
     const samples = [
-      { cardType: 'minimal', channelId: 'stack.main', behaviorId: 'stack', category: 'chat', title: 'M · 极简卡片', content: '后台动作已记录。', visual: { enabled: true, preset: 'minimal', intensity: 'balanced', category: 'chat', cardType: 'minimal', space: { anchor: 'bottom-right', gap: 12, margin: 18 }, appearance: { size: 'medium', aspectRatio: 'default', backgroundColor: '#0e1916', backgroundFit: 'fill', backgroundPadding: 0, borderRadius: 16, opacity: 0.96 } } },
-      { cardType: 'minimal', channelId: 'ticker.main', behaviorId: 'ticker', category: 'chat', title: 'D · 弹幕通知', content: '一条新消息划过顶部轨道。', visual: { enabled: true, preset: 'accent', intensity: 'expressive', category: 'chat', cardType: 'minimal', space: { anchor: 'top-right', gap: 12, margin: 18 }, appearance: { size: 'small', aspectRatio: 'wide', backgroundColor: '#10221e', backgroundFit: 'fill', backgroundPadding: 0, borderRadius: 12, opacity: 0.98 } } },
-      { cardType: 'minimal', channelId: 'popup.main', behaviorId: 'popup', category: 'error', title: 'P · 突脸信息', content: '重要事件需要确认。', visual: { enabled: true, preset: 'warning', intensity: 'expressive', category: 'error', cardType: 'minimal', space: { anchor: 'top-right', gap: 16, margin: 24 }, appearance: { size: 'large', aspectRatio: 'default', backgroundColor: '#201817', backgroundFit: 'fill', backgroundPadding: 0, borderRadius: 24, opacity: 0.99 } } }
+      { cardType: 'minimal', channelId: 'visual.try-one.stack', behaviorId: 'stack', category: 'chat', title: '堆叠', content: '堆叠卡片叠在角落。', visual: { enabled: true, preset: 'minimal', intensity: 'balanced', category: 'chat', cardType: 'minimal', behaviorId: 'stack', space: { anchor: 'bottom-right', gap: 12, margin: 18 }, appearance: { size: 'medium', aspectRatio: 'default', backgroundColor: '#0e1916', backgroundFit: 'fill', backgroundPadding: 0, borderRadius: 16, opacity: 0.96 } } },
+      { cardType: 'minimal', channelId: 'visual.try-one.ticker', behaviorId: 'ticker', category: 'chat', title: '弹幕', content: '弹幕从右往左流过。', visual: { enabled: true, preset: 'accent', intensity: 'expressive', category: 'chat', cardType: 'minimal', behaviorId: 'ticker', space: { anchor: 'top-right', gap: 12, margin: 18 }, appearance: { size: 'small', aspectRatio: 'wide', backgroundColor: '#10221e', backgroundFit: 'fill', backgroundPadding: 0, borderRadius: 12, opacity: 0.98 } } }
     ];
     const results = [];
     for (const sample of samples) {
       for (let index = 0; index < count; index += 1) {
         const notificationId = `parallel-${sample.behaviorId}-${Date.now().toString(36)}-${index + 1}`;
         const record = { notificationId, title: sample.title, content: `${sample.content} 通道：${sample.channelId}` };
-        const card = notificationCardPayload(record, index, health.workArea, health.layout, sample.visual, { eventId: `visual.parallel.${sample.cardType}`, categoryId: sample.category, eventTypeId: 'parallel-test', visualProfileId: `visual.${sample.cardType}` }, { behaviorProfileId: sample.behaviorId, behaviorChannelId: sample.channelId });
-        const entry = { cardId: card.id, notificationId, cardType: sample.cardType, behaviorChannelId: sample.channelId, geometry: { x: card.x, y: card.y, width: card.width, height: card.height } };
+        const card = notificationCardPayload(record, index, health.workArea, health.layout, sample.visual, { eventId: `visual.parallel.${sample.behaviorId}`, categoryId: sample.category, eventTypeId: 'parallel-test', visualProfileId: `visual.${sample.behaviorId}` }, { behaviorProfileId: sample.behaviorId, behaviorChannelId: sample.channelId });
+        const entry = { cardId: card.id, notificationId, cardType: sample.cardType, behaviorId: sample.behaviorId, behaviorChannelId: sample.channelId, geometry: { x: card.x, y: card.y, width: card.width, height: card.height } };
         if (host) {
           const response = await host.client.request('scene.create', card, { retryable: false, idempotencyKey: `parallel-card-${notificationId}` });
           entry.response = response?.payload?.result ?? null;
         }
         results.push(entry);
+        if (gap > 0 && !(sample === samples.at(-1) && index === count - 1)) await new Promise((resolve) => setTimeout(resolve, gap));
       }
     }
-    return { ok: true, count, generated: results.length, created: createCards, channels: Object.fromEntries(samples.map((sample) => [sample.channelId, count])), cardTypes: samples.map((sample) => sample.cardType), results };
+    return { ok: true, count, intervalMs: gap, generated: results.length, created: createCards, channels: Object.fromEntries(samples.map((sample) => [sample.channelId, count])), cardTypes: samples.map((sample) => sample.cardType), behaviors: samples.map((sample) => sample.behaviorId), results };
   }
 
   async runNotificationTest(input = {}) {
@@ -3463,6 +3532,62 @@ export default class NotificationHubVNextPlugin {
     };
   }
 
+  buildVisualDraftNativeCard({ health, cardId, draft = null, title, body, eventId, channelId }) {
+    const sourceProfile = draft ?? this.visualSettingsStore.getSnapshot().settings.profile;
+    const profile = createVisualProfile(normalizeVisualPreviewProfile(sourceProfile));
+    const activeType = profile.card.types[profile.card.activeType];
+    const behaviorId = profile.behaviorId === 'ticker' ? 'ticker' : 'stack';
+    const visual = resolveVisualDraftPayload({
+      enabled: profile.global.enabled !== false,
+      preset: profile.global.preset,
+      intensity: profile.global.intensity,
+      category: 'chat',
+      cardType: profile.card.activeType,
+      behaviorId,
+      space: activeType.properties?.space,
+      appearance: activeType.appearance,
+      ...(behaviorId === 'ticker' && profile.ticker ? { ticker: profile.ticker } : {})
+    }, activeType);
+    const card = notificationCardPayload(
+      { notificationId: cardId, title, content: body },
+      0,
+      health.workArea,
+      health.layout ?? { direction: 'right', anchor: 'bottom-left', spacing: 12 },
+      visual,
+      { eventId, categoryId: 'chat', eventTypeId: 'preview', visualProfileId: 'draft' },
+      { behaviorProfileId: behaviorId, behaviorChannelId: channelId ?? `visual.try-one.${behaviorId}` }
+    );
+    return { profile, card: { ...card, id: cardId, title, body } };
+  }
+
+  async runVisualDraftSample({ draft = null } = {}) {
+    const host = this.requireRuntimeTestHost();
+    const health = (await host.client.request('health', {}, { retryable: true, maxAttempts: 2 }))?.payload?.result ?? {};
+    const id = `${VISUAL_TRY_CARD_PREFIX}${Date.now().toString(36)}-${Math.random().toString(16).slice(2, 8)}`;
+    const { profile, card } = this.buildVisualDraftNativeCard({
+      health,
+      cardId: id,
+      draft,
+      title: '试一条',
+      body: '当前工作室草稿，不写通知历史。',
+      eventId: 'visual.try-one'
+    });
+    const label = profile.behaviorId === 'ticker' ? '弹幕' : '堆叠';
+    card.title = `试一条 · ${label}`;
+    card.body = '当前工作室草稿，不写通知历史。';
+    const response = await host.client.request('scene.create', card, { retryable: false });
+    this.recordVisualDiagnostic({ code: 'VISUAL_DRAFT_SAMPLE_CREATED', message: 'Visual draft sample created' }, 'DRAFT_SAMPLE', { cardId: id, behaviorId: profile.behaviorId });
+    return {
+      generated: 1,
+      receivedDraft: draft !== null,
+      behaviorId: profile.behaviorId,
+      historyWritten: false,
+      soundPlayed: false,
+      cardId: id,
+      results: [{ cardId: id, response: response?.payload?.result ?? null }]
+    };
+  }
+
   async runVisualEventExperiment({ eventId, count = 1, intervalMs = 120 } = {}) {
     if (typeof eventId !== 'string' || !eventId.trim()) throw Object.assign(new Error('视觉实验台需要选择事件'), { code: 'VISUAL_EVENT_TEST_EVENT_REQUIRED' });
     if (!Number.isInteger(count) || count < 1 || count > 50) throw Object.assign(new Error('视觉实验台次数必须是 1 到 50'), { code: 'VISUAL_EVENT_TEST_COUNT_INVALID' });
@@ -3475,7 +3600,7 @@ export default class NotificationHubVNextPlugin {
     const health = (await host.client.request('health', {}, { retryable: true, maxAttempts: 2 }))?.payload?.result ?? {};
     const results = [];
     for (let index = 0; index < count; index += 1) {
-      const id = `nh-visual-event-test-${Date.now().toString(36)}-${index + 1}`;
+      const id = `${VISUAL_EVENT_TEST_CARD_PREFIX}${Date.now().toString(36)}-${index + 1}`;
       const card = this.buildVisualWorkbenchCard('hold', health, id, profile.profile, binding);
       card.title = `视觉实验台 · ${eventId}`;
       card.body = `使用已绑定配置包：${binding.visualProfileId}`;
@@ -3496,12 +3621,13 @@ export default class NotificationHubVNextPlugin {
       context: { globalEnabled: profile.global?.enabled !== false }
     });
     const activeType = profile?.card?.types?.[profile.card.activeType ?? 'minimal'] ?? {};
+    const nativeBehavior = resolveVisualEventNativeBehavior(profile);
     const visualPayload = event
       ? visual
-      : resolveVisualDraftPayload({ enabled: visual.enabled, preset: visual.preset, intensity: visual.intensity, category: visual.category, cardType: visual.cardType, behaviorId: visual.behaviorId, space: visual.space, appearance: visual.appearance }, activeType);
+      : resolveVisualDraftPayload({ enabled: visual.enabled, preset: visual.preset, intensity: visual.intensity, category: visual.category, cardType: visual.cardType, behaviorId: visual.behaviorId, space: visual.space, appearance: visual.appearance, ...(profile.ticker ? { ticker: profile.ticker } : {}) }, activeType);
     const id = cardId ?? `${VISUAL_WORKBENCH_CARD_PREFIX}${Date.now().toString(36)}-${Math.random().toString(16).slice(2, 8)}`;
     const phaseLabels = { enter: '入场测试', hold: '持续更新测试', exit: '消失测试' };
-    const card = notificationCardPayload({ notificationId: id, title: `视觉实验台 · ${phaseLabels[phase]}`, content: '真实 Native 卡片。修改设置后点击持续 / 更新，验证当前视觉配置。' }, 0, health.workArea, health.layout ?? { direction: 'right', anchor: 'bottom-left', spacing: 12 }, visualPayload, { eventId: eventInput.eventId, categoryId: eventInput.categoryId ?? 'chat', eventTypeId: eventInput.eventTypeId ?? 'completed', visualProfileId: eventInput.visualProfileId ?? 'visual.default' }, { behaviorProfileId: 'stack', behaviorChannelId: eventInput.behaviorChannelId ?? 'visual.workbench' });
+    const card = notificationCardPayload({ notificationId: id, title: `视觉实验台 · ${phaseLabels[phase]}`, content: '真实 Native 卡片。修改设置后点击持续 / 更新，验证当前视觉配置。' }, 0, health.workArea, health.layout ?? { direction: 'right', anchor: 'bottom-left', spacing: 12 }, visualPayload, { eventId: eventInput.eventId, categoryId: eventInput.categoryId ?? 'chat', eventTypeId: eventInput.eventTypeId ?? 'completed', visualProfileId: eventInput.visualProfileId ?? 'visual.default' }, { behaviorProfileId: nativeBehavior.behaviorProfileId, behaviorChannelId: eventInput.behaviorChannelId ?? nativeBehavior.behaviorChannelId });
     return { ...card, id, title: `视觉实验台 · ${phaseLabels[phase]}`, body: '真实 Native 卡片。修改设置后点击持续 / 更新，验证当前视觉配置。' };
   }
 
@@ -3534,32 +3660,46 @@ export default class NotificationHubVNextPlugin {
     return { closed: true, id, response: response?.payload?.result ?? null };
   }
 
+  async clearVisualStudioCards() {
+    const prefixes = [VISUAL_TRY_CARD_PREFIX, VISUAL_WORKBENCH_CARD_PREFIX, VISUAL_PREVIEW_CARD_PREFIX, VISUAL_EVENT_TEST_CARD_PREFIX];
+    this.visualPreviewClosedExplicitly = true;
+    this.visualPreviewSessionGeneration += 1;
+    const host = this.requireRuntimeTestHost();
+    const health = await host.client.request('health', {}, { retryable: true, maxAttempts: 2 });
+    const cards = health?.payload?.result?.sceneCards;
+    const liveIds = Array.isArray(cards)
+      ? cards.map((card) => card?.id).filter((id) => typeof id === 'string' && prefixes.some((prefix) => id.startsWith(prefix)))
+      : [];
+    const tracked = [this.visualPreviewCardId, this.visualWorkbenchCardId].filter((id) => typeof id === 'string' && !liveIds.includes(id));
+    const ids = [...liveIds, ...tracked];
+    const dismissed = [];
+    for (const id of ids) {
+      try {
+        await host.client.request('scene.dismiss', { id }, { retryable: false });
+        dismissed.push(id);
+      } catch {
+        // Card may already be gone.
+      }
+    }
+    this.visualPreviewCardId = null;
+    this.visualWorkbenchCardId = null;
+    this.recordVisualDiagnostic({ code: 'VISUAL_STUDIO_CARDS_CLEARED', message: 'Visual studio cards cleared' }, 'STUDIO_CLEAR', { count: dismissed.length });
+    return { dismissed, count: dismissed.length, historyWritten: false };
+  }
+
   buildVisualPreviewCard(health, cardId, draft = null) {
     // Preview owns its source boundary: an explicit draft is never resolved through
     // the persisted store or visual.default category policy.
-    const sourceProfile = draft ?? this.visualSettingsStore.getSnapshot().settings.profile;
-    const profile = createVisualProfile(normalizeVisualPreviewProfile(sourceProfile));
-    const activeType = profile.card.types[profile.card.activeType];
-    const visual = resolveVisualDraftPayload({
-      enabled: profile.global.enabled !== false,
-      preset: profile.global.preset,
-      intensity: profile.global.intensity,
-      category: 'chat',
-      cardType: profile.card.activeType,
-      behaviorId: profile.behaviorId,
-      space: activeType.properties?.space,
-      appearance: activeType.appearance
-    }, activeType);
-    const card = notificationCardPayload(
-      { notificationId: cardId, title: '实时视觉预览', content: '当前编辑草稿的 Native 预览，不会写入通知历史。' },
-      0,
-      health.workArea,
-      health.layout ?? { direction: 'right', anchor: 'bottom-left', spacing: 12 },
-      visual,
-      { eventId: 'visual.preview', categoryId: 'chat', eventTypeId: 'preview', visualProfileId: 'draft' },
-      null
-    );
-    return { ...card, id: cardId, title: '实时视觉预览', body: '当前编辑草稿的 Native 预览，不会写入通知历史。' };
+    const { card } = this.buildVisualDraftNativeCard({
+      health,
+      cardId,
+      draft,
+      title: '实时视觉预览',
+      body: '当前编辑草稿的 Native 预览，不会写入通知历史。',
+      eventId: 'visual.preview',
+      channelId: 'visual.preview'
+    });
+    return card;
   }
 
   isVisualPreviewCardMissing(error) {
@@ -3612,7 +3752,20 @@ export default class NotificationHubVNextPlugin {
     }
     const placementFingerprint = visualPlacementFingerprint(draft ?? this.visualSettingsStore.getSnapshot().settings.profile);
     const placementChanged = this.visualPreviewPlacementFingerprint !== null && placementFingerprint !== this.visualPreviewPlacementFingerprint;
-    const currentGeometry = placementChanged ? null : (sceneCardGeometryFromResult(health, this.visualPreviewCardId) ?? this.visualPreviewCardGeometry);
+    if (placementChanged && this.visualPreviewCardId) {
+      const previousCardId = this.visualPreviewCardId;
+      try { await host.client.request('scene.dismiss', { id: previousCardId }, { retryable: false }); } catch { /* recreate even if dismiss failed */ }
+      this.visualPreviewCardId = null;
+      this.visualPreviewCardGeometry = null;
+      this.visualPreviewPlacementFingerprint = null;
+      if (this.visualPreviewClosedExplicitly || sessionGeneration !== this.visualPreviewSessionGeneration) {
+        throw Object.assign(new Error('Realtime Native preview session is closed'), { code: 'VISUAL_PREVIEW_SESSION_CLOSED' });
+      }
+      const recreated = await this.openVisualPreviewCard({ draft });
+      this.recordVisualDiagnostic({ code: 'VISUAL_PREVIEW_RECREATED', message: 'Realtime Native preview card recreated' }, 'PREVIEW_RECREATE', { cardId: recreated.cardId, previousCardId });
+      return { ...recreated, updated: false, recreated: true };
+    }
+    const currentGeometry = sceneCardGeometryFromResult(health, this.visualPreviewCardId) ?? this.visualPreviewCardGeometry;
     const card = {
       ...this.buildVisualPreviewCard(health, this.visualPreviewCardId, draft),
       ...(currentGeometry ? { x: currentGeometry.x, y: currentGeometry.y } : {})
@@ -3620,7 +3773,7 @@ export default class NotificationHubVNextPlugin {
     const sourceProfile = draft ?? this.visualSettingsStore.getSnapshot().settings.profile;
     const activeType = sourceProfile?.card?.types?.[sourceProfile?.card?.activeType ?? 'minimal'] ?? {};
     const explicitDimensions = Number.isInteger(activeType.appearance?.width) && Number.isInteger(activeType.appearance?.height);
-    if (!placementChanged && !explicitDimensions && currentGeometry) {
+    if (!explicitDimensions && currentGeometry) {
       card.width = currentGeometry.width;
       card.height = currentGeometry.height;
     }

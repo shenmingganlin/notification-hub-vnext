@@ -107,6 +107,67 @@ test('plugin opens, updates and closes a real visual workbench card without noti
   assert.equal(calls[4][0], 'scene.dismiss');
   assert.equal(plugin.notificationStore.size, 0);
 });
+
+test('workbench card follows the draft behavior instead of hardcoded stack', async () => {
+  const plugin = new NotificationHubVNextPlugin(context());
+  const calls = [];
+  plugin.runtimeHost = {
+    state: 'running',
+    client: {
+      async request(type, payload) {
+        calls.push([type, payload]);
+        if (type === 'health') return { payload: { result: { workArea: { left: 0, top: 0, width: 1920, height: 1080 }, layout: { direction: 'right', anchor: 'bottom-left', spacing: 12 } } } };
+        return { payload: { result: { status: 'accepted' } } };
+      }
+    }
+  };
+  await plugin.openVisualWorkbenchCard({
+    phase: 'enter',
+    draft: { global: { enabled: true }, behaviorId: 'ticker', ticker: { speedPxPerSec: 400, band: 'top', bandRatio: 0.28, trackCount: 3, minGapPx: 64 } }
+  });
+  const create = calls.find(([type]) => type === 'scene.create')[1];
+  assert.equal(create.behavior.behaviorProfileId, 'ticker');
+  assert.equal(create.behavior.behaviorChannelId, 'visual.event.ticker');
+  assert.equal(create.visual.ticker.trackCount, 3);
+  assert.equal(create.visual.ticker.trackGapPx, 8);
+});
+
+test('clearVisualStudioCards dismisses studio cards without touching notification history', async () => {
+  const plugin = new NotificationHubVNextPlugin(context());
+  const dismissed = [];
+  plugin.runtimeHost = {
+    state: 'running',
+    client: {
+      async request(type, payload) {
+        if (type === 'health') {
+          return {
+            payload: {
+              result: {
+                workArea: { left: 0, top: 0, width: 1920, height: 1080 },
+                layout: { direction: 'right', anchor: 'bottom-left', spacing: 12 },
+                sceneCards: [
+                  { id: 'nh-visual-try-aaa' },
+                  { id: 'nh-visual-preview-bbb' },
+                  { id: 'nh-visual-event-test-ccc' },
+                  { id: 'nh-vnext-notification-keep' }
+                ]
+              }
+            }
+          };
+        }
+        if (type === 'scene.dismiss') dismissed.push(payload.id);
+        return { payload: { result: { status: 'accepted' } } };
+      }
+    }
+  };
+  const result = await plugin.clearVisualStudioCards();
+  assert.deepEqual(result.dismissed, ['nh-visual-try-aaa', 'nh-visual-preview-bbb', 'nh-visual-event-test-ccc']);
+  assert.equal(result.count, 3);
+  assert.equal(result.historyWritten, false);
+  assert.equal(plugin.notificationStore.size, 0);
+  assert.equal(dismissed.includes('nh-vnext-notification-keep'), false);
+});
+
 test('realtime preview projects the draft and preserves Native-returned geometry', async () => {
   const plugin = new NotificationHubVNextPlugin(context());
   const calls = [];
@@ -164,26 +225,27 @@ test('realtime preview projects the draft and preserves Native-returned geometry
 
   const updateResult = await plugin.updateVisualPreviewCard({ draft: updatedDraft });
   assert.equal(updateResult.receivedDraft, true);
-  assert.equal(updateResult.updated, true);
-  assert.equal(updateResult.recreated, false);
-  assert.equal(updateResult.cardId, opened.card.id);
+  assert.equal(updateResult.updated, false);
+  assert.equal(updateResult.recreated, true);
+  assert.notEqual(updateResult.cardId, opened.card.id);
   assert.match(updateResult.draftFingerprint, /^[a-f0-9]{16}$/);
   assert.match(updateResult.nativeVisualFingerprint, /^[a-f0-9]{16}$/);
   assert.equal(updateResult.nativeVisualFingerprint, updateResult.draftFingerprint);
   assert.equal('title' in updateResult, false);
-  const firstUpdate = calls.filter(([type]) => type === 'scene.update')[0][1];
-  assert.deepEqual({ x: firstUpdate.x, y: firstUpdate.y, width: firstUpdate.width, height: firstUpdate.height }, { x: 301, y: 302, width: 503, height: 204 });
-  assert.equal(firstUpdate.visual.appearance.backgroundColor, '#abcdef');
-  assert.equal(firstUpdate.visual.appearance.borderRadius, 8);
-  assert.equal(firstUpdate.visual.appearance.opacity, 0.48);
+  assert.equal(calls.filter(([type]) => type === 'scene.dismiss').length, 1);
+  const recreated = calls.filter(([type]) => type === 'scene.create')[1][1];
+  assert.equal(recreated.visual.appearance.backgroundColor, '#abcdef');
+  assert.equal(recreated.visual.appearance.borderRadius, 8);
+  assert.equal(recreated.visual.appearance.opacity, 0.48);
   assert.equal(plugin.visualSettingsStore.getSnapshot().settings.profile.card.types.minimal.appearance.backgroundColor, '#0e1916');
   assert.equal(plugin.visualSettingsStore.getSnapshot().settings.profile.card.types.minimal.appearance.borderRadius, 16);
   assert.equal(plugin.visualSettingsStore.getSnapshot().settings.profile.card.types.minimal.appearance.opacity, 0.96);
 
-  await plugin.updateVisualPreviewCard({ draft: updatedDraft });
-  const secondUpdate = calls.filter(([type]) => type === 'scene.update')[1][1];
-  assert.deepEqual({ x: secondUpdate.x, y: secondUpdate.y, width: secondUpdate.width, height: secondUpdate.height }, { x: 401, y: 402, width: 601, height: 302 });
-  assert.equal(secondUpdate.id, opened.card.id);
+  const sameDraft = await plugin.updateVisualPreviewCard({ draft: updatedDraft });
+  assert.equal(sameDraft.recreated, false);
+  assert.equal(sameDraft.updated, true);
+  const secondUpdate = calls.filter(([type]) => type === 'scene.update')[0][1];
+  assert.equal(secondUpdate.id, updateResult.cardId);
 });
 
 test('realtime preview opens the real page default draft with a legal simple layout', async () => {
@@ -331,10 +393,87 @@ test('opening an existing realtime preview reuses its Native card', async () => 
     }
   };
   const first = await plugin.openVisualPreviewCard({ draft: { global: { enabled: true } } });
-  const second = await plugin.openVisualPreviewCard({ draft: { global: { enabled: true }, card: { types: { minimal: { appearance: { backgroundColor: '#654321' } } } } } });
+  const second = await plugin.openVisualPreviewCard({ draft: { global: { enabled: true } } });
   assert.equal(second.card.id, first.card.id);
   assert.equal(calls.filter(([type]) => type === 'scene.create').length, 1);
   assert.equal(calls.filter(([type]) => type === 'scene.update').length, 1);
+  const third = await plugin.openVisualPreviewCard({ draft: { global: { enabled: true }, behaviorId: 'ticker', ticker: { speedPxPerSec: 520, band: 'bottom', trackCount: 4 } } });
+  assert.equal(third.recreated, true);
+  assert.notEqual(third.card.id, first.card.id);
+  assert.equal(calls.filter(([type]) => type === 'scene.dismiss').length, 1);
+  assert.equal(calls.filter(([type]) => type === 'scene.create').length, 2);
+});
+
+test('visual draft sample uses the current draft without event binding', async () => {
+  const plugin = new NotificationHubVNextPlugin(context());
+  const calls = [];
+  plugin.runtimeHost = { state: 'running', client: { async request(type, payload) { calls.push([type, payload]); if (type === 'health') return { payload: { result: { workArea: { left: 0, top: 0, width: 1920, height: 1080 }, layout: { direction: 'right', anchor: 'bottom-left', spacing: 12 } } } }; return { payload: { result: { status: 'accepted' } } }; } } };
+  const result = await plugin.runVisualDraftSample({
+    draft: {
+      global: { enabled: true },
+      behaviorId: 'ticker',
+      ticker: { speedPxPerSec: 520, band: 'bottom', bandRatio: 0.4, trackCount: 3, minGapPx: 48 },
+      card: { activeType: 'minimal', types: { minimal: { appearance: { width: 360, height: 88, backgroundColor: '#123456' } } } }
+    }
+  });
+  assert.equal(result.generated, 1);
+  assert.equal(result.receivedDraft, true);
+  assert.equal(result.behaviorId, 'ticker');
+  assert.equal(result.historyWritten, false);
+  assert.equal(result.soundPlayed, false);
+  assert.equal(plugin.notificationStore.size, 0);
+  assert.equal(plugin.visualBindingRegistry.list().length, 0);
+  const create = calls.find(([type]) => type === 'scene.create')[1];
+  assert.equal(create.behavior.behaviorProfileId, 'ticker');
+  assert.equal(create.behavior.behaviorChannelId, 'visual.try-one.ticker');
+  assert.equal(create.visual.ticker.speedPxPerSec, 520);
+  assert.equal(create.visual.ticker.clickThrough, true);
+  assert.equal(create.visual.ticker.band, 'bottom');
+  assert.equal(create.visual.appearance.backgroundColor, '#123456');
+  assert.equal(create.width, 360);
+  assert.equal(create.height, 88);
+  assert.match(create.title, /试一条/);
+  assert.doesNotMatch(create.title, /chat\.assistant_reply/);
+});
+
+test('visual draft sample keeps stack off the ticker channel and size', async () => {
+  const plugin = new NotificationHubVNextPlugin(context());
+  const calls = [];
+  plugin.runtimeHost = { state: 'running', client: { async request(type, payload) { calls.push([type, payload]); if (type === 'health') return { payload: { result: { workArea: { left: 0, top: 0, width: 1920, height: 1080 }, layout: { direction: 'right', anchor: 'bottom-left', spacing: 12 } } } }; return { payload: { result: { status: 'accepted' } } }; } } };
+  const result = await plugin.runVisualDraftSample({
+    draft: {
+      global: { enabled: true },
+      behaviorId: 'stack',
+      ticker: { speedPxPerSec: 800, band: 'top', bandRatio: 0.28, trackCount: 10, minGapPx: 64 },
+      card: { activeType: 'minimal', types: { minimal: { appearance: { size: 'medium', backgroundColor: '#123456' } } } }
+    }
+  });
+  assert.equal(result.behaviorId, 'stack');
+  const create = calls.find(([type]) => type === 'scene.create')[1];
+  assert.equal(create.behavior.behaviorProfileId, 'stack');
+  assert.equal(create.behavior.behaviorChannelId, 'visual.try-one.stack');
+  assert.equal('ticker' in create.visual, false);
+  assert.equal(create.width, 420);
+  assert.equal(create.height, 220);
+});
+
+test('visual draft sample rolls ticker speed when speedRandom is on', async () => {
+  const plugin = new NotificationHubVNextPlugin(context());
+  const calls = [];
+  plugin.runtimeHost = { state: 'running', client: { async request(type, payload) { calls.push([type, payload]); if (type === 'health') return { payload: { result: { workArea: { left: 0, top: 0, width: 1920, height: 1080 }, layout: { direction: 'right', anchor: 'bottom-left', spacing: 12 } } } }; return { payload: { result: { status: 'accepted' } } }; } } };
+  const result = await plugin.runVisualDraftSample({
+    draft: {
+      global: { enabled: true },
+      behaviorId: 'ticker',
+      ticker: { speedPxPerSec: 400, band: 'top', bandRatio: 0.28, trackCount: 0, minGapPx: 64, speedRandom: true }
+    }
+  });
+  assert.equal(result.receivedDraft, true);
+  const create = calls.find(([type]) => type === 'scene.create')[1];
+  assert.equal(create.behavior.behaviorProfileId, 'ticker');
+  assert.equal('speedRandom' in create.visual.ticker, false);
+  assert.ok(Number.isInteger(create.visual.ticker.speedPxPerSec));
+  assert.ok(create.visual.ticker.speedPxPerSec >= 150 && create.visual.ticker.speedPxPerSec <= 800);
 });
 
 test('visual event experiment uses the bound profile without notification history or sound', async () => {
@@ -377,6 +516,106 @@ test('custom visual profiles protect referenced assets from deletion', async () 
   }
 });
 
+function fakeRuntime() {
+  const calls = [];
+  return {
+    calls,
+    host: {
+      state: 'running',
+      client: {
+        async request(type, payload) {
+          calls.push([type, payload]);
+          if (type === 'health') {
+            return { payload: { result: { workArea: { left: 0, top: 0, width: 1920, height: 1080 }, layout: { direction: 'right', anchor: 'bottom-left', spacing: 12 }, sceneCards: [] } } };
+          }
+          return { payload: { result: { status: 'accepted' } } };
+        }
+      }
+    }
+  };
+}
+
+function createChatRecord(plugin, notificationId) {
+  return plugin.notificationApi.createNotification({
+    notificationId,
+    traceId: `trace-${notificationId}`,
+    type: 'chat_message',
+    source: 'test',
+    title: '助手回复',
+    content: 'body'
+  });
+}
+
+test('unbound real notifications do not create a desktop card', async () => {
+  const plugin = new NotificationHubVNextPlugin(context());
+  const { calls, host } = fakeRuntime();
+  plugin.runtimeHost = host;
+  const record = createChatRecord(plugin, 'n-unbound');
+  const shown = await plugin.showNotificationScene(record);
+  plugin.enqueueNotificationScene(record);
+  await plugin.waitForNotificationSceneQueues();
+  assert.equal(shown.skipped, true);
+  assert.equal(calls.filter(([type]) => type === 'scene.create').length, 0);
+  assert.equal(plugin.visualBindingRegistry.list().length, 0);
+});
+
+test('saving the visual studio does not bind events or start showing cards', async () => {
+  const plugin = new NotificationHubVNextPlugin(context());
+  const { calls, host } = fakeRuntime();
+  plugin.runtimeHost = host;
+  await plugin.updateVisualSettings({ profile: { behaviorId: 'ticker' } });
+  assert.equal(plugin.visualBindingRegistry.list().length, 0);
+  assert.equal(plugin.visualProfileRegistry.get('visual.default').profile.behaviorId, 'ticker');
+  await plugin.showNotificationScene(createChatRecord(plugin, 'n-studio-save'));
+  assert.equal(calls.filter(([type]) => type === 'scene.create').length, 0);
+});
+
+test('bound ticker profile flies on visual.event.ticker', async () => {
+  const plugin = new NotificationHubVNextPlugin(context());
+  plugin.saveVisualProfile({
+    profileId: 'visual.ticker',
+    name: '弹幕方案',
+    profile: { behaviorId: 'ticker', ticker: { speedPxPerSec: 520, band: 'bottom' } }
+  });
+  plugin.applyVisualProfileToEvents({ profileId: 'visual.ticker', eventIds: ['chat.assistant_reply.completed'] });
+  assert.equal(plugin.getEventPresentationSettings().settings.events['chat.assistant_reply.completed'].behaviorProfileId, 'ticker');
+  assert.equal(plugin.visualBindingRegistry.get('chat.assistant_reply.completed').behaviorChannelId, 'visual.event.ticker');
+  const { calls, host } = fakeRuntime();
+  plugin.runtimeHost = host;
+  await plugin.showNotificationScene(createChatRecord(plugin, 'n-ticker-bound'));
+  const create = calls.find(([type]) => type === 'scene.create')[1];
+  assert.equal(create.behavior.behaviorProfileId, 'ticker');
+  assert.equal(create.behavior.behaviorChannelId, 'visual.event.ticker');
+  assert.equal(create.visual.ticker.speedPxPerSec, 520);
+});
+
+test('bound stack profile stacks on visual.event.stack', async () => {
+  const plugin = new NotificationHubVNextPlugin(context());
+  plugin.saveVisualProfile({ profileId: 'visual.stack', name: '堆叠方案', profile: { behaviorId: 'stack' } });
+  plugin.applyVisualProfileToEvents({ profileId: 'visual.stack', eventIds: ['chat.assistant_reply.completed'] });
+  assert.equal(plugin.getEventPresentationSettings().settings.events['chat.assistant_reply.completed'].behaviorProfileId, 'stack');
+  const { calls, host } = fakeRuntime();
+  plugin.runtimeHost = host;
+  await plugin.showNotificationScene(createChatRecord(plugin, 'n-stack-bound'));
+  const create = calls.find(([type]) => type === 'scene.create')[1];
+  assert.equal(create.behavior.behaviorProfileId, 'stack');
+  assert.equal(create.behavior.behaviorChannelId, 'visual.event.stack');
+});
+
+test('broken visual binding skips the desktop card instead of falling back to the studio draft', async () => {
+  const plugin = new NotificationHubVNextPlugin(context());
+  plugin.saveVisualProfile({ profileId: 'visual.gone', name: '将丢失', profile: { behaviorId: 'ticker' } });
+  plugin.applyVisualProfileToEvents({ profileId: 'visual.gone', eventIds: ['chat.assistant_reply.completed'] });
+  plugin.visualProfileRegistry.removeReference('visual.gone', 'chat.assistant_reply.completed');
+  plugin.visualProfileRegistry.remove('visual.gone');
+  const { calls, host } = fakeRuntime();
+  plugin.runtimeHost = host;
+  const shown = await plugin.showNotificationScene(createChatRecord(plugin, 'n-broken-binding'));
+  assert.equal(shown.skipped, true);
+  assert.equal(calls.filter(([type]) => type === 'scene.create').length, 0);
+  assert.ok(plugin.getVisualSettingsStatus().visualDiagnostics.some((entry) => entry.code === 'VISUAL_EVENT_BINDING_PROFILE_MISSING'));
+});
+
 test('plugin visual API keeps sound settings when restoring a visual event', async () => {
   const plugin = new NotificationHubVNextPlugin(context());
   plugin.visualProfileRegistry.register({ profileId: 'api.warning', name: 'API Warning', profile: {} });
@@ -386,7 +625,7 @@ test('plugin visual API keeps sound settings when restoring a visual event', asy
   assert.equal(plugin.getEventPresentationSettings().settings.events['tool.execution.failed'].soundProfileId, 'sound.failure');
 });
 
-test('parallel visual sample creates minimal, danmaku, and popup cards on isolated channels', async () => {
+test('parallel visual sample creates stack and ticker cards on try-one channels', async () => {
   const plugin = new NotificationHubVNextPlugin(context());
   const calls = [];
   plugin.runtimeHost = {
@@ -399,17 +638,79 @@ test('parallel visual sample creates minimal, danmaku, and popup cards on isolat
       }
     }
   };
-  const result = await plugin.runParallelCardSample({ count: 1, createCards: true });
-  assert.deepEqual(result.cardTypes, ['minimal', 'minimal', 'minimal']);
-  assert.deepEqual(Object.keys(result.channels), ['stack.main', 'ticker.main', 'popup.main']);
-  assert.equal(result.generated, 3);
+  const result = await plugin.runParallelCardSample({ count: 1, intervalMs: 0, createCards: true });
+  assert.deepEqual(result.cardTypes, ['minimal', 'minimal']);
+  assert.deepEqual(result.behaviors, ['stack', 'ticker']);
+  assert.deepEqual(Object.keys(result.channels), ['visual.try-one.stack', 'visual.try-one.ticker']);
+  assert.equal(result.generated, 2);
   const creates = calls.filter(([type]) => type === 'scene.create').map(([, payload]) => payload);
-  assert.equal(creates.length, 3);
-  assert.deepEqual(creates.map((card) => [card.visual.cardType, card.behavior.behaviorChannelId]), [
-    ['minimal', 'stack.main'],
-    ['minimal', 'ticker.main'],
-    ['minimal', 'popup.main']
+  assert.equal(creates.length, 2);
+  assert.deepEqual(creates.map((card) => [card.title, card.behavior.behaviorChannelId]), [
+    ['堆叠', 'visual.try-one.stack'],
+    ['弹幕', 'visual.try-one.ticker']
   ]);
-  assert.equal(new Set(creates.map((card) => card.id)).size, 3);
+  assert.equal(new Set(creates.map((card) => card.id)).size, 2);
   assert.equal(creates.every((card) => card.width > 0 && card.height > 0), true);
+  assert.equal(creates.some((card) => card.behavior.behaviorChannelId === 'popup.main'), false);
+});
+
+test('unbound defaultMode stack and ticker create cards without writing bindings', async () => {
+  const plugin = new NotificationHubVNextPlugin(context());
+  const { calls, host } = fakeRuntime();
+  plugin.runtimeHost = host;
+  await plugin.updateVisualSettings({ profile: { global: { enabled: true, defaultMode: 'stack' }, behaviorId: 'ticker' } });
+  assert.equal(plugin.visualBindingRegistry.list().length, 0);
+  const stacked = await plugin.showNotificationScene(createChatRecord(plugin, 'n-default-stack'));
+  assert.equal(stacked.skipped, undefined);
+  const stackCreate = calls.find(([type]) => type === 'scene.create');
+  assert.ok(stackCreate);
+  assert.equal(stackCreate[1].behavior.behaviorProfileId, 'stack');
+  assert.equal(plugin.visualBindingRegistry.list().length, 0);
+  calls.length = 0;
+  await plugin.updateVisualSettings({ profile: { global: { enabled: true, defaultMode: 'ticker' } } });
+  await plugin.showNotificationScene(createChatRecord(plugin, 'n-default-ticker'));
+  const tickerCreate = calls.find(([type]) => type === 'scene.create');
+  assert.equal(tickerCreate[1].behavior.behaviorProfileId, 'ticker');
+});
+
+test('global visual switch blocks bound real cards', async () => {
+  const plugin = new NotificationHubVNextPlugin(context());
+  plugin.saveVisualProfile({ profileId: 'visual.bound', name: 'Bound', profile: { behaviorId: 'stack' } });
+  plugin.applyVisualProfileToEvents({ profileId: 'visual.bound', eventIds: ['chat.assistant_reply.completed'] });
+  await plugin.updateVisualSettings({ profile: { global: { enabled: false, defaultMode: 'stack' } } });
+  const { calls, host } = fakeRuntime();
+  plugin.runtimeHost = host;
+  const shown = await plugin.showNotificationScene(createChatRecord(plugin, 'n-global-off'));
+  assert.equal(shown.skipped, true);
+  assert.equal(plugin.resolveVisualEventCardIntent(createChatRecord(plugin, 'n-global-off-2')).reason, 'global-disabled');
+  assert.equal(calls.filter(([type]) => type === 'scene.create').length, 0);
+});
+
+test('removing an in-use visual profile unbinds events first', () => {
+  const plugin = new NotificationHubVNextPlugin(context());
+  plugin.saveVisualProfile({ profileId: 'visual.in-use', name: '占用', profile: { behaviorId: 'stack' } });
+  plugin.applyVisualProfileToEvents({ profileId: 'visual.in-use', eventIds: ['chat.assistant_reply.completed', 'tool.execution.succeeded'] });
+  assert.equal(plugin.listCustomVisualEvents()[0].label, '助手回复完成');
+  const removed = plugin.removeVisualProfile('visual.in-use');
+  assert.equal(removed.removed, true);
+  assert.deepEqual(removed.unboundEventIds.sort(), ['chat.assistant_reply.completed', 'tool.execution.succeeded']);
+  assert.equal(plugin.visualBindingRegistry.get('chat.assistant_reply.completed'), null);
+  assert.equal(plugin.listCustomVisualEvents().length, 0);
+});
+
+test('visual diagnostics carry level for problems versus ok operations', async () => {
+  const plugin = new NotificationHubVNextPlugin(context());
+  plugin.runtimeHost = fakeRuntime().host;
+  await plugin.openVisualPreviewCard({ draft: { global: { enabled: true } } });
+  const ok = plugin.getVisualSettingsStatus().visualDiagnostics.find((entry) => entry.code === 'VISUAL_PREVIEW_CREATED');
+  assert.equal(ok.level, 'ok');
+  assert.ok(ok.details.cardId);
+  plugin.saveVisualProfile({ profileId: 'visual.gone', name: '将丢失', profile: {} });
+  plugin.applyVisualProfileToEvents({ profileId: 'visual.gone', eventIds: ['chat.assistant_reply.completed'] });
+  plugin.visualProfileRegistry.removeReference('visual.gone', 'chat.assistant_reply.completed');
+  plugin.visualProfileRegistry.remove('visual.gone');
+  await plugin.showNotificationScene(createChatRecord(plugin, 'n-diag-missing'));
+  const error = plugin.getVisualSettingsStatus().visualDiagnostics.find((entry) => entry.code === 'VISUAL_EVENT_BINDING_PROFILE_MISSING');
+  assert.equal(error.level, 'error');
+  assert.equal(error.details.eventId, 'chat.assistant_reply.completed');
 });

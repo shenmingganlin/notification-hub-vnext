@@ -255,13 +255,28 @@ ${PAGE_NAVIGATION_STYLE}
   var $ = function (id) { return document.getElementById(id); };
   var viewMeta = ${JSON.stringify(SETTINGS_VIEWS)};
   function requestHtml(path) {
-    if (window.hana && window.hana.api && typeof window.hana.api.fetch === "function") return window.hana.api.fetch(path);
-    var current = new URL(window.location.href);
-    var match = /^(.*\\/api\\/plugins\\/[^/]+)(?:\\/[^/]*)?$/.exec(current.pathname || "");
-    if (!match) return Promise.reject(new Error("设置页面缺少插件 API 路径"));
-    var url = new URL(match[1] + "/" + path, current.origin);
-    ["pluginSurfaceSession", "token"].forEach(function (key) { var value = current.searchParams.get(key); if (value) url.searchParams.set(key, value); });
-    return fetch(url.toString());
+    try {
+      if (window.hana && window.hana.api && typeof window.hana.api.fetch === "function") return Promise.resolve(window.hana.api.fetch(path));
+      var current = new URL(window.location.href);
+      var match = /^(.*\\/api\\/plugins\\/[^/]+)(?:\\/[^/]*)?$/.exec(current.pathname || "");
+      if (!match) return Promise.reject(new Error("设置页面缺少插件 API 路径"));
+      var url = new URL(match[1] + "/" + path, current.origin);
+      ["pluginSurfaceSession", "token"].forEach(function (key) { var value = current.searchParams.get(key); if (value) url.searchParams.set(key, value); });
+      return Promise.resolve(fetch(url.toString()));
+    } catch (error) {
+      return Promise.reject(error);
+    }
+  }
+  function readHtmlPayload(response) {
+    if (response == null) return Promise.resolve("");
+    if (typeof response === "string") return Promise.resolve(response);
+    if (typeof response.ok === "boolean" && response.ok === false) {
+      var fail = (typeof response.json === "function") ? Promise.resolve(response.json()) : Promise.resolve(response);
+      return fail.then(function (data) { throw new Error((data && data.error && data.error.message) || "设置子页面加载失败"); });
+    }
+    if (typeof response.text === "function") return Promise.resolve(response.text());
+    if (typeof response.json === "function") return Promise.resolve(response.json()).then(function (data) { return typeof data === "string" ? data : JSON.stringify(data); });
+    return Promise.resolve(String(response));
   }
   function setStatus(text, kind) { $("settings-shell-status").textContent = text; $("settings-shell-status").className = "settings-shell-status" + (kind ? " " + kind : ""); }
   function updateNavigation(view) { document.querySelectorAll("[data-settings-shell-view]").forEach(function (item) { item.classList.toggle("active", item.getAttribute("data-settings-shell-view") === view); }); var meta = viewMeta[view] || viewMeta.general; $("settings-shell-view-title").textContent = meta.title; $("settings-shell-view-description").textContent = meta.description; }
@@ -280,10 +295,10 @@ ${PAGE_NAVIGATION_STYLE}
     currentView = view;
     setStatus("已读取", "success");
   }
-  function loadView(view) {
-    if (!viewMeta[view] || viewMeta[view].comingSoon || view === currentView) return;
+  function loadView(view, force) {
+    if (!viewMeta[view] || viewMeta[view].comingSoon || (view === currentView && !force)) return;
     setStatus("正在读取…", "");
-    requestHtml("settings-content?view=" + encodeURIComponent(view)).then(function (response) { if (!response.ok) return response.json().then(function (data) { throw new Error(data.error && data.error.message || "设置子页面加载失败"); }); return response.text(); }).then(function (html) { mountFragment(html, view); }).catch(function (error) { setStatus(error.message || "设置子页面加载失败", "error"); });
+    Promise.resolve(requestHtml("settings-content?view=" + encodeURIComponent(view))).then(readHtmlPayload).then(function (html) { mountFragment(html, view); }).catch(function (error) { setStatus(error.message || "设置子页面加载失败", "error"); });
   }
   window.NotificationHubSettingsShell = { loadView: loadView, mount: mountFragment };
   document.addEventListener("notification-hub-settings-status", function (event) { var detail = event && event.detail || {}; if (detail.text) setStatus(detail.text, detail.kind || "success"); });

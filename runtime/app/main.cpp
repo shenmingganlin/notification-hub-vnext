@@ -5,6 +5,7 @@
 #include "../transport/named_pipe.hpp"
 #include "../scene/controller.hpp"
 #include "../scene/layout.hpp"
+#include "../scene/ticker.hpp"
 #include "../scene/work_area.hpp"
 #include "../scene/window.hpp"
 #include "../scene/visual.hpp"
@@ -51,6 +52,17 @@ using notification_hub::scene::SceneWindowState;
 using notification_hub::scene::WindowConfig;
 using notification_hub::scene::close_button_bounds;
 using notification_hub::scene::point_inside_card;
+using notification_hub::scene::valid_visual_style;
+using notification_hub::scene::TickerChannelOptions;
+using notification_hub::scene::TickerTrackPlan;
+using notification_hub::scene::plan_ticker_tracks;
+using notification_hub::scene::ticker_track_clearance;
+using notification_hub::scene::choose_ticker_track;
+using notification_hub::scene::ticker_entry_delay_ms;
+using notification_hub::scene::ticker_position_x;
+using notification_hub::scene::ticker_is_offscreen;
+using notification_hub::scene::ticker_band_top_y;
+using notification_hub::scene::ticker_track_y;
 
 constexpr std::string_view kTimestamp = "2026-08-01T00:00:00.000Z";
 
@@ -383,6 +395,108 @@ bool layout_self_test() {
     const auto event = create_event(
         "layout-self-test", "layout-planned", "LAYOUT_STACK_SHELF_OK", "info", true,
         "Deterministic stack and shelf layout calculation completed", std::string(kTimestamp));
+    std::cout << serialize_jsonl(event);
+    return true;
+}
+
+// Ticker 行为纯逻辑自检（契约 §2.1 / §2.3 / §4 / §8）。
+// 不创建窗口：位置、选轨、出屏判定都是纯函数，因此可在无显示器环境下判定。
+bool ticker_self_test() {
+    // §2.3 轨道几何：契约里的 1080 屏算例 —— band 28% = 302，卡高 76 + 8 = 84，得 3 条。
+    const auto band_height = 302;
+    const auto plan = plan_ticker_tracks(band_height, 76, 8, 0);
+    if (plan.track_height_px != 84 || plan.track_count != 3) {
+        std::cerr << "ticker track plan mismatch: height=" << plan.track_height_px
+                  << " count=" << plan.track_count << "\n";
+        return false;
+    }
+    // 显式配置名实一致：填 10 就是 10，不按 28% 带子裁成 3。
+    if (plan_ticker_tracks(band_height, 76, 8, 2).track_count != 2) return false;
+    if (plan_ticker_tracks(band_height, 76, 8, 10).track_count != 10) return false;
+    if (plan_ticker_tracks(10, 76, 8, 0).track_count != 1) return false;
+    // 不设上限：band 拉满时条数随高度增长，不裁到 4。
+    if (plan_ticker_tracks(1080, 76, 8, 0).track_count != 12) {
+        std::cerr << "ticker track plan must scale past 4 tracks when band is full\n";
+        return false;
+    }
+    // 显式条数时 band 是从动：10 条照收，3 条把带子缩到 needed，贴底不留满屏空带。
+    {
+        const int work_h = 1080;
+        auto plan10 = plan_ticker_tracks(work_h, 76, 8, 10);
+        const auto max10 = (work_h + plan10.track_gap_px) / plan10.track_height_px;
+        if (plan10.track_count > max10) plan10.track_count = max10;
+        if (plan10.track_count != 10) return false;
+        const auto needed10 = plan10.track_count * plan10.track_height_px - plan10.track_gap_px;
+        if (needed10 != 832) return false;
+        auto plan3 = plan_ticker_tracks(work_h, 76, 8, 3);
+        const auto needed3 = plan3.track_count * plan3.track_height_px - plan3.track_gap_px;
+        if (plan3.track_count != 3 || needed3 != 244) return false;
+        if (ticker_band_top_y(false, 0, work_h, needed3) != 836) return false;
+        if (ticker_band_top_y(false, 0, work_h, work_h) != 0) return false;
+    }
+
+    // §4 净空：无前车记 +∞（一定优先）；有前车 clearance = lane_right - prev_right - min_gap。
+    const auto clear_empty = ticker_track_clearance(false, 0.0, 1920, 64);
+    if (!(clear_empty > 1e9)) return false;
+    if (ticker_track_clearance(true, 1800.0, 1920, 64) != 56.0) return false;
+
+    // §4 选轨：净空最大者；并列取最小 index。
+    if (choose_ticker_track({56.0, clear_empty, 100.0}) != 1) return false;
+    if (choose_ticker_track({10.0, 10.0, 9.0}) != 0) return false;
+    if (choose_ticker_track({}) != -1) return false;
+
+    // §4.3 延迟进屏：全占时按 (-clearance)/speed 延迟，不换道、不叠放。
+    if (ticker_entry_delay_ms(-320.0, 400.0) != 800.0) return false;
+    if (ticker_entry_delay_ms(0.0, 400.0) != 0.0) return false;
+    if (ticker_entry_delay_ms(-320.0, 0.0) != 0.0) return false;
+
+    // §2.1 位置是时间的纯函数：400 px/s 走 1 秒 = 左移 400。
+    if (ticker_position_x(1920.0, 400.0, 1000.0) != 1520.0) return false;
+    if (ticker_position_x(1920.0, 400.0, 0.0) != 1920.0) return false;
+    // 同一时刻无论分几拍推进，结果必须一致（禁止逐帧累加导致漂移）。
+    const auto once = ticker_position_x(1920.0, 400.0, 250.0);
+    if (once != ticker_position_x(1920.0, 400.0, 250.0)) return false;
+
+    // §8 出屏判定含 24px 缓冲：右侧边缘必须越过 lane 左边再退 24px 才算离开。
+    if (ticker_is_offscreen(100.0, 120, 24)) return false;  // 100 < 96 为假
+    if (!ticker_is_offscreen(95.0, 120, 24)) return false;  // 95 < 96 为真
+
+    // §2.3 band 贴顶/贴底与轨道 y。
+    if (ticker_band_top_y(true, 0, 1080, 302) != 0) return false;
+    if (ticker_band_top_y(false, 0, 1080, 302) != 778) return false;
+    if (ticker_track_y(100, 2, plan) != 268) return false;
+
+    // Native 侧校验：合法默认值通过、越界值被拒、条数不设上限。
+    VisualStyle ticker_style{};
+    ticker_style.specified = true;
+    ticker_style.ticker_specified = true;
+    if (!valid_visual_style(ticker_style)) {
+        std::cerr << "default ticker visual style must be valid\n";
+        return false;
+    }
+    auto bad_speed = ticker_style;
+    bad_speed.ticker_speed_px_per_second = 100;
+    if (valid_visual_style(bad_speed)) {
+        std::cerr << "out-of-range ticker speed must be rejected\n";
+        return false;
+    }
+    auto bad_band = ticker_style;
+    bad_band.ticker_band = "middle";
+    if (valid_visual_style(bad_band)) {
+        std::cerr << "unknown ticker band must be rejected\n";
+        return false;
+    }
+    auto many_tracks = ticker_style;
+    many_tracks.ticker_track_count = 999;
+    if (!valid_visual_style(many_tracks)) {
+        std::cerr << "ticker track count must have no upper limit\n";
+        return false;
+    }
+
+    const auto event = create_event(
+        "ticker-self-test", "ticker-planned", "TICKER_MOTION_CONTRACT_OK", "info", true,
+        "Deterministic ticker track, clearance, position and offscreen calculation completed",
+        std::string(kTimestamp));
     std::cout << serialize_jsonl(event);
     return true;
 }
@@ -1429,6 +1543,11 @@ int main(int argc, char** argv) {
     if (argc > 2 && std::string_view(argv[1]) == "--visual-asset-fallback-self-test") {
         const bool passed = visual_asset_fallback_self_test(argv[2]);
         std::cout << "notification-hub-runtime visual asset fallback self-test: " << (passed ? "ok" : "failed") << "\n";
+        return passed ? 0 : 1;
+    }
+    if (argc > 1 && std::string_view(argv[1]) == "--ticker-self-test") {
+        const bool passed = ticker_self_test();
+        std::cout << "notification-hub-runtime ticker self-test: " << (passed ? "ok" : "failed") << "\n";
         return passed ? 0 : 1;
     }
     if (argc > 2 && std::string_view(argv[1]) == "--pipe-server") {

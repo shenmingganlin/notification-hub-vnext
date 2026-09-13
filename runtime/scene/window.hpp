@@ -42,6 +42,7 @@ public:
     bool is_frame_rendered() const noexcept;
     bool is_close_requested() const noexcept;
     bool is_dragging() const noexcept;
+    bool ignores_pointer() const noexcept;
     unsigned int dpi() const noexcept;
     bool apply_dpi_change(unsigned int dpi, const void* suggested_rect) noexcept;
     bool get_window_position(int& x, int& y) const noexcept;

@@ -81,6 +81,7 @@ add_executable(notification-hub-runtime
   scene/layout.cpp
   scene/work_area.cpp
   scene/controller.cpp
+  scene/ticker.cpp
 )
 
 target_include_directories(notification-hub-runtime PRIVATE
@@ -88,6 +89,12 @@ target_include_directories(notification-hub-runtime PRIVATE
 )
 
 target_compile_features(notification-hub-runtime PRIVATE cxx_std_20)
+
+# 源文件使用 UTF-8（含中文注释）。缺了这个开关，MSVC 会在中文代码页下把
+# UTF-8 多字节序列按 ANSI 解析，导致注释吞掉换行、代码解析错位。
+if (MSVC)
+  target_compile_options(notification-hub-runtime PRIVATE /utf-8)
+endif()
 
 target_compile_definitions(notification-hub-runtime PRIVATE
   NOTIFICATION_HUB_VERSION="${PROJECT_VERSION}"
@@ -111,6 +118,7 @@ add_test(NAME runtime_drag_interaction_self_test COMMAND notification-hub-runtim
 add_test(NAME runtime_visual_self_test COMMAND notification-hub-runtime --visual-self-test)
 add_test(NAME runtime_desktop_visual_self_test COMMAND notification-hub-runtime --desktop-visual-self-test)
 add_test(NAME runtime_desktop_hit_test_self_test COMMAND notification-hub-runtime --desktop-hit-test-self-test)
+add_test(NAME runtime_ticker_self_test COMMAND notification-hub-runtime --ticker-self-test)
 add_test(NAME runtime_dpi_self_test COMMAND notification-hub-runtime --dpi-self-test)
 add_test(NAME runtime_dpi_transition_self_test COMMAND notification-hub-runtime --dpi-transition-self-test)
 add_test(NAME runtime_scene_controller_self_test COMMAND notification-hub-runtime --scene-controller-self-test)

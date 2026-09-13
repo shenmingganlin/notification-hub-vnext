@@ -10,7 +10,7 @@ $ErrorActionPreference = 'Stop'
 
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $canonicalVersion = (Get-Content (Join-Path $repoRoot 'VERSION') -Raw -Encoding UTF8).Trim()
-if ($canonicalVersion -ne '0.1.5') { throw "VERSION must be exactly 0.1.5, got '$canonicalVersion'" }
+if ($canonicalVersion -ne '0.1.6') { throw "VERSION must be exactly 0.1.6, got '$canonicalVersion'" }
 
 $packageJsonPath = Join-Path $repoRoot 'package.json'
 $packageJson = Get-Content $packageJsonPath -Raw -Encoding UTF8 | ConvertFrom-Json

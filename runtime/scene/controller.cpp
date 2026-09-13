@@ -2,6 +2,7 @@
 
 #include "window.hpp"
 #include "layout.hpp"
+#include "ticker.hpp"
 #include "work_area.hpp"
 #include "../protocol/message.hpp"
 
@@ -33,6 +34,26 @@ namespace {
 bool is_visual_preview_card(std::string_view id) {
     return id.rfind("nh-visual-preview-", 0) == 0;
 }
+
+bool is_ticker_profile(std::string_view profile_id) {
+    return profile_id == "ticker" || profile_id == "danmaku";
+}
+
+#ifdef _WIN32
+bool apply_card_window_pos(HWND hwnd, int x, int y, int width, int height, bool size_changed) {
+    if (hwnd == nullptr) return false;
+    UINT flags = SWP_NOACTIVATE | SWP_NOZORDER;
+    if (!size_changed) flags |= SWP_NOSIZE;
+    return SetWindowPos(
+        hwnd,
+        nullptr,
+        x,
+        y,
+        size_changed ? width : 0,
+        size_changed ? height : 0,
+        flags) != FALSE;
+}
+#endif
 
 bool visual_asset_file_is_trusted(std::string_view root_dir, const VisualAssetRecord& asset) {
 #ifdef _WIN32
@@ -202,6 +223,10 @@ public:
         std::string channel_id;
         std::string profile_id;
         std::vector<std::string> card_order;
+        // 通道取最新一张 ticker 卡的 band / 轨道 / 间距；速度在出生时抄到每张卡上，
+        // 飞行中的卡不跟着改，试一条才能立刻用上新旋钮。
+        TickerChannelOptions ticker_options{};
+        bool ticker_options_specified{};
     };
 
     static std::string channel_id_for(const SceneCardState& card) {
@@ -254,9 +279,44 @@ public:
                 channel_it = behavior_channels.emplace(channel_id, std::move(channel)).first;
                 behavior_channel_order.push_back(channel_id);
             }
+            if (card_it->second.visual.ticker_specified) {
+                auto& options = channel_it->second.ticker_options;
+                options.speed_px_per_second = static_cast<double>(card_it->second.visual.ticker_speed_px_per_second);
+                options.band_top = card_it->second.visual.ticker_band != "bottom";
+                options.band_ratio = card_it->second.visual.ticker_band_ratio;
+                options.track_count = card_it->second.visual.ticker_track_count;
+                options.track_gap_px = card_it->second.visual.ticker_track_gap_px;
+                options.min_gap_px = card_it->second.visual.ticker_min_gap_px;
+                channel_it->second.ticker_options_specified = true;
+            }
             channel_it->second.card_order.push_back(id);
         }
     }
+
+    // 弹幕卡片的运动状态。位置不存当前值，而是存「出生时刻 + 出生位置」，
+    // 每拍按契约 §2.1 的纯函数重算——这样心跳抖动/丢拍不会造成漂移。
+    struct TickerMotion {
+        std::chrono::steady_clock::time_point spawn{};
+        double spawn_left_x{};
+        double speed_px_per_second{400.0};
+        int track_index{};
+        int band_top{};
+        int lane_left{};
+        int exit_margin_px{24};
+        TickerTrackPlan plan{};
+    };
+
+    // Ticker 通道摆位（契约 §3 / §4）。返回 false 表示几何无法应用。
+    bool place_ticker_channel(
+        const BehaviorChannelState& channel,
+        const StackLayoutOptions& options,
+        std::string& error_code,
+        std::string& error_message);
+
+    std::unordered_map<std::string, TickerMotion> ticker_motions;
+    bool ticker_ticking{};
+    std::chrono::steady_clock::time_point last_tick{};
+    int ticker_heartbeat_ms{16};
 
     std::unique_ptr<SceneWindow> window;
     SceneWindowState state{};
@@ -274,6 +334,157 @@ public:
     std::unordered_map<std::string, VisualAssetRecord> visual_assets;
     std::string visual_asset_root_dir;
 };
+
+bool RuntimeSceneController::Impl::place_ticker_channel(
+    const BehaviorChannelState& channel,
+    const StackLayoutOptions& options,
+    std::string& error_code,
+    std::string& error_message) {
+    const auto& ticker = channel.ticker_options;
+    const auto lane_left = options.work_area_left;
+    const auto lane_right = options.work_area_left + options.work_area_width;
+    // 卡高取本通道最大者：契约 §2.2 要求等高，用最大值保证轨道容纳。
+    auto card_height = 0;
+    for (const auto& id : channel.card_order) {
+        const auto card_it = cards.find(id);
+        if (card_it == cards.end()) continue;
+        const auto height = card_it->second.layout_height > 0
+            ? card_it->second.layout_height
+            : card_it->second.window.height;
+        if (height > card_height) card_height = height;
+    }
+    if (card_height <= 0) return true;
+
+    auto band_height = 0;
+    auto band_top = options.work_area_top;
+    TickerTrackPlan plan{};
+    if (ticker.track_count > 0) {
+        plan = plan_ticker_tracks(options.work_area_height, card_height, ticker.track_gap_px, ticker.track_count);
+    } else {
+        band_height = static_cast<int>(std::lround(
+            static_cast<double>(options.work_area_height) * ticker.band_ratio));
+        band_top = ticker_band_top_y(
+            ticker.band_top, options.work_area_top, options.work_area_height, band_height);
+        plan = plan_ticker_tracks(band_height, card_height, ticker.track_gap_px, ticker.track_count);
+    }
+    const auto max_tracks = (std::max)(1, (options.work_area_height + plan.track_gap_px) / plan.track_height_px);
+    if (plan.track_count > max_tracks) plan.track_count = max_tracks;
+    const auto needed_band = plan.track_count * plan.track_height_px - plan.track_gap_px;
+    if (ticker.track_count > 0) {
+        band_height = (std::min)(options.work_area_height, needed_band);
+        band_top = ticker_band_top_y(
+            ticker.band_top, options.work_area_top, options.work_area_height, band_height);
+    } else if (needed_band > band_height) {
+        band_height = (std::min)(options.work_area_height, needed_band);
+        band_top = ticker_band_top_y(
+            ticker.band_top, options.work_area_top, options.work_area_height, band_height);
+    }
+    const auto now = std::chrono::steady_clock::now();
+
+    for (const auto& id : channel.card_order) {
+        auto card_it = cards.find(id);
+        auto window_it = card_windows.find(id);
+        if (card_it == cards.end() || window_it == card_windows.end() || window_it->second == nullptr) continue;
+
+        auto motion_it = ticker_motions.find(id);
+        if (motion_it == ticker_motions.end()) {
+            // 新卡：按「进屏点前方的净空」选轨（契约 §4），不是按轨道里卡片的数量。
+            std::vector<double> nearest_ahead(static_cast<std::size_t>(plan.track_count), 0.0);
+            std::vector<bool> has_ahead(static_cast<std::size_t>(plan.track_count), false);
+            for (const auto& other_id : channel.card_order) {
+                if (other_id == id) continue;
+                const auto other_motion_it = ticker_motions.find(other_id);
+                const auto other_card_it = cards.find(other_id);
+                if (other_motion_it == ticker_motions.end() || other_card_it == cards.end()) continue;
+                const auto& other = other_motion_it->second;
+                if (other.track_index < 0 || other.track_index >= plan.track_count) continue;
+                const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+                    now - other.spawn).count();
+                const auto other_width = other_card_it->second.layout_width > 0
+                    ? other_card_it->second.layout_width
+                    : other_card_it->second.window.width;
+                const auto right = ticker_position_x(
+                    other.spawn_left_x, other.speed_px_per_second, static_cast<double>(elapsed))
+                    + static_cast<double>(other_width);
+                const auto index = static_cast<std::size_t>(other.track_index);
+                if (!has_ahead[index] || right > nearest_ahead[index]) {
+                    nearest_ahead[index] = right;
+                    has_ahead[index] = true;
+                }
+            }
+
+            std::vector<double> clearances(static_cast<std::size_t>(plan.track_count), 0.0);
+            for (auto index = 0; index < plan.track_count; ++index) {
+                clearances[static_cast<std::size_t>(index)] = ticker_track_clearance(
+                    has_ahead[static_cast<std::size_t>(index)],
+                    nearest_ahead[static_cast<std::size_t>(index)],
+                    lane_right,
+                    ticker.min_gap_px);
+            }
+            const auto track_index = choose_ticker_track(clearances);
+            if (track_index < 0) continue;
+            auto card_speed = ticker.speed_px_per_second;
+            if (card_it->second.visual.ticker_specified) {
+                card_speed = static_cast<double>(card_it->second.visual.ticker_speed_px_per_second);
+                if (card_speed < 150.0) card_speed = 150.0;
+                if (card_speed > 800.0) card_speed = 800.0;
+            }
+            // 全占时不换道、不叠放：把出生时间推到未来，卡片在屏外等待（契约 §4.3）。
+            const auto delay_ms = ticker_entry_delay_ms(
+                clearances[static_cast<std::size_t>(track_index)], card_speed);
+
+            TickerMotion motion{};
+            motion.spawn = now + std::chrono::milliseconds(static_cast<long long>(std::llround(delay_ms)));
+            motion.spawn_left_x = static_cast<double>(lane_right);
+            motion.speed_px_per_second = card_speed;
+            motion.track_index = track_index;
+            motion.band_top = band_top;
+            motion.lane_left = lane_left;
+            motion.exit_margin_px = ticker.exit_margin_px;
+            motion.plan = plan;
+            ticker_motions.emplace(id, motion);
+            motion_it = ticker_motions.find(id);
+        } else {
+            // 其它卡片进出可能改变本通道 lane：出屏判定必须用当前 lane，
+            // 否则会把弹幕提前回收（或永远回收不掉）。
+            // 只刷新判定参数，不动出生点，避免飞行中的卡片跳变。
+            motion_it->second.lane_left = lane_left;
+            motion_it->second.exit_margin_px = ticker.exit_margin_px;
+        }
+
+        if (motion_it == ticker_motions.end()) continue;
+        const auto& motion = motion_it->second;
+        const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - motion.spawn).count();
+        const auto x = static_cast<int>(std::lround(ticker_position_x(
+            motion.spawn_left_x, motion.speed_px_per_second, static_cast<double>(elapsed))));
+        const auto y = ticker_track_y(motion.band_top, motion.track_index, motion.plan);
+        const auto width = card_it->second.layout_width > 0
+            ? card_it->second.layout_width
+            : card_it->second.window.width;
+        const auto height = card_it->second.layout_height > 0
+            ? card_it->second.layout_height
+            : card_it->second.window.height;
+        const auto size_changed = card_it->second.window.width != width
+            || card_it->second.window.height != height;
+        card_it->second.window = SceneWindowState{x, y, width, height};
+#ifdef _WIN32
+        const auto hwnd = static_cast<HWND>(window_it->second->native_handle());
+        if (!apply_card_window_pos(hwnd, x, y, width, height, size_changed)) {
+            error_code = "RUNTIME_SCENE_WINDOW_APPLY_FAILED";
+            error_message = "Ticker channel layout could not apply card geometry";
+            return false;
+        }
+#endif
+        // 关键性能点：内容未变时只移动，不重绘。弹幕每拍重画一次会把性能拖垮。
+        if (size_changed
+            && (!window_it->second->resize_render_target(width, height) || !window_it->second->paint())) {
+            error_code = "RUNTIME_SCENE_WINDOW_APPLY_FAILED";
+            error_message = "Ticker channel layout could not resize the card surface";
+            return false;
+        }
+    }
+    return true;
+}
 
 void RuntimeSceneController::configure_visual_assets(const std::vector<VisualAssetRecord>& assets, std::string_view root_dir) {
     if (impl_ == nullptr) impl_ = new Impl();
@@ -663,36 +874,76 @@ bool RuntimeSceneController::apply_channel_layout(
 
     impl_->rebuild_behavior_channels();
     if (impl_->behavior_channel_order.size() > 1 || impl_->has_explicit_behavior_channels()) {
+        auto card_is_ticker = [&](const std::string& id) {
+            const auto card_it = impl_->cards.find(id);
+            if (card_it == impl_->cards.end()) return false;
+            return is_ticker_profile(Impl::profile_id_for(card_it->second));
+        };
+        int occupying_count = 0;
+        for (const auto& occupying_id : impl_->behavior_channel_order) {
+            const auto occupying_it = impl_->behavior_channels.find(occupying_id);
+            if (occupying_it == impl_->behavior_channels.end()) continue;
+            const bool has_stack = std::any_of(
+                occupying_it->second.card_order.begin(),
+                occupying_it->second.card_order.end(),
+                [&](const std::string& id) { return !card_is_ticker(id); });
+            if (has_stack) occupying_count += 1;
+        }
         const auto channel_count = static_cast<int>(impl_->behavior_channel_order.size());
         int lane_left = effective_work_area.rect.left;
+        int occupying_index = 0;
         for (int channel_index = 0; channel_index < channel_count; ++channel_index) {
             const auto& channel_id = impl_->behavior_channel_order[static_cast<std::size_t>(channel_index)];
             const auto channel_it = impl_->behavior_channels.find(channel_id);
             if (channel_it == impl_->behavior_channels.end()) continue;
+            const auto profile_id = channel_it->second.profile_id;
+
+            auto channel_options = options;
+            channel_options.work_area_height = effective_work_area.rect.height;
+            channel_options.work_area_top = effective_work_area.rect.top;
+            channel_options.mode = options.mode;
+            channel_options.direction = options.direction;
+            channel_options.anchor = options.anchor;
+
+            std::vector<std::string> ticker_ids;
+            std::vector<std::string> stack_ids;
+            for (const auto& id : channel_it->second.card_order) {
+                if (card_is_ticker(id)) ticker_ids.push_back(id);
+                else stack_ids.push_back(id);
+            }
+
+            // 弹幕叠满屏，不跟堆叠抢半条 lane。同通道里的堆叠卡仍走堆叠，不被第一张弹幕锁死。
+            if (!ticker_ids.empty()) {
+                auto ticker_channel = channel_it->second;
+                ticker_channel.card_order = ticker_ids;
+                auto ticker_options = channel_options;
+                ticker_options.work_area_width = effective_work_area.rect.width;
+                ticker_options.work_area_left = effective_work_area.rect.left;
+                ticker_options.mode = LayoutMode::Shelf;
+                ticker_options.direction = StackDirection::Right;
+                ticker_options.anchor = StackAnchor::TopLeft;
+                if (!impl_->place_ticker_channel(
+                    ticker_channel, ticker_options, error_code, error_message)) {
+                    return false;
+                }
+            }
+            if (stack_ids.empty()) continue;
+
+            const auto remaining_occupying = occupying_count - occupying_index;
             const auto remaining_width = effective_work_area.rect.width - (lane_left - effective_work_area.rect.left);
-            const auto lane_width = channel_index == channel_count - 1
+            const auto lane_width = remaining_occupying <= 1
                 ? remaining_width
-                : effective_work_area.rect.width / channel_count;
+                : effective_work_area.rect.width / occupying_count;
+            occupying_index += 1;
             if (lane_width <= 0) {
                 error_code = "LAYOUT_BEHAVIOR_CHANNEL_INVALID";
                 error_message = "Behavior channels could not be assigned positive layout lanes";
                 return false;
             }
 
-            auto channel_options = options;
-            const auto profile_id = channel_it->second.profile_id;
             channel_options.work_area_width = lane_width;
-            channel_options.work_area_height = effective_work_area.rect.height;
             channel_options.work_area_left = lane_left;
-            channel_options.work_area_top = effective_work_area.rect.top;
-            channel_options.mode = options.mode;
-            channel_options.direction = options.direction;
-            channel_options.anchor = options.anchor;
-            if (profile_id == "ticker" || profile_id == "danmaku") {
-                channel_options.mode = LayoutMode::Shelf;
-                channel_options.direction = StackDirection::Right;
-                channel_options.anchor = StackAnchor::TopLeft;
-            } else if (profile_id == "popup") {
+            if (profile_id == "popup") {
                 channel_options.mode = LayoutMode::Stack;
                 channel_options.direction = StackDirection::Down;
                 channel_options.anchor = StackAnchor::TopLeft;
@@ -703,8 +954,8 @@ bool RuntimeSceneController::apply_channel_layout(
             }
 
             std::vector<StackCardInput> channel_inputs;
-            channel_inputs.reserve(channel_it->second.card_order.size());
-            for (const auto& id : channel_it->second.card_order) {
+            channel_inputs.reserve(stack_ids.size());
+            for (const auto& id : stack_ids) {
                 const auto card_it = impl_->cards.find(id);
                 if (card_it == impl_->cards.end()) continue;
                 channel_inputs.push_back(StackCardInput{
@@ -1157,6 +1408,75 @@ bool RuntimeSceneController::pump_messages() {
         }
     }
     return changed;
+}
+
+bool RuntimeSceneController::tick_animation() {
+#ifdef _WIN32
+    if (impl_ == nullptr) return false;
+    // 无 ticker 卡片 → 心跳停摆，空闲零开销（契约 §2.5）。
+    if (impl_->ticker_motions.empty()) {
+        impl_->ticker_ticking = false;
+        return false;
+    }
+
+    const auto now = std::chrono::steady_clock::now();
+    if (impl_->ticker_ticking) {
+        const auto since_last = std::chrono::duration_cast<std::chrono::milliseconds>(
+            now - impl_->last_tick).count();
+        if (since_last < impl_->ticker_heartbeat_ms) return false;
+    }
+    impl_->last_tick = now;
+    impl_->ticker_ticking = true;
+
+    auto changed = false;
+    std::vector<std::string> exiting;
+    exiting.reserve(impl_->ticker_motions.size());
+    for (const auto& entry : impl_->ticker_motions) {
+        const auto& card_id = entry.first;
+        const auto& motion = entry.second;
+        auto card_it = impl_->cards.find(card_id);
+        const auto window_it = impl_->card_windows.find(card_id);
+        if (card_it == impl_->cards.end() || window_it == impl_->card_windows.end()
+            || window_it->second == nullptr) {
+            exiting.push_back(card_id);
+            continue;
+        }
+
+        const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+            now - motion.spawn).count();
+        const auto x = static_cast<int>(std::lround(ticker_position_x(
+            motion.spawn_left_x, motion.speed_px_per_second, static_cast<double>(elapsed))));
+        const auto y = ticker_track_y(motion.band_top, motion.track_index, motion.plan);
+        const auto width = card_it->second.window.width;
+        const auto height = card_it->second.window.height;
+
+        if (card_it->second.window.x != x || card_it->second.window.y != y) {
+            const auto hwnd = static_cast<HWND>(window_it->second->native_handle());
+            if (apply_card_window_pos(hwnd, x, y, width, height, false)) {
+                card_it->second.window.x = x;
+                card_it->second.window.y = y;
+                changed = true;
+            }
+        }
+        // 出屏回收（契约 §8）：含 24px 缓冲，避免窗口边缘被「切一半」留在屏上。
+        if (ticker_is_offscreen(
+            static_cast<double>(x + width), motion.lane_left, motion.exit_margin_px)) {
+            exiting.push_back(card_id);
+        }
+    }
+
+    for (const auto& id : exiting) {
+        std::string error_code;
+        std::string error_message;
+        if (dismiss_card(id, error_code, error_message, "scene.ticker-exit")) {
+            changed = true;
+        }
+        impl_->ticker_motions.erase(id);
+    }
+    return changed;
+#else
+    return false;
+#endif
 }
 
 bool RuntimeSceneController::has_window() const noexcept {

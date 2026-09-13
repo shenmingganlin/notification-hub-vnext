@@ -1,5 +1,6 @@
 import { createVisualProfileRegistry } from './visual-profile-registry.js';
 import { createEventBindingRegistry } from './event-binding-registry.js';
+import { resolveVisualEventNativeBehavior } from './visual-event-native-behavior.js';
 
 export const VISUAL_REGISTRY_SNAPSHOT_VERSION = 1;
 function error(code, message, field) { return Object.assign(new Error(message), { code, details: field ? { field } : {} }); }
@@ -34,7 +35,7 @@ export function restoreVisualRegistrySnapshot(snapshot, { profileRegistry, bindi
   return { revision: snapshot.revision, profileCount: snapshot.profiles.length, bindingCount: snapshot.bindings.length };
 }
 
-export function projectVisualRegistryToEventSettings({ settings, bindingRegistry } = {}) {
+export function projectVisualRegistryToEventSettings({ settings, bindingRegistry, profileRegistry } = {}) {
   if (!plain(settings) || !bindingRegistry || typeof bindingRegistry.list !== 'function') throw error('VISUAL_REGISTRY_PROJECTION_INVALID', 'settings and bindingRegistry are required');
   const events = { ...(settings.events ?? {}) };
   for (const binding of bindingRegistry.list()) {
@@ -43,7 +44,13 @@ export function projectVisualRegistryToEventSettings({ settings, bindingRegistry
       behaviorProfileId: 'stack',
       behaviorChannelId: 'stack.main'
     };
-    events[binding.eventId] = { ...current, visualProfileId: text('visualProfileId', binding.visualProfileId), ...(binding.behaviorChannelId ? { behaviorChannelId: binding.behaviorChannelId } : {}) };
+    const native = resolveVisualEventNativeBehavior(profileRegistry?.get?.(binding.visualProfileId)?.profile);
+    events[binding.eventId] = {
+      ...current,
+      visualProfileId: text('visualProfileId', binding.visualProfileId),
+      behaviorProfileId: native.behaviorProfileId,
+      behaviorChannelId: binding.behaviorChannelId ?? native.behaviorChannelId
+    };
   }
   return clone({ ...settings, events });
 }

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { createVisualProfile, createVisualSettings, VISUAL_PRESETS } from '../../plugin/domain/visual-settings.js';
+import { createVisualProfile, createVisualSettings, VISUAL_PRESETS, VALID_DEFAULT_MODES } from '../../plugin/domain/visual-settings.js';
 
 test('visual profile provides independent global and category presets', () => {
   const profile = createVisualProfile({ global: { preset: 'soft', intensity: 'expressive' }, categories: { error: { preset: 'critical', enabled: false } } });
@@ -38,4 +38,13 @@ test('visual profile strategies reject unsafe ids and arbitrary fields', () => {
 test('visual settings reject arbitrary styling fields and invalid presets', () => {
   assert.throws(() => createVisualSettings({ profile: { global: { css: 'body{}' } } }), (error) => error.code === 'VISUAL_PROFILE_FIELD_UNKNOWN');
   assert.throws(() => createVisualProfile({ global: { preset: 'custom-css' } }), (error) => error.code === 'VISUAL_PROFILE_PRESET_INVALID');
+});
+
+test('visual profile defaultMode is off, stack or ticker and migrates minimal', () => {
+  assert.deepEqual(VALID_DEFAULT_MODES, ['off', 'stack', 'ticker']);
+  assert.equal(createVisualProfile().global.defaultMode, 'off');
+  assert.equal(createVisualProfile({ global: { defaultMode: 'stack' } }).global.defaultMode, 'stack');
+  assert.equal(createVisualProfile({ global: { defaultMode: 'ticker' } }).global.defaultMode, 'ticker');
+  assert.equal(createVisualProfile({ global: { defaultMode: 'minimal' } }).global.defaultMode, 'stack');
+  assert.throws(() => createVisualProfile({ global: { defaultMode: 'popup' } }), (error) => error.code === 'VISUAL_PROFILE_FIELD_INVALID');
 });

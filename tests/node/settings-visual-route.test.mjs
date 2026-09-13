@@ -8,34 +8,101 @@ function harness() {
   return { app, routes };
 }
 
-test('visual settings page renders hierarchical pipeline layout', () => {
+test('ticker behavior renders live parameter controls only when selected', () => {
+  const html = renderVisualSettingsPage('/settings-visual', {
+    settings: { profile: { version: 2, behaviorId: 'ticker', ticker: { speedPxPerSec: 800, band: 'bottom', bandRatio: 0.5, trackCount: 12, minGapPx: 24 }, global: { enabled: true } } },
+    revision: 4,
+    status: 'applied'
+  });
+  // 选中弹幕后参数区可见（不带 hidden），并按 profile 回填
+  assert.match(html, /id="ticker-section"(?![^>]*hidden)/);
+  assert.match(html, /id="ticker-speed"[^>]*value="800"/);
+  assert.match(html, /<option value="bottom" selected>底部<\/option>/);
+  assert.doesNotMatch(html, /id="ticker-band-ratio"[^>]*type="range"/);
+  assert.doesNotMatch(html, /<input[^>]*type="range"[^>]*id="ticker-band-ratio"/);
+  assert.doesNotMatch(html, /弹幕带高度/);
+  assert.doesNotMatch(html, /按弹幕带高度来算/);
+  assert.match(html, /填几就是几行。带子高度跟着变，贴顶或贴底。/);
+  assert.match(html, /id="ticker-band-fill"[^>]*height:93%/);
+  // 轨道数不设上限：不能带 max 属性
+  assert.match(html, /id="ticker-track-count"[^>]*value="12"(?![^>]*max)/);
+  assert.match(html, /id="ticker-min-gap"[^>]*value="24"/);
+  assert.match(html, /id="ticker-track-gap"[^>]*value="8"/);
+  assert.match(html, /异轨间距/);
+  assert.match(html, /id="ticker-speed-random"[^>]*aria-pressed="false"/);
+  assert.match(html, /class="ticker-flow-stage"/);
+  assert.match(html, /class="ticker-flow-random"/);
+  assert.match(html, /id="ticker-speed"[\s\S]*id="ticker-speed-val"[\s\S]*ticker-flow-random[\s\S]*id="ticker-speed-random"/);
+  assert.doesNotMatch(html, /slider-row with-action/);
+  assert.match(html, /id="ticker-click-through"[^>]*aria-pressed="true"/);
+  assert.match(html, /data-axis="behavior" data-value="ticker"[^>]*aria-pressed="true"/);
+  assert.match(html, /id="stack-section"[^>]*hidden/);
+  assert.doesNotMatch(html, /id="ticker-hover-pause"|id="ticker-overflow"/);
+});
+
+test('visual settings collect emits ticker speedRandom from the random button', () => {
+  const html = renderVisualSettingsPage('/settings-visual', {
+    settings: { profile: { version: 2, behaviorId: 'ticker', ticker: { speedPxPerSec: 400, band: 'top', bandRatio: 0.28, trackCount: 0, minGapPx: 64, speedRandom: true }, global: { enabled: true } } }
+  });
+  assert.match(html, /id="ticker-speed-random"[^>]*aria-pressed="true"/);
+  assert.match(html, /id="ticker-speed-val"[^>]*>400</);
+  assert.doesNotMatch(html, /id="ticker-speed-val"[^>]*>随机</);
+  assert.match(html, /studio \.ticker-section \.band-hit\{height:50%/);
+  assert.match(html, /id="ticker-track-count"[^>]*value="0"/);
+  assert.match(html, /旧自动档，改数字即按条数主控/);
+  assert.doesNotMatch(html, /按弹幕带高度来算/);
+  const script = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map((match) => match[1]).find((value) => value.includes('function collect('));
+  const collectStart = script.indexOf('function collect(');
+  const collectEnd = script.indexOf('var previewOpen', collectStart);
+  const source = script.slice(collectStart, collectEnd);
+  const values = new Map([
+    ['global-visual-enabled', { checked: true, value: '' }],
+    ['global-visual-default-mode', { value: 'off' }],
+    ['pipeline-type', { value: 'minimal' }],
+    ['pipeline-behavior', { value: 'ticker' }],
+    ['ticker-speed', { value: '520' }],
+    ['ticker-band', { value: 'bottom' }],
+    ['ticker-track-count', { value: '3' }],
+    ['ticker-min-gap', { value: '48' }],
+    ['ticker-speed-random', { getAttribute: (name) => name === 'aria-pressed' ? 'true' : null, value: '' }],
+    ['ticker-click-through', { getAttribute: (name) => name === 'aria-pressed' ? 'false' : null, value: '' }]
+  ]);
+  const collect = new Function('state', '$', `${source}; return collect();`)({ profile: {} }, (id) => values.get(id) ?? { value: '' });
+  assert.equal(collect.behaviorId, 'ticker');
+  assert.equal(collect.ticker.speedPxPerSec, 520);
+  assert.equal(collect.ticker.trackCount, 3);
+  assert.equal(collect.ticker.bandRatio, 0.23);
+  assert.equal(collect.ticker.speedRandom, true);
+  assert.equal(collect.ticker.clickThrough, false);
+  assert.equal(collect.ticker.trackGapPx, 8);
+});
+
+test('visual settings page renders card studio layout', () => {
   const html = renderVisualSettingsPage('/settings-visual', {
     settings: { profile: { version: 1, global: { enabled: true, preset: 'soft' }, categories: { error: { preset: 'critical' } } } },
     revision: 3,
     status: 'applied'
   });
-  // Pipeline hierarchy
   assert.match(html, /通知视觉/);
+  assert.match(html, /选一种出现方式/);
   assert.match(html, /出现方式/);
   assert.match(html, /pipeline-behavior/);
-  assert.match(html, /axis-chip/);
   assert.match(html, /堆叠/);
   assert.match(html, /未实现/);
-  assert.match(html, /卡片种类/);
   assert.match(html, /pipeline-type/);
   assert.match(html, /极简/);
-  assert.match(html, /卡片外观编辑器/);
-  assert.match(html, /出现方式设置/);
-  assert.match(html, /卡片外观设置/);
-  assert.match(html, /皮肤/);
+  assert.match(html, /卡片外观/);
   assert.match(html, /skin-bg-color/);
-  assert.match(html, /管理视觉素材/);
-  assert.match(html, /visual-assets-open/);
+  assert.doesNotMatch(html, /管理视觉素材/);
+  assert.doesNotMatch(html, /visual-assets-open/);
+  assert.doesNotMatch(html, /背景素材/);
+  assert.match(html, /visual-clear-cards/);
+  assert.match(html, /清除屏幕上的视觉卡/);
   assert.match(html, /打开实时预览/);
+  assert.match(html, /试一条/);
   assert.match(html, /visual-settings-save/);
   assert.match(html, /<details/);
   assert.match(html, /visual-diagnostics-list/);
-  // Preview
   assert.match(html, /实时预览/);
   assert.match(html, /visual-preview/);
   // Convergence: no unbuilt or duplicated controls remain visible
@@ -71,24 +138,36 @@ test('visual settings page renders hierarchical pipeline layout', () => {
   assert.match(html, /visual-preview-confirmation/);
   assert.match(html, /后端已确认/);
   assert.match(html, /data-axis="behavior" data-value="stack"[^>]*aria-pressed="true"/);
-  assert.match(html, /data-axis="behavior" data-value="ticker"[^>]*aria-disabled="true"/);
+  assert.match(html, /data-value="ticker" aria-pressed="false">弹幕<\/button>/);
+  assert.doesNotMatch(html, /data-value="ticker"[^>]*aria-disabled/);
+  assert.doesNotMatch(html, /axis-chip-code/);
   assert.match(html, /data-axis="behavior" data-value="popup"[^>]*aria-disabled="true"/);
-  assert.match(html, /起步预设/);
+  // 弹幕参数：轨道数是主旋钮；高度不再是可拧的 range
+  assert.match(html, /id="ticker-section"/);
+  assert.match(html, /id="ticker-band"/);
+  assert.match(html, /id="ticker-speed"/);
+  assert.doesNotMatch(html, /id="ticker-band-ratio"[^>]*type="range"/);
+  assert.match(html, /id="ticker-track-count"/);
+  assert.match(html, /id="ticker-min-gap"/);
+  assert.doesNotMatch(html, /id="ticker-hover-pause"|id="ticker-overflow"/);
+  assert.doesNotMatch(html, /起步预设|卡片外观编辑器|VISUAL WORKBENCH|stack\.main|Native preview/);
+  assert.match(html, /id="stack-section"(?![^>]*hidden)/);
+  assert.match(html, /id="ticker-section"[^>]*hidden/);
   assert.doesNotMatch(html, /data-visual-mode/);
-  assert.match(html, /if\(window.__notificationHubVisualDispose\)window.__notificationHubVisualDispose\(\)/);
+  assert.match(html, /if\s*\(window.__notificationHubVisualDispose\)\s*window.__notificationHubVisualDispose\(\)/);
   assert.match(html, /previewGeneration/);
-  assert.match(html, /previewPending&&previewOpen/);
+  assert.match(html, /previewPending\s*&&\s*previewOpen/);
   assert.match(html, /关闭实时预览/);
   assert.match(html, /visual-preview\/close/);
-  assert.match(html, /document\.addEventListener\("input",visualInputHandler\)/);
-  assert.match(html, /document\.addEventListener\("change",visualInputHandler\)/);
+  assert.match(html, /document\.addEventListener\("input",\s*visualInputHandler\)/);
+  assert.match(html, /document\.addEventListener\("change",\s*visualInputHandler\)/);
   assert.match(html, /__notificationHubVisualInputHandler/);
-  assert.match(html, /function feedback\(id,text,kind\)/);
+  assert.match(html, /function feedback\(id,\s*text,\s*kind\)/);
   assert.doesNotMatch(html, /var feedback=\$\("visual-feedback"\)/);
-  assert.match(html, /profileFeedback=\$\("visual-feedback"\)/);
+  assert.match(html, /profileFeedback\s*=\s*\$\("visual-feedback"\)/);
   assert.match(html, /visual-preview\/open/);
   assert.match(html, /visual-preview\/update/);
-  assert.match(html, /JSON\.stringify\(\{draft:collect\(\)\}\)/);
+  assert.match(html, /JSON\.stringify\(\{\s*draft:\s*collect\(\)\s*\}\)/);
   assert.doesNotMatch(html, /open-visual-workbench|workbench-phase|visual-workbench\/open|workbenchPayload/);
   // Script compilation
   const scripts = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map((match) => match[1]);
@@ -102,43 +181,41 @@ test('visual settings page renders hierarchical pipeline layout', () => {
   assert.doesNotMatch(html, /window\.confirm/);
 });
 
-test('visual mode editor drives the active type and keeps preview in document flow', () => {
+test('visual studio keeps preview in document flow and contract fields', () => {
   const html = renderVisualSettingsPage('/settings-visual', {
     profile: { global: { enabled: true }, card: { activeType: 'popup', types: { popup: { appearance: { width: 480, height: 260 } } } } }
   });
-  assert.match(html, /data-editor-mode="minimal"/);
   assert.match(html, /id="pipeline-behavior"[\s\S]*?value="popup" selected/);
   assert.match(html, /id="prop-width"[^>]*value="480"/);
   assert.match(html, /id="prop-height"[^>]*value="260"/);
   assert.match(html, /id="visual-preview-floating"/);
   assert.match(html, /id="visual-preview-stage"/);
-  assert.match(html, /data-preview-card="minimal"/);
   assert.match(html, /id="prop-margin-left"/);
   assert.match(html, /id="prop-margin-right"/);
   assert.match(html, /id="prop-margin-top"/);
   assert.match(html, /id="prop-margin-bottom"/);
-  assert.match(html, /距屏幕左侧/);
-  assert.match(html, /距屏幕右侧/);
-  assert.match(html, /距屏幕顶部/);
-  assert.match(html, /距屏幕底部/);
+  assert.match(html, /距左/);
+  assert.match(html, /距右/);
+  assert.match(html, /距上/);
+  assert.match(html, /距下/);
   assert.match(html, /id="prop-opacity" type="number" min="0" max="1"/);
   assert.match(html, /id="prop-width"[^>]*value="480"(?![^>]*disabled)/);
   assert.doesNotMatch(html, /id="prop-aspect-ratio"/);
-  assert.match(html, /grid-template-columns:190px minmax\(0,1fr\) minmax\(260px,300px\)/);
-  assert.match(html, /visual-preview-column\{display:block;grid-area:preview;position:sticky/);
-  assert.match(html, /preview-sticky-panel\{position:static/);
-  assert.match(html, /grid-template-areas:"preview" "sidebar" "editor"/);
-  assert.match(html, /stage-popup\{top:auto;right:10px;bottom:10px;left:auto;transform:none\}/);
+  assert.doesNotMatch(html, /grid-template-columns:190px/);
+  assert.doesNotMatch(html, /visual-preview-column\{display:block;grid-area:preview;position:sticky/);
+  assert.doesNotMatch(html, /stage-card stage-ticker|stage-card stage-popup|preview-channel-list/);
+  assert.equal((html.match(/id="visual-preview-stage"/g) ?? []).length, 1);
   assert.doesNotMatch(html, /visual-preview-drag-handle|previewDragHandle/);
-  assert.match(html, /setAttribute\("aria-pressed",active\?"true":"false"\)/);
+  assert.match(html, /setAttribute\("aria-pressed",\s*active\s*\?\s*"true"\s*:\s*"false"\)/);
   assert.match(html, /bindStageDrag/);
   assert.match(html, /pointerdown/);
+  assert.match(html, /@keyframes ticker-flow/);
 });
 
 test('visual mode collection writes the edited type instead of always overwriting minimal', () => {
   const html = renderVisualSettingsPage('/settings-visual', { profile: { global: { enabled: true }, card: { activeType: 'minimal', types: { minimal: {} } } } });
-  const script = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map((match) => match[1]).find((value) => value.includes('function collect(){'));
-  const collectStart = script.indexOf('function collect(){');
+  const script = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map((match) => match[1]).find((value) => value.includes('function collect('));
+  const collectStart = script.indexOf('function collect(');
   const collectEnd = script.indexOf('var previewOpen', collectStart);
   const source = script.slice(collectStart, collectEnd);
   const values = new Map([
@@ -153,17 +230,17 @@ test('visual mode collection writes the edited type instead of always overwritin
 
 test('visual settings collect emits nested card visual contract', () => {
   const html = renderVisualSettingsPage('/settings-visual', { profile: { global: { enabled: true }, card: { activeType: 'minimal', types: { minimal: {} } } } });
-  const script = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map((match) => match[1]).find((value) => value.includes('function collect(){'));
+  const script = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map((match) => match[1]).find((value) => value.includes('function collect('));
   assert.ok(script);
-  const collectStart = script.indexOf('function collect(){');
+  const collectStart = script.indexOf('function collect(');
   const collectEnd = script.indexOf('var previewOpen', collectStart);
   const source = collectStart >= 0 && collectEnd > collectStart ? script.slice(collectStart, collectEnd) : null;
   assert.ok(source);
-  assert.match(source, /properties:\{space:/);
-  assert.match(source, /skin:\{skinId:[\s\S]*background:\{/);
-  assert.match(source, /effects:\{effectConfigId:[\s\S]*slots:\{/);
+  assert.match(source, /properties:\s*\{\s*space:/);
+  assert.match(source, /skin:\s*\{\s*skinId:[\s\S]*background:\s*\{/);
+  assert.match(source, /effects:\s*\{\s*effectConfigId:[\s\S]*slots:\s*\{/);
   assert.doesNotMatch(source, /properties:\{size:/);
-  assert.doesNotMatch(source, /skin:\{skinId:[\s\S]*backgroundColor:/);
+  assert.doesNotMatch(source, /skin:\s*\{\s*skinId:[\s\S]*backgroundColor:/);
   const values = new Map([
     ['global-visual-enabled', { checked: true, value: '' }], ['global-visual-default-mode', { value: 'off' }],
     ['prop-layout', { value: 'simple' }], ['prop-anchor', { value: 'top-right' }], ['prop-gap', { value: '8' }], ['prop-size', { value: 'medium' }],
@@ -194,19 +271,20 @@ test('visual settings collect emits nested card visual contract', () => {
 test('visual settings realtime preview keeps the latest draft and has an explicit close gate', () => {
   const html = renderVisualSettingsPage('/settings-visual', { profile: { global: { enabled: true }, card: { activeType: 'minimal', types: { minimal: {} } } } });
   assert.match(html, /function schedulePreviewUpdate/);
-  assert.match(html, /previewPending=true/);
-  assert.match(html, /if\(previewOpen\)\{setPreviewState\("等待更新"\);schedulePreviewUpdate\(\)\}/);
-  assert.match(html, /if\(previewPending\)schedulePreviewUpdate\(\)/);
-  assert.match(html, /previewGeneration\+\+/);
-  assert.match(html, /previewOpen=false/);
+  assert.match(html, /previewPending\s*=\s*true/);
+  assert.match(html, /if\s*\(previewOpen\)/);
+  assert.match(html, /schedulePreviewUpdate\(\)/);
+  assert.match(html, /if\s*\(previewPending\)/);
+  assert.match(html, /previewGeneration\s*\+\+/);
+  assert.match(html, /previewOpen\s*=\s*false/);
   assert.match(html, /visual-preview\/close/);
 });
 
 test('visual settings delegated listeners handle controls mounted and replaced after initialization', () => {
   const html = renderVisualSettingsPage('/settings-visual', { profile: { global: { enabled: true }, card: { activeType: 'minimal', types: { minimal: {} } } } });
-  const script = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map((match) => match[1]).find((value) => value.includes('var syncIds='));
-  const start = script.indexOf('var syncIds=');
-  const end = script.indexOf('if($("visual-settings-save"))', start);
+  const script = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map((match) => match[1]).find((value) => value.includes('var syncIds'));
+  const start = script.indexOf('var syncIds');
+  const end = script.indexOf('var previewButton', start);
   const source = script.slice(start, end);
   const listeners = new Map();
   const elements = new Map();
@@ -240,25 +318,35 @@ test('visual settings delegated listeners handle controls mounted and replaced a
   assert.equal(applied.length, 1);
 });
 
+test('studio click handler is named and removed on dispose so random speed stays clickable', () => {
+  const html = renderVisualSettingsPage('/settings-visual', {
+    settings: { profile: { version: 2, behaviorId: 'ticker', ticker: { speedPxPerSec: 400 }, global: { enabled: true } } }
+  });
+  assert.match(html, /function studioClickHandler\(event\)/);
+  assert.match(html, /window\.__notificationHubStudioClick = studioClickHandler/);
+  assert.match(html, /removeEventListener\("click", studioClickHandler\)/);
+  assert.match(html, /id="ticker-speed-random"/);
+  assert.match(html, /class="ticker-flow-random"/);
+  assert.doesNotMatch(html, /slider-row with-action/);
+});
+
 test('visual settings preview exposes explicit failure and latest-update guards', () => {
   const html = renderVisualSettingsPage('/settings-visual', { profile: { global: { enabled: true }, card: { activeType: 'minimal', types: { minimal: {} } } } });
   assert.match(html, /function previewError\(error\)/);
-  assert.match(html, /失败 · \"\+code/);
-  assert.match(html, /Promise\.resolve\(\)\.then\(function\(\)\{return json\("visual-preview\/update"/);
-  assert.match(html, /if\(previewPending&&previewOpen\)schedulePreviewUpdate\(\)/);
-  assert.match(html, /generation!==previewGeneration/);
+  assert.match(html, /失败 · /);
+  assert.match(html, /json\("visual-preview\/update"/);
+  assert.match(html, /previewPending\s*&&\s*previewOpen/);
+  assert.match(html, /generation\s*!==\s*previewGeneration/);
 });
 
-test('visual settings fragment passes pipeline structure', () => {
+test('visual settings fragment passes studio structure', () => {
   const fragment = renderVisualSettingsFragment('/settings-content?view=visual', {
     profile: { global: { enabled: true, preset: 'soft' }, categories: {} },
     status: 'saved'
   });
-  assert.match(fragment, /visual-workbench/);
+  assert.match(fragment, /class="studio"/);
   assert.match(fragment, /出现方式/);
-  assert.match(fragment, /卡片种类/);
-  assert.match(fragment, /卡片外观设置/);
-  assert.match(fragment, /皮肤/);
+  assert.match(fragment, /卡片外观/);
   assert.match(fragment, /pipeline-type/);
   assert.match(fragment, /pipeline-behavior/);
   assert.match(fragment, /syncPreview/);
@@ -266,15 +354,15 @@ test('visual settings fragment passes pipeline structure', () => {
   assert.match(fragment, /visual-preview\/update/);
   assert.doesNotMatch(fragment, /open-visual-workbench|workbench-phase|visual-workbench\/open|workbenchPayload/);
   assert.match(fragment, /visual-settings-save/);
-  assert.match(fragment, /visual-assets-open/);
+  assert.doesNotMatch(fragment, /visual-assets-open/);
   assert.match(fragment, /<details/);
-  assert.match(fragment, /<details class="editor-accordion" open>[\s\S]*id="prop-anchor"/);
-  assert.match(fragment, /<details class="editor-accordion"[\s\S]*id="visual-assets-open"/);
+  assert.match(fragment, /id="prop-anchor"/);
+  assert.doesNotMatch(fragment, /id="visual-assets-open"/);
   assert.doesNotMatch(fragment, /<[^>]+visibility:hidden/);
   assert.doesNotMatch(fragment, /<\/main>/);
   assert.equal((fragment.match(/<script>/g) ?? []).length, 1);
-  assert.match(fragment, /grid-template-columns:190px minmax\(0,1fr\) minmax\(260px,300px\)/);
-  assert.match(fragment, /视觉实验台/);
+  assert.doesNotMatch(fragment, /grid-template-columns:190px/);
+  assert.match(fragment, /已绑定事件试运行/);
   assert.doesNotMatch(fragment, /全部事件/);
   assert.doesNotMatch(fragment, /run-tests/);
 });
@@ -290,6 +378,8 @@ test('visual settings route exposes status, update, and preview endpoints', asyn
     async closeVisualPreviewCard() { calls.push('previewClose'); return { closed: true }; },
     previewVisualSettings(input) { calls.push(['preview', input]); return { input, decision: { enabled: true, preset: 'soft', intensity: 'balanced', category: 'chat', matchedBy: 'category', reason: 'category-policy' } }; },
     async runVisualEventExperiment(input) { calls.push(['eventExperiment', input]); return { generated: input.count, failed: 0, historyWritten: false, soundPlayed: false }; },
+    async runVisualDraftSample(input) { calls.push(['draftSample', input]); return { generated: 1, receivedDraft: true, behaviorId: input.draft?.behaviorId ?? 'stack', historyWritten: false, soundPlayed: false }; },
+    async clearVisualStudioCards() { calls.push('clearCards'); return { dismissed: [], count: 0, historyWritten: false }; },
     async runParallelCardSample(input) { calls.push(['parallel', input]); return { generated: 4, failed: 0 }; },
     listVisualProfiles() { calls.push('listProfiles'); return []; },
     removeVisualProfile(profileId) { calls.push(['removeProfile', profileId]); return { removed: true, visualRevision: 2 }; },
@@ -302,7 +392,7 @@ test('visual settings route exposes status, update, and preview endpoints', asyn
     restoreVisualEventDefault(eventId) { calls.push(['restore', eventId]); return { ok: true }; }
   };
   registerVisualSettingsRoute(app, { _notificationHubVNextPlugin: api });
-  assert.deepEqual([...routes.keys()], ['GET /settings-visual', 'GET /visual-settings-status', 'GET /visual-diagnostics', 'POST /visual-diagnostics-clear', 'POST /visual-diagnostics-export', 'POST /visual-settings-update', 'POST /visual-settings-preview', 'POST /visual-workbench/open', 'POST /visual-workbench/update', 'POST /visual-workbench/close', 'POST /visual-preview/open', 'POST /visual-preview/update', 'POST /visual-preview/close', 'POST /visual-test-event', 'POST /visual-test-parallel-cards', 'GET /visual-profiles', 'POST /visual-profiles/save', 'DELETE /visual-profiles/:profileId', 'POST /visual-profiles/preview-apply', 'POST /visual-profiles/apply', 'GET /custom-visual-events', 'POST /custom-visual-events/restore-default']);
+  assert.deepEqual([...routes.keys()], ['GET /settings-visual', 'GET /visual-settings-status', 'GET /visual-diagnostics', 'POST /visual-diagnostics-clear', 'POST /visual-diagnostics-export', 'POST /visual-settings-update', 'POST /visual-settings-preview', 'POST /visual-workbench/open', 'POST /visual-workbench/update', 'POST /visual-workbench/close', 'POST /visual-preview/open', 'POST /visual-preview/update', 'POST /visual-preview/close', 'POST /visual-try-one', 'POST /visual-clear-cards', 'POST /visual-test-event', 'POST /visual-test-parallel-cards', 'GET /visual-profiles', 'POST /visual-profiles/save', 'DELETE /visual-profiles/:profileId', 'POST /visual-profiles/preview-apply', 'POST /visual-profiles/apply', 'GET /custom-visual-events', 'POST /custom-visual-events/restore-default']);
   const context = (body = {}) => ({ req: { url: '/settings-visual', json: async () => body }, html(value) { return { kind: 'html', value }; }, json(value, status = 200) { return { value, status }; } });
   assert.match(routes.get('GET /settings-visual')(context()).value, /通知视觉/);
   assert.equal((routes.get('GET /visual-settings-status')(context())).value.ok, true);
@@ -318,6 +408,11 @@ test('visual settings route exposes status, update, and preview endpoints', asyn
   assert.equal(previewResponse.value.ok, true);
   assert.deepEqual(previewResponse.value.decision, { enabled: true, preset: 'soft', intensity: 'balanced', category: 'chat', matchedBy: 'category', reason: 'category-policy' });
   assert.deepEqual(calls.at(-1), ['preview', { labels: ['chat'], importance: 'normal' }]);
+  const tryOneResponse = await routes.get('POST /visual-try-one')(context({ draft: { behaviorId: 'ticker' } }));
+  assert.equal(tryOneResponse.value.ok, true);
+  assert.equal(tryOneResponse.value.generated, 1);
+  assert.equal(tryOneResponse.value.receivedDraft, true);
+  assert.deepEqual(calls.at(-1), ['draftSample', { draft: { behaviorId: 'ticker' } }]);
   const testResponse = await routes.get('POST /visual-test-event')(context({ eventId: 'chat.assistant_reply.completed', count: 2, intervalMs: 0 }));
   assert.equal(testResponse.value.ok, true);
   assert.equal(testResponse.value.generated, 2);
@@ -372,7 +467,7 @@ test('visual settings page shows saved profiles when data provided', () => {
   assert.match(html, /ticker·maid/);
   assert.match(html, /chat\.assistant_reply\.completed/);
   assert.match(html, /class="secondary profile-export" data-profile-id="stack-minimal"/);
-  assert.match(html, /profileIds:\[profileId\]/);
+  assert.match(html, /profileIds:\s*\[profileId\]/);
   assert.match(html, /data-profile-name="stack·minimal"/);
   assert.match(html, /已自定义配置包/);
   assert.match(html, /visual-profile-list/);
@@ -405,21 +500,36 @@ test('visual settings page has event-bound visual experiment section', () => {
     revision: 2,
     status: 'saved'
   });
-  assert.match(html, /视觉实验台/);
+  assert.match(html, /已绑定事件试运行/);
   assert.match(html, /visual-test-event/);
   assert.match(html, /读取已绑定事件/);
   assert.match(html, /json\("custom-visual-events"\)/);
-  assert.match(html, /NotificationHubSettingsShell/);
+  assert.match(html, /renderProfileList/);
+  assert.match(html, /function refreshProfiles/);
+  assert.doesNotMatch(html, /NotificationHubSettingsShell\.loadView\("visual"\)/);
   assert.match(html, /visual-test-count/);
   assert.match(html, /visual-test-event/);
-  assert.match(html, /JSON\.stringify\(\{eventId:eventId,count:count,intervalMs:interval\}\)/);
-  assert.doesNotMatch(html, /visual-test-event[\s\S]{0,1200}draft:collect\(\)/);
+  assert.match(html, /eventId:\s*eventId[\s\S]*count:\s*count[\s\S]*intervalMs:\s*interval/);
+  assert.doesNotMatch(html, /visual-test-event[\s\S]{0,1200}draft:\s*collect\(\)/);
+  assert.match(html, /visual-try-one/);
+  assert.match(html, /json\("visual-try-one"[\s\S]*draft:\s*collect\(\)/);
+  assert.doesNotMatch(html, /json\("visual-test-event"[\s\S]*count:1,intervalMs:0/);
   assert.match(html, /visual-test-send/);
-  assert.match(html, /visual-test-parallel/);
-  assert.match(html, /visual-test-parallel-cards/);
+  assert.doesNotMatch(html, /visual-test-parallel/);
+  assert.doesNotMatch(html, /并行测试堆叠和弹幕/);
   assert.match(html, /visual-test-feedback/);
   assert.doesNotMatch(html, /预览测试/);
   assert.doesNotMatch(html, /visual-test-notification/);
+});
+
+test('try-one sits in the title row and previews the current draft', () => {
+  const html = renderVisualSettingsPage('/settings-visual', {
+    settings: { profile: { version: 2, behaviorId: 'ticker', global: { enabled: true } } }
+  });
+  assert.match(html, /hero-actions[\s\S]*id="visual-try-one"[\s\S]*id="visual-settings-save"/);
+  assert.doesNotMatch(html, /preview-actions[\s\S]{0,240}id="visual-try-one"/);
+  assert.match(html, /json\("visual-try-one"[\s\S]*draft:\s*collect\(\)/);
+  assert.match(html, /试一条在标题旁/);
 });
 
 test('visual settings page has apply-to-events section', () => {
@@ -436,9 +546,12 @@ test('visual settings page has apply-to-events section', () => {
     status: 'saved'
   });
   assert.match(html, /应用于事件/);
+  assert.match(html, /默认不出桌面卡；选事件再套这套样子。弹幕方案会飞，堆叠方案会叠。/);
+  assert.doesNotMatch(html, /全部事件/);
   assert.match(html, /apply-event-select/);
   assert.match(html, /apply-visual-profile/);
-  assert.match(html, /apply-visual-preview/);
+  assert.doesNotMatch(html, /apply-visual-preview/);
+  assert.doesNotMatch(html, /预览影响/);
   assert.match(html, /apply-visual-btn/);
   assert.match(html, /apply-bound-list/);
   assert.match(html, /chat\.assistant_reply\.completed/);
@@ -493,8 +606,10 @@ test('visual settings page has global switch and default mode selector', () => {
   assert.match(html, /visual-global-switch/);
   assert.match(html, /默认视觉效果/);
   assert.match(html, /defaultMode/);
-  assert.match(html, /off.*视觉关闭/);
-  assert.match(html, /minimal.*极简/);
+  assert.match(html, /off.*关闭视觉/);
+  assert.match(html, /stack.*全部堆叠/);
+  assert.match(html, /ticker.*全部弹幕/);
+  assert.doesNotMatch(html, /value="minimal"[^>]*>极简/);
 });
 
 test('visual settings page disables pipeline when global visual is off', () => {
@@ -507,4 +622,54 @@ test('visual settings page disables pipeline when global visual is off', () => {
   });
   assert.match(html, /visual-global-off/);
   assert.match(html, /关闭全局视觉/);
+});
+
+test('visual studio hides inactive behavior knobs and keeps a single primary save', () => {
+  const stack = renderVisualSettingsPage('/settings-visual', {
+    settings: { profile: { version: 2, behaviorId: 'stack', global: { enabled: true } } }
+  });
+  const ticker = renderVisualSettingsPage('/settings-visual', {
+    settings: { profile: { version: 2, behaviorId: 'ticker', ticker: { speedPxPerSec: 400, band: 'top', bandRatio: 0.28, trackCount: 0, minGapPx: 64 }, global: { enabled: true } } }
+  });
+  assert.match(stack, /id="ticker-section"[^>]*hidden/);
+  assert.match(stack, /id="stack-section"(?![^>]*hidden)/);
+  assert.match(ticker, /id="ticker-section"(?![^>]*hidden)/);
+  assert.match(ticker, /id="stack-section"[^>]*hidden/);
+  assert.equal((stack.match(/class="primary"/g) ?? []).length, 1);
+  assert.doesNotMatch(stack, /id="ticker-hover-pause"|id="ticker-overflow"/);
+  assert.match(ticker, /id="ticker-track-count"[^>]*(?![^>]*max)/);
+  assert.doesNotMatch(stack, /id="ticker-track-count"[^>]*max=/);
+  assert.doesNotMatch(stack, /VISUAL WORKBENCH|stack\.main|Native preview/);
+  assert.equal((stack.match(/id="visual-preview-stage"/g) ?? []).length, 1);
+  assert.doesNotMatch(stack, /stage-card stage-ticker|data-preview-card="ticker"|data-preview-card="popup"/);
+});
+
+test('studio setting groups use fold and referenced profiles can be deleted', () => {
+  const html = renderVisualSettingsPage('/settings-visual', {
+    settings: { profile: { version: 2, behaviorId: 'stack', global: { enabled: true, defaultMode: 'off' } } },
+    profiles: [
+      { profileId: 'visual.bound', name: '占用包', source: 'local', references: ['chat.assistant_reply.completed'] }
+    ],
+    visualDiagnostics: [
+      { code: 'VISUAL_PREVIEW_CREATED', stage: 'PREVIEW_SESSION', message: 'ok', level: 'ok', details: { cardId: 'c1' }, timestamp: 't' },
+      { code: 'VISUAL_EVENT_BINDING_PROFILE_MISSING', stage: 'EVENT_CARD', message: 'missing', level: 'error', details: { eventId: 'chat.assistant_reply.completed' }, timestamp: 't' }
+    ]
+  });
+  assert.match(html, /id="stack-section"[^>]*open/);
+  assert.match(html, /id="appearance-section"[^>]*open/);
+  assert.match(html, /id="visual-preview"[^>]*open/);
+  assert.match(html, /<summary>堆叠怎么出现/);
+  assert.match(html, /<summary>弹幕怎么流/);
+  assert.match(html, /<summary>卡片外观/);
+  assert.match(html, /<summary>预览/);
+  assert.match(html, /class="secondary profile-delete" data-profile-id="visual.bound"/);
+  assert.match(html, /visual-delete-dialog/);
+  assert.match(html, /解除绑定，改走默认视觉档/);
+  assert.doesNotMatch(html, /并行测试堆叠和弹幕/);
+  assert.match(html, /1 个问题/);
+  assert.match(html, /visual-diagnostic-row is-error/);
+  assert.match(html, /visual-diagnostic-row is-ok/);
+  assert.match(html, /function refreshProfiles\(\)/);
+  assert.match(html, /renderProfileList/);
+  assert.doesNotMatch(html, /value\.overwritten/);
 });

@@ -73,6 +73,7 @@ public:
     std::string state_result_json(bool deduplicated) const;
     std::string cards_result_json(bool deduplicated) const;
     std::string dismiss_result_json(bool deduplicated, std::string_view card_id) const;
+    bool tick_animation();
     bool pump_messages();
     bool has_window() const noexcept;
 

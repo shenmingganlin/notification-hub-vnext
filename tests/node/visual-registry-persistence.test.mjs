@@ -48,4 +48,21 @@ test('projection preserves legacy sound fields and only writes visual event bind
   assert.equal(projected.events['tool.execution.succeeded'].soundProfileId, 'sound.custom');
   assert.equal(projected.events['tool.execution.succeeded'].visualProfileId, 'tool.stack');
   assert.equal(projected.events['tool.execution.succeeded'].behaviorChannelId, 'stack.tool');
+  assert.equal(projected.events['tool.execution.succeeded'].behaviorProfileId, 'stack');
+});
+
+test('projection aligns behaviorProfileId to a ticker visual profile', () => {
+  const profiles = createVisualProfileRegistry();
+  profiles.register({ profileId: 'chat.ticker', name: 'Chat Ticker', profile: { behaviorId: 'ticker' } });
+  const bindings = createEventBindingRegistry({ profileRegistry: profiles });
+  bindings.apply({ profileId: 'chat.ticker', eventIds: ['chat.assistant_reply.completed'] });
+  const projected = projectVisualRegistryToEventSettings({
+    settings: createEventPresentationSettings({
+      events: { 'chat.assistant_reply.completed': { soundProfileId: 'sound.default', visualProfileId: 'visual.old', behaviorProfileId: 'stack', behaviorChannelId: 'stack.main' } }
+    }),
+    bindingRegistry: bindings,
+    profileRegistry: profiles
+  });
+  assert.equal(projected.events['chat.assistant_reply.completed'].behaviorProfileId, 'ticker');
+  assert.equal(projected.events['chat.assistant_reply.completed'].soundProfileId, 'sound.default');
 });

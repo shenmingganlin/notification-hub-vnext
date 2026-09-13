@@ -31,6 +31,7 @@ LRESULT CALLBACK window_proc(HWND hwnd, UINT message, WPARAM wparam, LPARAM lpar
     switch (message) {
     case WM_NCHITTEST: {
         if (window == nullptr) return DefWindowProcW(hwnd, message, wparam, lparam);
+        if (window->ignores_pointer()) return HTTRANSPARENT;
         POINT point{GET_X_LPARAM(lparam), GET_Y_LPARAM(lparam)};
         ScreenToClient(hwnd, &point);
         return window->hit_test_client_point(static_cast<float>(point.x), static_cast<float>(point.y))
@@ -161,6 +162,7 @@ bool SceneWindow::create() {
     DWORD style = WS_POPUP;
     DWORD extended_style = WS_EX_NOACTIVATE | WS_EX_LAYERED | WS_EX_TOPMOST;
     if (config_.tool_window) extended_style |= WS_EX_TOOLWINDOW;
+    if (config_.visual.ticker_specified && config_.visual.ticker_click_through) extended_style |= WS_EX_TRANSPARENT;
 
     RECT bounds{0, 0, config_.width, config_.height};
     AdjustWindowRectEx(&bounds, style, FALSE, extended_style);
@@ -189,7 +191,9 @@ bool SceneWindow::create() {
         visible_ = false;
         return false;
     }
-    if (config_.visual.dismiss_mode == "timeout") SetTimer(static_cast<HWND>(hwnd_), kDismissTimerId, static_cast<UINT>(config_.visual.dismiss_timeout_ms), nullptr);
+    if (config_.visual.dismiss_mode == "timeout" && !config_.visual.ticker_specified) {
+        SetTimer(static_cast<HWND>(hwnd_), kDismissTimerId, static_cast<UINT>(config_.visual.dismiss_timeout_ms), nullptr);
+    }
     return true;
 #else
     return false;
@@ -321,6 +325,10 @@ bool SceneWindow::is_dragging() const noexcept {
     return drag_active_;
 }
 
+bool SceneWindow::ignores_pointer() const noexcept {
+    return config_.visual.ticker_specified && config_.visual.ticker_click_through;
+}
+
 bool SceneWindow::get_window_position(int& x, int& y) const noexcept {
 #ifdef _WIN32
     if (hwnd_ == nullptr) return false;
@@ -371,7 +379,8 @@ void SceneWindow::cancel_pointer_press() noexcept {
 
 bool SceneWindow::begin_drag_client_point(float x, float y) noexcept {
 #ifdef _WIN32
-    if (hwnd_ == nullptr || close_requested_ || !point_inside_card(x, y, static_cast<float>(config_.width), static_cast<float>(config_.height))
+    if (hwnd_ == nullptr || close_requested_ || ignores_pointer()
+        || !point_inside_card(x, y, static_cast<float>(config_.width), static_cast<float>(config_.height))
         || point_inside_close_button(x, y, static_cast<float>(config_.width), static_cast<float>(config_.height))) {
         return false;
     }
@@ -463,8 +472,17 @@ void SceneWindow::update_visual(VisualStyle visual) {
 #ifdef _WIN32
     if (hwnd_ != nullptr) {
         KillTimer(static_cast<HWND>(hwnd_), kDismissTimerId);
-        if (config_.visual.dismiss_mode == "timeout") SetTimer(static_cast<HWND>(hwnd_), kDismissTimerId, static_cast<UINT>(config_.visual.dismiss_timeout_ms), nullptr);
-        InvalidateRect(static_cast<HWND>(hwnd_), nullptr, FALSE);
+        if (config_.visual.dismiss_mode == "timeout" && !config_.visual.ticker_specified) {
+            SetTimer(static_cast<HWND>(hwnd_), kDismissTimerId, static_cast<UINT>(config_.visual.dismiss_timeout_ms), nullptr);
+        }
+        const auto hwnd = static_cast<HWND>(hwnd_);
+        auto style = GetWindowLongW(hwnd, GWL_EXSTYLE);
+        const auto next = ignores_pointer() ? (style | WS_EX_TRANSPARENT) : (style & ~WS_EX_TRANSPARENT);
+        if (next != style) {
+            SetWindowLongW(hwnd, GWL_EXSTYLE, next);
+            SetWindowPos(hwnd, nullptr, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED);
+        }
+        InvalidateRect(hwnd, nullptr, FALSE);
     }
 #endif
 }
