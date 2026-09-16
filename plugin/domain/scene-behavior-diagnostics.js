@@ -28,7 +28,9 @@ function projectCard(card = {}) {
     eventTypeId: textOrNull(presentation.eventTypeId),
     visualProfileId: textOrNull(presentation.visualProfileId),
     behaviorProfileId: textOrNull(behavior.behaviorProfileId),
-    behaviorChannelId: textOrNull(behavior.behaviorChannelId)
+    behaviorChannelId: textOrNull(behavior.behaviorChannelId),
+    flight: textOrNull(behavior.flight ?? behavior.behaviorProfileId),
+    flightChannelId: textOrNull(behavior.flightChannelId ?? behavior.behaviorChannelId)
   };
 }
 
@@ -42,7 +44,9 @@ function projectChannel(channel = {}) {
 
 export function createSceneBehaviorDiagnostics(snapshot = null) {
   const cards = Array.isArray(snapshot?.cards) ? snapshot.cards : [];
-  const channels = Array.isArray(snapshot?.behaviorChannels) ? snapshot.behaviorChannels : [];
+  const channels = Array.isArray(snapshot?.flightChannels)
+    ? snapshot.flightChannels
+    : (Array.isArray(snapshot?.behaviorChannels) ? snapshot.behaviorChannels : []);
   const cardOrder = Array.isArray(snapshot?.cardOrder) ? snapshot.cardOrder : [];
   const projectedCards = cards.slice(0, MAX_ENTRIES).map(projectCard);
   const projectedChannels = channels.slice(0, MAX_ENTRIES).map(projectChannel);

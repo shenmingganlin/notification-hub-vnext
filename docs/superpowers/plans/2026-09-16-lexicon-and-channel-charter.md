@@ -139,10 +139,10 @@ Native 新字段只垫结构体末尾。能改归属的就改归属，不靠加 
 
 ### Phase 4 — 事件巷、声音、通知中心
 
-- [ ] `behavior-channel.js` → 事件巷领域名（建议文件 `event-lane.js`），通知中心/设置页引用一次改完
-- [ ] 声音：检索 `behavior`/`channel`/`mode`；只改与飞法撞名的符号，不改音频语义
-- [ ] 通知中心列表/筛选若展示「行为」且实为飞法或事件巷，文案与字段对齐
-- [ ] 诊断码凡含 `VISUAL_BEHAVIOR_*` 的，新码并行，旧码映射一段时间
+- [x] `event-lane.js` 为正本；`behavior-channel.js` 只 re-export；表现层 import 已改走事件巷
+- [x] 声音：检索 `behavior`/`channel`/`mode`；`sound-diagnostic.channel` / `quiet-mode` / `channel-incoming` 是音频语义，不改名
+- [x] 通知中心无「行为」飞法撞名文案；诊断页与设置壳已改飞法/显示策略
+- [x] 诊断码 `VISUAL_BEHAVIOR_*` 保留；并行 `lexiconCode` 与 `FLIGHT_LAYOUT_FAILED` / `FLIGHT_UNAVAILABLE`
 
 ### Phase 5 — 插座 + 版本
 

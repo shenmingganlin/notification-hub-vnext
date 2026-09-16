@@ -80,6 +80,7 @@ test('channel runtime isolates adapter/layout failures from other channels', () 
   healthy.enqueue({ cardId: 'good', notificationId: 'good' });
   healthy.start('good', 0);
   assert.equal(broken.snapshot().diagnostics[0].code, 'VISUAL_BEHAVIOR_LAYOUT_FAILED');
+  assert.equal(broken.snapshot().diagnostics[0].lexiconCode, 'FLIGHT_LAYOUT_FAILED');
   assert.deepEqual(healthy.snapshot().visibleCardIds, ['good']);
   assert.equal(healthy.snapshot().diagnostics.length, 0);
 });

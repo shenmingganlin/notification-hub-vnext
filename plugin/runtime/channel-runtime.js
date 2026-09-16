@@ -33,7 +33,13 @@ export function createChannelRuntime({ channelId, behaviorId = 'stack', policy =
       else lastLayout = [];
     } catch (cause) {
       lastLayout = [];
-      localDiagnostics.push(freeze({ code: 'VISUAL_BEHAVIOR_LAYOUT_FAILED', stage: 'BEHAVIOR_LAYOUT', message: cause?.message ?? 'layout failed', recoverable: true }));
+      localDiagnostics.push(freeze({
+        code: cause?.code ?? 'VISUAL_BEHAVIOR_LAYOUT_FAILED',
+        lexiconCode: cause?.lexiconCode ?? 'FLIGHT_LAYOUT_FAILED',
+        stage: 'BEHAVIOR_LAYOUT',
+        message: cause?.message ?? 'layout failed',
+        recoverable: true
+      }));
     }
     emit('channel.reflow', { cardIds: visible().map((card) => card.cardId) });
   };

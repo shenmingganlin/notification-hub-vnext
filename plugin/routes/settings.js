@@ -130,7 +130,7 @@ function renderGeneralSettingsFragment(currentUrl = '', initialData = null) {
   <aside>
     <section class="settings-view-panel" aria-labelledby="general-keywords-title">
       <h2 id="general-keywords-title">重要性关键词</h2>
-      <p class="settings-view-intro">默认是普通。卡片内容命中关键词后标记为重要，不改变事件身份；行为策略可以据此决定是否合并、延长或强调显示。</p>
+      <p class="settings-view-intro">默认是普通。卡片内容命中关键词后标记为重要，不改变事件身份；显示策略可以据此决定是否合并、延长或强调显示。</p>
       <textarea id="general-keywords" rows="8" class="settings-view-keywords" aria-label="重要性关键词"></textarea>
       <p class="settings-view-note">每行一个关键词，也支持英文逗号分隔。</p>
       <div class="settings-view-actions"><button id="settings-save-keywords" type="button">保存关键词</button></div>
@@ -243,7 +243,7 @@ ${PAGE_NAVIGATION_STYLE}
 <main class="settings-shell">
   ${renderPageNavigation({ active: 'settings', currentUrl })}
   <aside class="settings-shell-sidebar" aria-label="设置分类">${nav}</aside>
-  <header class="settings-shell-header"><div><h1>设置</h1><p class="settings-shell-lead">管理 Notification Hub 的行为与显示策略。每个设置领域独立保存，页面切换不会离开当前 Hana 窗口。</p></div><div id="settings-shell-status" class="settings-shell-status" role="status" aria-live="polite">已读取</div></header>
+  <header class="settings-shell-header"><div><h1>设置</h1><p class="settings-shell-lead">管理 Notification Hub 的通知与显示策略。每个设置领域独立保存，页面切换不会离开当前 Hana 窗口。</p></div><div id="settings-shell-status" class="settings-shell-status" role="status" aria-live="polite">已读取</div></header>
   <div class="settings-shell-body">
     <section class="settings-shell-content" aria-live="polite"><header class="settings-shell-content-header"><div><h2 id="settings-shell-view-title">${escapeHtml(view.title)}</h2><p id="settings-shell-view-description">${escapeHtml(view.description)}</p></div></header><div id="settings-view-content">${initialContent}</div></section>
   </div>

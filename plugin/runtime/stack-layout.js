@@ -1,8 +1,11 @@
 import { resolveStackGrow, resolveStackWrap } from '../domain/stack-grow.js';
+import { withLexiconCode } from '../domain/lexicon-codes.js';
 
 const ANCHORS = Object.freeze(['top-left', 'top-right', 'bottom-left', 'bottom-right']);
 
-function layoutError(message, details = {}) { return Object.assign(new Error(message), { code: 'VISUAL_BEHAVIOR_LAYOUT_FAILED', details }); }
+function layoutError(message, details = {}) {
+  return withLexiconCode(Object.assign(new Error(message), { code: 'VISUAL_BEHAVIOR_LAYOUT_FAILED', details }));
+}
 function integer(field, value) { if (!Number.isInteger(value) || value <= 0) throw layoutError(`${field} must be a positive integer`, { field }); return value; }
 function freeze(value) { if (value && typeof value === 'object' && !Object.isFrozen(value)) { Object.values(value).forEach(freeze); Object.freeze(value); } return value; }
 

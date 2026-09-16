@@ -20,7 +20,7 @@ test('diagnostics page renders structured evidence without raw process streams o
   assert.match(html, /诊断中心/);
   assert.match(html, /Named Pipe/);
   assert.match(html, /恢复与布局/);
-  assert.match(html, /行为通道与卡片/);
+  assert.match(html, /飞法通道与卡片/);
   assert.match(html, /sceneBehavior/);
   assert.match(html, /behaviorChannelId/);
   assert.match(html, /最近诊断/);

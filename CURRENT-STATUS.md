@@ -10,8 +10,10 @@ Git：`f389d29` 为 0.1.7 回滚点；分支 `reform/0.1.8-lexicon`。
 弹幕规约走 `scene.set-charter`（试一条/预览/真卡发卡前写入）。堆叠仍走 `scene.set-mode`。未发 charter 时 Native 仍可用第一张卡播种。
 Native 内部 `FlightChannelState`；scene-state JSON 仍叫 `behaviorChannels`。JS 飞法解析正名为 `visual-event-native-flight.js`。
 `createFlightProfile` 只组装门票 + `CardLife`；`maxVisible` 仍挂着兼容，容量真正在 policy。
+事件巷正本是 `event-lane.js`；`behavior-channel.js` 只留别名。
+Phase 4 文案与诊断码：诊断页「飞法通道与卡片」；设置壳「通知/显示策略」；`VISUAL_BEHAVIOR_*` 仍抛旧码，并行 `lexiconCode`/`FLIGHT_*`。声音 `channel`/`quiet-mode` 是音频语义，未改名。通知中心无飞法撞名文案。
 
-未做：工作室 A 排版、PID follow、路径飞法、淡入、VERSION 0.1.8、事件巷文件物理切换、诊断旧码并行。
+未做：工作室 A 排版、PID follow、路径飞法、淡入、VERSION 0.1.8。
 
 ## 2026-09-15 0.1.7 开线
 

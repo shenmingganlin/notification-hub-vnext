@@ -34,12 +34,14 @@ test('scene behavior diagnostics projects bounded card and channel metadata with
       {
         id: 'card-a', x: 0, y: 0, width: 320, height: 160,
         eventId: 'tool.execution.succeeded', categoryId: 'tool', eventTypeId: 'execution.succeeded', visualProfileId: 'visual.tool.default',
-        behaviorProfileId: 'stack', behaviorChannelId: 'tool.main'
+        behaviorProfileId: 'stack', behaviorChannelId: 'tool.main',
+        flight: 'stack', flightChannelId: 'tool.main'
       },
       {
         id: 'card-b', x: 600, y: 0, width: 320, height: 160,
         eventId: 'chat.assistant_reply.completed', categoryId: 'chat', eventTypeId: 'assistant_reply.completed', visualProfileId: 'visual.chat.default',
-        behaviorProfileId: 'stack', behaviorChannelId: 'chat.main'
+        behaviorProfileId: 'stack', behaviorChannelId: 'chat.main',
+        flight: 'stack', flightChannelId: 'chat.main'
       }
     ],
     channels: [
@@ -47,6 +49,17 @@ test('scene behavior diagnostics projects bounded card and channel metadata with
       { channelId: 'chat.main', profileId: 'stack', cardOrder: ['card-b'] }
     ]
   });
+});
+
+test('scene behavior diagnostics accepts flightChannels as alias of behaviorChannels', () => {
+  const result = createSceneBehaviorDiagnostics({
+    cards: [{ id: 'card-a', x: 0, y: 0, width: 1, height: 1, behavior: { flight: 'ticker', flightChannelId: 'visual.event.ticker' } }],
+    flightChannels: [{ channelId: 'visual.event.ticker', profileId: 'ticker', cardOrder: ['card-a'] }]
+  });
+  assert.equal(result.channelCount, 1);
+  assert.equal(result.channels[0].channelId, 'visual.event.ticker');
+  assert.equal(result.cards[0].flight, 'ticker');
+  assert.equal(result.cards[0].flightChannelId, 'visual.event.ticker');
 });
 
 test('scene behavior diagnostics caps entries and marks truncation', () => {

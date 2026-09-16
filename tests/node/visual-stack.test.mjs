@@ -72,7 +72,7 @@ test('stack layout wrap off stays on one strip and rejects overflow instead of o
       { cardId: 'b', width: 80, height: 40 },
       { cardId: 'c', width: 80, height: 40 }
     ]
-  }), (error) => error.code === 'VISUAL_BEHAVIOR_LAYOUT_FAILED');
+  }), (error) => error.code === 'VISUAL_BEHAVIOR_LAYOUT_FAILED' && error.lexiconCode === 'FLIGHT_LAYOUT_FAILED');
 });
 
 test('snake layout fills oldest-first then reverses the next run', () => {
@@ -137,7 +137,7 @@ test('stack layout rejects cards that cannot fit the work area without silent de
   assert.throws(() => layout({
     workArea: { left: 0, top: 0, width: 300, height: 200 },
     cards: [{ cardId: 'too-large', width: 400, height: 100 }]
-  }), (error) => error.code === 'VISUAL_BEHAVIOR_LAYOUT_FAILED');
+  }), (error) => error.code === 'VISUAL_BEHAVIOR_LAYOUT_FAILED' && error.lexiconCode === 'FLIGHT_LAYOUT_FAILED');
 });
 
 test('channel runtime integrates Stack strategy for mixed sources and preserves geometry', () => {

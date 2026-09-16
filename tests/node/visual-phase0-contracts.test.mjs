@@ -90,6 +90,8 @@ test('visual diagnostic contract creates a frozen, traceable and recoverable err
 test('visual diagnostic contract rejects unknown stages, codes and unsafe source fields', () => {
   assert.ok(VISUAL_DIAGNOSTIC_STAGES.includes('PACKAGE_VALIDATE'));
   assert.ok(VISUAL_DIAGNOSTIC_CODES.includes('VISUAL_PROFILE_INVALID'));
+  assert.ok(VISUAL_DIAGNOSTIC_CODES.includes('FLIGHT_LAYOUT_FAILED'));
+  assert.ok(VISUAL_DIAGNOSTIC_STAGES.includes('FLIGHT_LAYOUT'));
   assert.throws(
     () => createVisualDiagnostic({ code: 'NOT_A_VISUAL_CODE', stage: 'EFFECT_RUN', message: 'bad', traceId: 't-1' }),
     (error) => error.code === 'VISUAL_DIAGNOSTIC_CODE_INVALID'

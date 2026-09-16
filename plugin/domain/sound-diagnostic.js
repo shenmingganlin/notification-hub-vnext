@@ -49,6 +49,7 @@ function normalizeInput(input = {}) {
     importance: boundedString(value.importance, 24),
     producer,
     source: boundedString(value.source, 96),
+    // channel 是声音来源标签（聊天频道等），不是飞法通道。
     channel: boundedString(value.channel, 64),
     stableKey: boundedString(value.stableKey, 160)
   };
