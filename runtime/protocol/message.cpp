@@ -105,6 +105,7 @@ public:
                 trace_id_ = result.message.trace_id;
             } else if (name == "type") {
                 if (!parse_string(result.message.type)) return fail("PROTOCOL_INVALID_MESSAGE", "type must be a string");
+                type_ = result.message.type;
             } else if (name == "timestamp") {
                 if (!parse_string(result.message.timestamp)) return fail("PROTOCOL_INVALID_MESSAGE", "timestamp must be a string");
             } else if (name == "idempotencyKey") {
@@ -163,7 +164,7 @@ private:
             std::move(message),
             request_id_,
             trace_id_,
-            result.message.type.empty() ? "unknown" : result.message.type
+            type_.empty() ? "unknown" : type_
         };
         return result;
     }
@@ -337,6 +338,7 @@ private:
     size_t position_{};
     std::string request_id_;
     std::string trace_id_;
+    std::string type_;
 };
 
 }  // namespace

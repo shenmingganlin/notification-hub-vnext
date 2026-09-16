@@ -118,12 +118,13 @@ test('native visual payload falls back for categories outside the Native visual 
 
 test('spaceToNativeStackLayout maps top anchors up and bottom anchors down without workArea keys', () => {
   const top = spaceToNativeStackLayout({ anchor: 'top-left', gap: 12 });
-  assert.deepEqual(top, { layout: 'stack', direction: 'up', wrap: 'parallel', anchor: 'top-left', spacing: 12, marginLeft: 18, marginRight: 0, marginTop: 18, marginBottom: 0 });
+  assert.deepEqual(top, { layout: 'stack', direction: 'up', wrap: 'parallel', anchor: 'top-left', spacing: 12, marginLeft: 18, marginRight: 0, marginTop: 18, marginBottom: 0, settle: 'snap' });
   assert.equal('workAreaWidth' in top, false);
   assert.equal('workAreaHeight' in top, false);
   assert.equal('dpiScale' in top, false);
   const bottom = spaceToNativeStackLayout({ anchor: 'bottom-right' });
-  assert.deepEqual(bottom, { layout: 'stack', direction: 'down', wrap: 'parallel', anchor: 'bottom-right', spacing: 8, marginLeft: 0, marginRight: 18, marginTop: 0, marginBottom: 18 });
+  assert.deepEqual(bottom, { layout: 'stack', direction: 'down', wrap: 'parallel', anchor: 'bottom-right', spacing: 8, marginLeft: 0, marginRight: 18, marginTop: 0, marginBottom: 18, settle: 'snap' });
+  assert.equal(spaceToNativeStackLayout({ anchor: 'bottom-right', settle: 'follow' }).settle, 'snap');
   assert.equal(spaceToNativeStackLayout({ anchor: 'top-right', gap: 0 }).direction, 'up');
   assert.equal(spaceToNativeStackLayout({ anchor: 'top-right', gap: 0 }).spacing, 0);
   assert.equal(spaceToNativeStackLayout({ anchor: 'bottom-left', gap: 24 }).direction, 'down');

@@ -22,8 +22,8 @@ export function createNotificationServices({
   const soundAssetRegistry = createSoundAssetRegistry();
   const soundAssetStorage = resolveSoundAssetStoragePaths({
     dataDir: ctx?.dataDir,
-    persistentDataDir: ctx?.soundAssetDataDir,
-    userDataDir: ctx?.userDataDir
+    persistentDataDir: ctx?.soundAssetDataDir
+      ?? (process.env.NODE_TEST_CONTEXT ? ctx?.dataDir : undefined)
   });
   const soundAssetRoot = soundAssetStorage.assetRoot;
   const soundConfig = resolveGlobalSoundConfig({ config: ctx?.config });

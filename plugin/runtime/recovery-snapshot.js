@@ -102,6 +102,13 @@ function validateSceneModePayload(payload) {
       throw recoveryError('RUNTIME_RECOVERY_INVALID_PAYLOAD', 'scene.set-mode requires a valid stack or shelf layout payload');
     }
   }
+  if ('settle' in payload && payload.settle !== 'snap') {
+    throw recoveryError('CHARTER_SETTLE_UNSUPPORTED', 'stack settle must be snap', {
+      field: 'settle',
+      expected: 'snap',
+      actual: payload.settle
+    });
+  }
   return payload;
 }
 

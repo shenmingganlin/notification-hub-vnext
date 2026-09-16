@@ -758,7 +758,8 @@ bool parse_scene_card_payload(std::string_view payload, scene::SceneCardState& c
         && card.window.height > 0 && card.window.height <= 10000;
 }
 
-bool parse_scene_mode_payload(std::string_view payload, scene::StackLayoutOptions& options) {
+bool parse_scene_mode_payload(std::string_view payload, scene::StackLayoutOptions& options, std::string& error_code) {
+    error_code = "LAYOUT_INVALID";
     size_t position = 0;
     const auto skip = [&]() {
         while (position < payload.size() && std::isspace(static_cast<unsigned char>(payload[position]))) ++position;
@@ -797,10 +798,12 @@ bool parse_scene_mode_payload(std::string_view payload, scene::StackLayoutOption
     bool seen_margin_top = false;
     bool seen_margin_bottom = false;
     bool seen_wrap = false;
+    bool seen_settle = false;
     std::string layout;
     std::string direction;
     std::string anchor;
     std::string wrap;
+    std::string settle;
     while (true) {
         skip();
         if (position < payload.size() && payload[position] == '}') {
@@ -809,13 +812,14 @@ bool parse_scene_mode_payload(std::string_view payload, scene::StackLayoutOption
         }
         std::string key;
         if (!parse_json_string_token(payload, position, key) || !consume(':')) return false;
-        if (key == "layout" || key == "direction" || key == "anchor" || key == "wrap") {
+        if (key == "layout" || key == "direction" || key == "anchor" || key == "wrap" || key == "settle") {
             std::string value;
             if (!parse_json_string_token(payload, position, value)) return false;
             if (key == "layout" && !seen_layout) { layout = std::move(value); seen_layout = true; }
             else if (key == "direction" && !seen_direction) { direction = std::move(value); seen_direction = true; }
             else if (key == "anchor" && !seen_anchor) { anchor = std::move(value); seen_anchor = true; }
             else if (key == "wrap" && !seen_wrap) { wrap = std::move(value); seen_wrap = true; }
+            else if (key == "settle" && !seen_settle) { settle = std::move(value); seen_settle = true; }
             else return false;
         } else if (key == "spacing" || key == "workAreaWidth" || key == "workAreaHeight" || key == "dpiScale"
             || key == "marginLeft" || key == "marginRight" || key == "marginTop" || key == "marginBottom") {
@@ -865,6 +869,11 @@ bool parse_scene_mode_payload(std::string_view payload, scene::StackLayoutOption
     else if (wrap == "off") options.wrap = scene::StackWrap::Off;
     else if (wrap == "snake") options.wrap = scene::StackWrap::Snake;
     else return false;
+    if (!seen_settle || settle == "snap") options.settle = scene::StackSettle::Snap;
+    else {
+        error_code = "CHARTER_SETTLE_UNSUPPORTED";
+        return false;
+    }
     return true;
 }
 
@@ -1179,6 +1188,7 @@ int run_named_pipe_server(std::string_view pipe_name, bool drop_after_health, bo
                     continue;
                 }
                 bool payload_valid = true;
+                std::string layout_error;
                 if (parsed.message.type == "scene.update" && !is_card_update) {
                     payload_valid = parse_scene_update_payload(parsed.message.payload_json, requested_scene_state);
                 } else if (parsed.message.type == "scene.create" || is_card_update) {
@@ -1186,22 +1196,28 @@ int run_named_pipe_server(std::string_view pipe_name, bool drop_after_health, bo
                 } else if (parsed.message.type == "scene.dismiss") {
                     payload_valid = parse_scene_dismiss_payload(parsed.message.payload_json, requested_dismiss_id);
                 } else if (is_layout_command) {
-                    payload_valid = parse_scene_mode_payload(parsed.message.payload_json, requested_layout_options);
+                    payload_valid = parse_scene_mode_payload(parsed.message.payload_json, requested_layout_options, layout_error);
                 } else if (is_charter_command) {
                     payload_valid = parse_scene_charter_payload(parsed.message.payload_json, requested_ticker_charter);
                 }
                 if (!payload_valid) {
-                    protocol::ProtocolError error{
-                        is_card_command
-                            ? "RUNTIME_SCENE_CARD_INVALID"
-                            : (is_layout_command ? "LAYOUT_INVALID" : (is_charter_command ? "CHARTER_INVALID" : "RUNTIME_SCENE_STATE_INVALID")),
-                        is_card_command
+                    const std::string error_code = is_card_command
+                        ? "RUNTIME_SCENE_CARD_INVALID"
+                        : (is_layout_command
+                            ? (layout_error.empty() ? "LAYOUT_INVALID" : layout_error)
+                            : (is_charter_command ? "CHARTER_INVALID" : "RUNTIME_SCENE_STATE_INVALID"));
+                    const std::string error_message = error_code == "CHARTER_SETTLE_UNSUPPORTED"
+                        ? "stack settle must be snap"
+                        : (is_card_command
                             ? "scene card payload is invalid"
                             : (is_layout_command
                                 ? "scene.set-mode requires a valid stack or shelf layout payload"
                                 : (is_charter_command
                                     ? "scene.set-charter requires a ticker charter payload"
-                                    : "scene.update requires integer x, y, width, and height")),
+                                    : "scene.update requires integer x, y, width, and height")));
+                    protocol::ProtocolError error{
+                        error_code,
+                        error_message,
                         parsed.message.request_id,
                         parsed.message.trace_id,
                         parsed.message.type

@@ -13,7 +13,9 @@ const EXPECTED_METHODS = [
   'importSoundAsset',
   'exportSoundComboPackage',
   'exportSoundPackage',
-  'testSoundAsset'
+  'testSoundAsset',
+  'syncSoundLibrary',
+  'revealSoundLibrary'
 ];
 const SETTINGS_METHODS = [
   'getSoundSettingsStatus',

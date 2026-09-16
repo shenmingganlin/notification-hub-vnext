@@ -26,7 +26,7 @@ function assertVersion(label, actual) {
 }
 
 test('VERSION is the canonical release version for Node/package metadata', () => {
-  assert.match(canonicalVersion, /^0\.1\.7$/);
+  assert.match(canonicalVersion, /^0\.1\.8$/);
   assertVersion('package.json', packageJson.version);
   assertVersion('package-lock.json root', packageLock.version);
   assertVersion('package-lock.json package entry', packageLock.packages[''].version);
@@ -45,8 +45,8 @@ test('CMake and protocol use the current release version without runtime workspa
 
 test('README documents the canonical current version and excludes historical diagnostics', () => {
   const readme = read('README.md');
-  assert.match(readme, /Current stable baseline: `0\.1\.7`/);
-  assert.match(readme, /Current stable version: `0\.1\.7`/);
+  assert.match(readme, /Current stable baseline: `0\.1\.8`/);
+  assert.match(readme, /Current stable version: `0\.1\.8`/);
   assert.match(readme, /VERSION.*canonical|canonical.*VERSION/i);
   assert.match(readme, /historical.*diagnostic|诊断.*历史|历史.*artifact/i);
 });

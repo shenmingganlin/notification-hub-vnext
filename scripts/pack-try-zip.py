@@ -8,10 +8,11 @@ from pathlib import Path
 root = Path(__file__).resolve().parents[1]
 dist = root / "dist"
 freeze = dist / "notification-hub-vnext-0.1.6.zip"
-try_zip = dist / "notification-hub-vnext-0.1.7-try.zip"
+baseline_zip = dist / "notification-hub-vnext-0.1.7-try.zip"
+try_zip = dist / "notification-hub-vnext-0.1.8.zip"
 plugin = root / "plugin"
 expected_freeze = "2BD878DEF7D8CCFCD47FA0482E8444BC0D1B967AC0FBBA201B3F226A7BB54D88"
-audio_name = "runtime/notification-hub-audio-engine.exe"
+audio_src = root / "build" / "audio-follow-default" / "runtime" / "Release" / "notification-hub-audio-engine.exe"
 
 freeze_sha_before = None
 if freeze.is_file():
@@ -19,15 +20,8 @@ if freeze.is_file():
     if freeze_sha_before != expected_freeze:
         raise SystemExit(f"freeze zip hash drifted: {freeze_sha_before}")
 
-audio_tmp = Path(tempfile.mkdtemp(prefix="nh-audio-")) / "notification-hub-audio-engine.exe"
-if freeze.is_file():
-    with zipfile.ZipFile(freeze) as z:
-        audio_tmp.write_bytes(z.read(audio_name))
-elif try_zip.is_file():
-    with zipfile.ZipFile(try_zip) as z:
-        audio_tmp.write_bytes(z.read(audio_name))
-else:
-    raise SystemExit("need freeze zip or an existing 0.1.7-try zip for the frozen audio engine")
+if not audio_src.is_file():
+    raise SystemExit(f"new audio engine missing: {audio_src}")
 
 stage = Path(tempfile.mkdtemp(prefix="nh-try-full-"))
 try:
@@ -51,7 +45,7 @@ try:
     runtime_dir = stage / "runtime"
     runtime_dir.mkdir(exist_ok=True)
     shutil.copy2(plugin / "runtime" / "notification-hub-runtime.exe", runtime_dir / "notification-hub-runtime.exe")
-    shutil.copy2(audio_tmp, runtime_dir / "notification-hub-audio-engine.exe")
+    shutil.copy2(audio_src, runtime_dir / "notification-hub-audio-engine.exe")
 
     adm_src = root / "node_modules" / "adm-zip"
     if not (adm_src / "adm-zip.js").is_file():
@@ -87,6 +81,8 @@ try:
             "routes/settings-font-assets.js",
             "routes/settings-font-assets-page.js",
             "domain/font-asset-library.js",
+            "domain/sound-library-reconcile.js",
+            "domain/sound-asset-storage-path.js",
             "assets/yuan/Hanako.png",
             "assets/yuan/Butter.png",
             "assets/yuan/Ming.png",
@@ -110,7 +106,6 @@ try:
         print("audio.exe", z.getinfo("runtime/notification-hub-audio-engine.exe").file_size)
 finally:
     shutil.rmtree(stage, ignore_errors=True)
-    shutil.rmtree(audio_tmp.parent, ignore_errors=True)
 
 digest = hashlib.sha256(try_zip.read_bytes()).hexdigest().upper()
 print("TRY_ZIP_SHA256", digest)
@@ -121,4 +116,6 @@ if freeze_sha_before:
     if freeze_sha_after != freeze_sha_before:
         raise SystemExit("freeze zip mutated")
 else:
-    print("FREEZE_ZIP", "missing; audio taken from previous 0.1.7-try")
+    print("FREEZE_ZIP", "missing; 0.1.6 freeze not present")
+if baseline_zip.is_file():
+    print("BASELINE_ZIP", baseline_zip.name, baseline_zip.stat().st_size)

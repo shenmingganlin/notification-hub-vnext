@@ -503,7 +503,7 @@ test('vNext plugin owns one isolated RuntimeHostAdapter through onload/onunload'
 
   await plugin.onload();
   assert.equal(pluginName, 'notification-hub-vnext');
-  assert.equal(pluginVersion, '0.1.7');
+  assert.equal(pluginVersion, '0.1.8');
   assert.equal(adapter.started, 1);
   assert.equal(plugin.runtimeHost, adapter);
   assert.equal(ctx.logs.some(([level, ...args]) => level === 'debug' && args.some((value) => JSON.stringify(value).includes('TEST_DIAGNOSTIC'))), true);
@@ -837,12 +837,15 @@ test('vNext sound settings test suppresses rapid accepted playback for the asset
   }
 });
 
-test('vNext restores custom sound assets into the registry captured by the scheduler', async () => {
+test('vNext restores each custom sound file as its own registry entry', async () => {
   const dataDir = await mkdtemp(path.join(os.tmpdir(), 'nh-sound-restore-'));
   const assetRoot = path.join(dataDir, 'sound-assets');
   const assetPath = path.join(assetRoot, 'custom', 'restored.wav');
+  const junkPath = path.join(assetRoot, 'custom', 'stub.wav');
+  const wavBytes = Buffer.concat([Buffer.from('RIFF'), Buffer.alloc(4), Buffer.from('WAVEfmt '), Buffer.alloc(48, 1), Buffer.from('payload')]);
   await mkdir(path.dirname(assetPath), { recursive: true });
-  await writeFile(assetPath, Buffer.from('wav'));
+  await writeFile(assetPath, wavBytes);
+  await writeFile(junkPath, Buffer.from('wav'));
   await writeFile(path.join(dataDir, 'sound-assets.json'), JSON.stringify({
     version: 1,
     assets: [{
@@ -852,7 +855,7 @@ test('vNext restores custom sound assets into the registry captured by the sched
       format: 'wav',
       relativePath: 'custom/restored.wav',
       durationMs: 160,
-      fileSizeBytes: 3,
+      fileSizeBytes: wavBytes.length,
       sha256: '0000000000000000000000000000000000000000000000000000000000000000',
       enabled: true
     }]
@@ -875,6 +878,8 @@ test('vNext restores custom sound assets into the registry captured by the sched
   try {
     assert.strictEqual(plugin.soundAssetRegistry, registry);
     assert.ok(plugin.soundAssetRegistry.get('custom.restored'));
+    assert.equal(plugin.soundAssetRegistry.list().filter((asset) => asset.kind === 'custom').length, 1);
+    assert.equal(plugin.soundAssetRegistry.get('stub'), null);
     const result = await plugin.testSoundAsset({ soundId: 'custom.restored' });
     await plugin.soundScheduler.waitForIdle({ timeoutMs: 500, pollMs: 1 });
     assert.equal(result.playback.status, 'played');
@@ -1669,7 +1674,7 @@ test('vNext plugin instance exposes a JSON-safe install response boundary', asyn
   const serialized = JSON.stringify({ id: pluginName, ctx, instance: plugin });
 
   assert.match(serialized, /"pluginName":"notification-hub-vnext"/);
-  assert.match(serialized, /"pluginVersion":"0\.1\.7"/);
+  assert.match(serialized, /"pluginVersion":"0\.1\.8"/);
   await plugin.onunload();
 });
 

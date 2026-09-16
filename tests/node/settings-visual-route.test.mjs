@@ -213,7 +213,9 @@ test('visual settings page renders card studio layout', () => {
   assert.match(html, /function readGlossary\(/);
   assert.match(html, /id="bg-adjust"/);
   assert.match(html, /id="bg-adjust-open"/);
-  assert.match(html, /id="bg-asset-import"[\s\S]*id="bg-asset-library"[\s\S]*id="bg-adjust-open"/);
+  assert.match(html, /id="bg-adjust-open"/);
+  assert.doesNotMatch(html, /id="bg-asset-import"/);
+  assert.doesNotMatch(html, /id="bg-asset-library"/);
   assert.match(html, />素材库</);
   assert.doesNotMatch(html, /function attachStudioBg\(/);
   assert.doesNotMatch(html, /className = "studio-bg"/);
@@ -969,7 +971,9 @@ test('visual settings fragment passes studio structure', () => {
   assert.doesNotMatch(fragment, /open-visual-workbench|workbench-phase|visual-workbench\/open|workbenchPayload/);
   assert.match(fragment, /visual-settings-save/);
   assert.doesNotMatch(fragment, /visual-assets-open/);
-  assert.match(fragment, /id="bg-asset-import"[\s\S]*id="bg-asset-library"[\s\S]*id="bg-adjust-open"/);
+  assert.match(fragment, /id="bg-adjust-open"/);
+  assert.doesNotMatch(fragment, /id="bg-asset-import"/);
+  assert.doesNotMatch(fragment, /id="bg-asset-library"/);
   assert.match(fragment, />素材库</);
   assert.match(fragment, /<details/);
   assert.match(fragment, /id="prop-anchor"/);
@@ -1154,6 +1158,7 @@ test('try-one sits in the title row and previews the current draft', () => {
     settings: { profile: { version: 2, behaviorId: 'ticker', global: { enabled: true } } }
   });
   assert.match(html, /hero-actions[\s\S]*id="visual-try-one"[\s\S]*id="open-visual-preview"[\s\S]*id="visual-settings-save"/);
+  assert.match(html, /hero-library[\s\S]*id="open-visual-assets"[\s\S]*id="visual-clear-cards"/);
   assert.doesNotMatch(html, /preview-actions[\s\S]{0,240}id="visual-try-one"/);
   assert.doesNotMatch(html, /preview-actions[\s\S]{0,400}id="open-visual-preview"/);
   assert.match(html, /json\("visual-try-one"[\s\S]*studioNativeBody\(\)/);

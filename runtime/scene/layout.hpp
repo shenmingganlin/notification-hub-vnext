@@ -30,6 +30,10 @@ enum class StackWrap {
     Snake
 };
 
+enum class StackSettle {
+    Snap
+};
+
 struct StackCardInput {
     std::string id;
     int width{};
@@ -53,6 +57,7 @@ struct StackLayoutOptions {
     int margin_top{};
     int margin_bottom{};
     StackWrap wrap{StackWrap::Parallel};
+    StackSettle settle{StackSettle::Snap};
 };
 
 struct StackCardPlacement {

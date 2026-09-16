@@ -71,6 +71,10 @@ test('sound settings page exposes the simplified configuration workbench and aud
   assert.match(html, /all-keep-combo-bindings.*pendingComboPackageText.*importSoundCombo/);
   assert.match(html, /确认导入/);
   assert.match(html, /保留本地绑定/);
+  assert.match(html, /打开声音库/);
+  assert.match(html, /同步库内文件/);
+  assert.match(html, /sound-library-sync/);
+  assert.match(html, /sound-library-reveal/);
   assert.match(html, /添加本地音频/);
   assert.match(html, /导入音频包（\.nhsound）/);
   assert.match(html, /package-conflict-list/);

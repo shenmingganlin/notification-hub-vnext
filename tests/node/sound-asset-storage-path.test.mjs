@@ -43,6 +43,18 @@ test('startup migration copies legacy registry and files into stable storage wit
   }
 });
 
+test('userDataDir does not steal the live sound library from AppData', () => {
+  const paths = resolveSoundAssetStoragePaths({
+    dataDir: 'C:\\Hana\\plugin-data',
+    userDataDir: 'C:\\Hana\\plugin-data',
+    env: { APPDATA: 'C:\\Users\\Ganlin\\AppData\\Roaming' },
+    platform: 'win32'
+  });
+
+  assert.equal(paths.root, path.resolve('C:\\Users\\Ganlin\\AppData\\Roaming\\HanaAgent\\notification-hub-vnext'));
+  assert.equal(paths.migratedFromLegacy, true);
+});
+
 test('explicit persistentDataDir is preferred for host and test isolation', () => {
   const paths = resolveSoundAssetStoragePaths({
     dataDir: 'C:\\Hana\\plugin-data',

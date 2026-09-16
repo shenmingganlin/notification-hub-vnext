@@ -165,8 +165,16 @@ test('recovery snapshot rejects unsupported commands and malformed files', async
     () => addRecoveryEntry(snapshot, {
       key: 'margin-99',
       type: 'scene.set-mode',
-      payload: { layout: 'stack', direction: 'down', anchor: 'top-right', spacing: 8, marginLeft: 99 }
+      payload: { layout: 'stack', direction: 'down', anchor: 'top-right', spacing: 8, marginLeft: 99, settle: 'snap' }
     })
+  );
+  assert.throws(
+    () => addRecoveryEntry(snapshot, {
+      key: 'follow-mode',
+      type: 'scene.set-mode',
+      payload: { layout: 'stack', direction: 'down', anchor: 'top-right', spacing: 8, settle: 'follow' }
+    }),
+    (error) => error.code === 'CHARTER_SETTLE_UNSUPPORTED'
   );
   assert.throws(
     () => addRecoveryEntry(snapshot, {

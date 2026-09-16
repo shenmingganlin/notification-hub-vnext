@@ -1,6 +1,14 @@
 # 当前状态快照（2026-08-15，Windows）
 
-## 2026-09-16 词表 + 通道规约（0.1.8 进行中）
+## 2026-09-17 0.1.8 钉死
+
+VERSION / manifest / plugin version 已升 **0.1.8**。分支仍是 `reform/0.1.8-lexicon`；0.1.7 回滚点 `f389d29`。
+
+堆叠规约插座：`StackCharter.settle` 仅 `snap`。`follow` 在 JS charter、恢复快照、Native `scene.set-mode` 均拒绝，错误码 `CHARTER_SETTLE_UNSUPPORTED`。不写 PID 控制器。下发卡永远带 `settle: "snap"`。
+词表残留已登记：`docs/superpowers/lexicon-alias-inventory.md`。协议旧键、scene-state `behaviorChannels`、`VISUAL_BEHAVIOR_*` 别名留下。
+皮肤/裁切不做。下一刀：堆叠 PID（`settle: follow`）。
+
+## 2026-09-16 词表 + 通道规约（0.1.8）
 
 计划：`docs/superpowers/plans/2026-09-16-lexicon-and-channel-charter.md`。ADR-006 已写。
 
@@ -16,8 +24,6 @@ Phase 4 文案与诊断码：诊断页「飞法通道与卡片」；设置壳「
 工作室 collect 同时写 `flight`；只收到旧键时 `lexiconAliasesUsed()` 记 `LEXICON_ALIAS_USED`。
 
 声音引擎：WASAPI 跟系统默认播放设备（eConsole）。插拔耳机/切换默认输出会重开流，不再绑死启动时那块扬声器。真机需换上新的 `notification-hub-audio-engine.exe`。
-
-未做：PID follow、路径飞法、淡入、VERSION 0.1.8。
 
 ## 2026-09-15 0.1.7 开线
 

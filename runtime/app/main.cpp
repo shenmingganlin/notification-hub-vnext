@@ -2407,6 +2407,19 @@ bool protocol_self_test() {
     if (!expect_rejected(
             R"({"protocolVersion":1,"requestId":"req-invalid-time","traceId":"trace-invalid-time","type":"health","timestamp":"2026-08-01","payload":{}})",
             "PROTOCOL_INVALID_MESSAGE")) return false;
+    {
+        const auto invalid_time = parse_message(
+            R"({"protocolVersion":1,"requestId":"req-invalid-time","traceId":"trace-invalid-time","type":"health","timestamp":"2026-08-01","payload":{}})");
+        if (invalid_time.error.request_type != "health") {
+            std::cerr << "parse error must echo request type, got " << invalid_time.error.request_type << "\n";
+            return false;
+        }
+        const auto encoded = notification_hub::protocol::serialize_error(invalid_time.error);
+        if (encoded.find("\"requestType\":\"health\"") == std::string::npos) {
+            std::cerr << "serialized parse error lost requestType\n";
+            return false;
+        }
+    }
     constexpr std::string_view escaped_scene =
         R"({"protocolVersion":1,"requestId":"req-escaped","traceId":"trace-escaped","type":"scene.create","timestamp":"2026-08-01T00:00:00.000Z","payload":{"id":"card-\u4e2d\ud83d\ude80","title":"\u6d4b\u8bd5","body":"escaped unicode"}})";
     const auto escaped_result = parse_message(escaped_scene);

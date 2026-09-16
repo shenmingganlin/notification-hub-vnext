@@ -1576,18 +1576,6 @@ function studioClickHandler(event) {
     if (window.NotificationHubPageRouter) window.NotificationHubPageRouter.load("visual-assets-page");
     return;
   }
-  var bgImport = event.target && event.target.closest ? event.target.closest("#bg-asset-import") : null;
-  if (bgImport) {
-    event.preventDefault();
-    importBgAsset();
-    return;
-  }
-  var bgLibrary = event.target && event.target.closest ? event.target.closest("#bg-asset-library") : null;
-  if (bgLibrary) {
-    event.preventDefault();
-    if (window.NotificationHubPageRouter) window.NotificationHubPageRouter.load("visual-assets-page");
-    return;
-  }
   var fontImport = event.target && event.target.closest ? event.target.closest("#font-asset-import") : null;
   if (fontImport) {
     event.preventDefault();
@@ -2420,6 +2408,10 @@ if (previewButton) previewButton.addEventListener("click", function () {
     if (generation !== previewGeneration) return;
     previewError(error);
   }).finally(function () { previewButton.disabled = false; });
+});
+var openAssetsBtn = $("open-visual-assets");
+if (openAssetsBtn) openAssetsBtn.addEventListener("click", function () {
+  if (window.NotificationHubPageRouter) window.NotificationHubPageRouter.load("visual-assets-page");
 });
 var clearCards = $("visual-clear-cards");
 if (clearCards) clearCards.addEventListener("click", function () {

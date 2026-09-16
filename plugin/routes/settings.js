@@ -446,6 +446,24 @@ export default function registerSettingsRoute(app, ctx) {
     try { const plugin = getSoundAssetServices(); if (!plugin?.getSoundAssetStatus) return c.json({ ok: false, error: { code: 'SOUND_ASSET_API_UNAVAILABLE', message: 'Sound asset API unavailable' } }, 503); return c.json({ ok: true, ...plugin.getSoundAssetStatus() }); }
     catch (error) { return c.json({ ok: false, error: errorPayload(error) }, 500); }
   });
+  app.post('/sound-library-sync', async (c) => {
+    try {
+      const plugin = getSoundAssetServices();
+      if (!plugin?.syncSoundLibrary) return c.json(soundAssetUnavailable('SOUND_ASSET_API_UNAVAILABLE', 'Sound asset API unavailable'), 503);
+      return c.json({ ok: true, ...(await plugin.syncSoundLibrary()) });
+    } catch (error) {
+      return c.json({ ok: false, error: errorPayload(error) }, 500);
+    }
+  });
+  app.post('/sound-library-reveal', async (c) => {
+    try {
+      const plugin = getSoundAssetServices();
+      if (!plugin?.revealSoundLibrary) return c.json(soundAssetUnavailable('SOUND_ASSET_API_UNAVAILABLE', 'Sound asset API unavailable'), 503);
+      return c.json({ ok: true, ...(await plugin.revealSoundLibrary()) });
+    } catch (error) {
+      return c.json({ ok: false, error: errorPayload(error) }, 500);
+    }
+  });
   app.post('/sound-combo-package-import', async (c) => {
     try { const plugin = getSoundAssetServices(); if (!plugin?.importSoundComboPackage) return c.json({ ok: false, error: { code: 'SOUND_ASSET_API_UNAVAILABLE', message: 'Sound combo package API unavailable' } }, 503); return c.json({ ok: true, ...(await plugin.importSoundComboPackage(await readJsonBody(c))) }); }
     catch (error) { const status = error?.code?.startsWith('SOUND_COMBO_PACKAGE_') || error?.code?.startsWith('SOUND_PACKAGE_') ? 400 : 503; return c.json({ ok: false, error: errorPayload(error) }, status); }

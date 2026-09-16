@@ -22,6 +22,7 @@ import { createSoundDiagnostic } from './domain/sound-diagnostic.js';
 import { createSoundRuleExplanation } from './domain/sound-rule-explanation.js';
 import { loadSoundAssetRegistry, saveSoundAssetRegistry } from './domain/sound-asset-persistence.js';
 import { migrateSoundAssetStorage, resolveSoundAssetStoragePaths } from './domain/sound-asset-storage-path.js';
+import { reconcileSoundLibrary } from './domain/sound-library-reconcile.js';
 import { exportSoundPackage } from './domain/sound-package-exporter.js';
 import { importSoundPackage } from './domain/sound-package-importer.js';
 import { exportSoundComboPackage } from './domain/sound-combo-package-exporter.js';
@@ -152,7 +153,7 @@ export * from './domain/notification-store-snapshot.js';
 export * from './domain/notification-store-store.js';
 export * from './domain/notification-store-persistence.js';
 
-export const pluginVersion = '0.1.7';
+export const pluginVersion = '0.1.8';
 export const pluginName = 'notification-hub-vnext';
 export const RUNTIME_TEST_CARD_PREFIX = 'nh-vnext-test-';
 export const VISUAL_WORKBENCH_CARD_PREFIX = 'nh-visual-workbench-';
@@ -612,8 +613,8 @@ export default class NotificationHubVNextPlugin {
     this.soundFilePicker = this.soundFilePickerFactory({ platform: process.platform });
     this.soundAssetStorage = notificationServices.soundAssetStorage ?? resolveSoundAssetStoragePaths({
       dataDir: ctx?.dataDir,
-      persistentDataDir: ctx?.soundAssetDataDir,
-      userDataDir: ctx?.userDataDir
+      persistentDataDir: ctx?.soundAssetDataDir
+        ?? (process.env.NODE_TEST_CONTEXT ? ctx?.dataDir : undefined)
     });
     this.soundAssetRoot = this.soundAssetStorage.assetRoot;
     this.soundAssetRegistryPath = this.soundAssetStorage.registryPath;
@@ -724,6 +725,8 @@ export default class NotificationHubVNextPlugin {
       clearSoundDiagnostics: this.clearSoundDiagnostics.bind(this),
       exportSoundDiagnostics: this.exportSoundDiagnostics.bind(this),
       getSoundAssetStatus: this.getSoundAssetStatus.bind(this),
+      syncSoundLibrary: this.syncSoundLibrary.bind(this),
+      revealSoundLibrary: this.revealSoundLibrary.bind(this),
       importSoundPackage: this.importSoundPackage.bind(this),
       importSoundAsset: this.importSoundAsset.bind(this),
       updateSoundAssetConfiguration: this.updateSoundAssetConfiguration.bind(this),
@@ -1729,17 +1732,41 @@ export default class NotificationHubVNextPlugin {
       if (migration.migrated) {
         this.ctx.log?.info?.(`[notification-hub-vnext] Migrated sound assets to stable user storage: ${migration.to}`);
       }
-      const restoredRegistry = await loadSoundAssetRegistry(this.soundAssetRegistryPath);
+      await mkdir(this.soundAssetRoot, { recursive: true });
+      const previous = (await loadSoundAssetRegistry(this.soundAssetRegistryPath)).list();
+      const reconciled = await reconcileSoundLibrary({
+        assetRoot: this.soundAssetRoot,
+        registryPath: this.soundAssetRegistryPath,
+        previousAssets: previous
+      });
       for (const asset of this.soundAssetRegistry.list()) {
         if (asset.kind === 'custom') this.soundAssetRegistry.remove(asset.soundId);
       }
-      for (const asset of restoredRegistry.list()) {
+      for (const asset of reconciled.registry.list()) {
         if (asset.kind === 'custom') this.soundAssetRegistry.add(asset);
+      }
+      if (reconciled.skipped.length) {
+        this.ctx.log?.info?.(`[notification-hub-vnext] Sound library skipped ${reconciled.skipped.length} junk file(s)`);
       }
     } catch (error) {
       this.soundAssetDiagnostics.push({ code: error.code ?? 'SOUND_ASSET_LOAD_FAILED', message: error.message, details: error.details ?? {}, timestamp: new Date().toISOString() });
       this.ctx.log?.warn?.(`[notification-hub-vnext] Sound asset restore failed: ${error.message}`, error.details);
     }
+  }
+
+  async syncSoundLibrary() {
+    await this.restoreSoundAssets();
+    return this.getSoundSettingsStatus();
+  }
+
+  async revealSoundLibrary() {
+    const folder = this.soundAssetRoot;
+    await mkdir(folder, { recursive: true });
+    if (process.platform === 'win32') {
+      const { spawn } = await import('node:child_process');
+      spawn('explorer.exe', [folder], { detached: true, stdio: 'ignore' }).unref();
+    }
+    return { ok: true, assetRoot: folder };
   }
 
   async saveSoundAssets() {
@@ -4124,6 +4151,7 @@ export * from './domain/sound-settings-store-persistence.js';
 export * from './domain/custom-sound-asset.js';
 export * from './domain/sound-asset-registry.js';
 export * from './domain/sound-asset-persistence.js';
+export * from './domain/sound-library-reconcile.js';
 export * from './domain/sound-package.js';
 export * from './domain/sound-package-importer.js';
 export * from './domain/sound-package-exporter.js';

@@ -76,7 +76,8 @@ export function spaceToNativeStackLayout(space = {}) {
     marginLeft: leftOn ? nativeStackMargin(space, 'marginLeft') : 0,
     marginRight: leftOn ? 0 : nativeStackMargin(space, 'marginRight'),
     marginTop: topOn ? nativeStackMargin(space, 'marginTop') : 0,
-    marginBottom: topOn ? 0 : nativeStackMargin(space, 'marginBottom')
+    marginBottom: topOn ? 0 : nativeStackMargin(space, 'marginBottom'),
+    settle: 'snap'
   };
 }
 

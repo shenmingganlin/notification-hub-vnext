@@ -8,7 +8,9 @@ const SOUND_ASSET_METHODS = Object.freeze([
   'importSoundAsset',
   'exportSoundComboPackage',
   'exportSoundPackage',
-  'testSoundAsset'
+  'testSoundAsset',
+  'syncSoundLibrary',
+  'revealSoundLibrary'
 ]);
 
 function bindMethods(target, source) {

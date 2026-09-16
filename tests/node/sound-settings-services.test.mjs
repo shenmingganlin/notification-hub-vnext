@@ -23,7 +23,9 @@ const ASSET_METHODS = [
   'importSoundAsset',
   'exportSoundComboPackage',
   'exportSoundPackage',
-  'testSoundAsset'
+  'testSoundAsset',
+  'syncSoundLibrary',
+  'revealSoundLibrary'
 ];
 
 function createSource() {

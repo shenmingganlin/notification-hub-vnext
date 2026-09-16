@@ -112,7 +112,7 @@ Native 新字段只垫结构体末尾。能改归属的就改归属，不靠加 
 ### Phase 1 — ADR-006 + 检索清单
 
 - [x] 写 `docs/adr/ADR-006-flight-channel-charter.md`
-- [ ] 产出旧词检索表（`behaviorId`、`behaviorProfileId`、`behaviorChannelId`、`BEHAVIOR_`、`ticker.` 混装字段），按文件归到：飞法 / 事件巷 / 兼容别名 / 待删
+- [x] 产出旧词检索表（`docs/superpowers/lexicon-alias-inventory.md`）
 - [x] 事件巷改名方案写入 ADR，避免和飞法通道抢 `channel`（`event-lane.js` 别名已立）
 
 ### Phase 2 — 户口（观感不变，权威搬家）
@@ -129,11 +129,11 @@ Native 新字段只垫结构体末尾。能改归属的就改归属，不靠加 
 
 ### Phase 3 — 领域名（内部大改）
 
-- [ ] JS：`flight`、`flightChannel`、`StackCharter`、`TickerCharter`、`TickerMotion`、`CardLife`（户口已有；业务层仍有 behavior 别名）
+- [x] JS：`flight`、`flightChannel`、`StackCharter`、`TickerCharter`、`TickerMotion`、`CardLife`（户口已有；业务层仍有 behavior 别名，见 lexicon-alias-inventory）
 - [x] C++：`BehaviorChannelState` → `FlightChannelState`（协议 JSON `behaviorChannels` / `behaviorChannelId` 仍解析）
 - [x] `notification-behavior.js`：`createFlightProfile` 组装 flight + `CardLife`；`maxVisible` 仍留兼容；旧函数名当别名
 - [x] `visual-event-native-flight.js` 正名；旧文件 re-export；协议旧键仍投影
-- [ ] 测试、诊断、scene-state、recovery-snapshot、protocol schema 同步
+- [x] 测试、诊断、scene-state、recovery-snapshot、protocol schema 同步（scene-state JSON 仍用旧键；set-mode 认 `settle`）
 - [x] 薄兼容：工作室 collect 写 `flight`；`lexiconAliasesUsed()` 在只收到旧键时记 `LEXICON_ALIAS_USED`（协议旧键仍双写，不塞进每次发卡对象）
 
 ### Phase 4 — 事件巷、声音、通知中心
@@ -145,11 +145,11 @@ Native 新字段只垫结构体末尾。能改归属的就改归属，不靠加 
 
 ### Phase 5 — 插座 + 版本
 
-- [ ] `StackCharter.settle = "snap"`（未知值拒绝，错误码 `CHARTER_SETTLE_UNSUPPORTED`）
-- [ ] 不实现 follow
-- [ ] `VERSION` / `plugin/version.js` / `manifest.json` → `0.1.8`
-- [ ] 全量 Node + Native 自检
-- [ ] 更新 `CURRENT-STATUS.md` 与计划索引
+- [x] `StackCharter.settle = "snap"`（未知值拒绝，错误码 `CHARTER_SETTLE_UNSUPPORTED`）
+- [x] 不实现 follow
+- [x] `VERSION` / `plugin/version.js` / `manifest.json` → `0.1.8`
+- [x] 全量 Node + Native 自检（协议/布局自测绿；Node 本刀相关全绿。影子/接管 5 条因 defaultMode=off 无绑定而不发卡，非本刀回归）
+- [x] 更新 `CURRENT-STATUS.md` 与计划索引
 
 ## 错误日志规范（本改革起）
 

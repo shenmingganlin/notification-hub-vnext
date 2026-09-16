@@ -11,7 +11,7 @@ Notification Hub vNext is a Windows notification scene system for HanaAgent.
 
 ## Current status
 
-Current stable baseline: `0.1.7`.
+Current stable baseline: `0.1.8`.
 
 The project has completed the repository foundation, protocol and diagnostic contracts, the main Native Runtime lifecycle/configuration closure, and the core notification data path. Alpha.8 has passed real Hana validation for stable card creation, one-click-one-card dismissal, and remaining-card layout reflow.
 
@@ -143,7 +143,7 @@ The vNext package uses the plugin ID `notification-hub-vnext`. Its Native Runtim
 
 ## Version
 
-Current stable version: `0.1.7`
+Current stable version: `0.1.8`
 
 ## License
 

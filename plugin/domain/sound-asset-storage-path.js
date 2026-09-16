@@ -40,11 +40,12 @@ export async function migrateSoundAssetStorage(paths) {
 export function resolveSoundAssetStoragePaths({
   dataDir,
   persistentDataDir,
-  userDataDir,
   env = process.env,
   platform = process.platform
 } = {}) {
-  const explicitRoot = firstNonEmpty(persistentDataDir, userDataDir);
+  // 声音库只认专门的 persistentDataDir，或用户级 AppData。
+  // 不使用 Hana 的 userDataDir / 可替换 plugin dataDir 当活库，避免更新后丢文件。
+  const explicitRoot = firstNonEmpty(persistentDataDir);
   const appDataRoot = firstNonEmpty(env?.APPDATA, env?.XDG_DATA_HOME);
   const stableRoot = explicitRoot
     || (appDataRoot ? path.join(appDataRoot, PRODUCT_DATA_FOLDER, PLUGIN_DATA_FOLDER) : '');
