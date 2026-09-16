@@ -134,7 +134,7 @@ Native 新字段只垫结构体末尾。能改归属的就改归属，不靠加 
 - [x] `notification-behavior.js`：`createFlightProfile` 组装 flight + `CardLife`；`maxVisible` 仍留兼容；旧函数名当别名
 - [x] `visual-event-native-flight.js` 正名；旧文件 re-export；协议旧键仍投影
 - [ ] 测试、诊断、scene-state、recovery-snapshot、protocol schema 同步
-- [ ] 薄兼容：读旧键，写新键，日志若仍收到旧键记 `LEXICON_ALIAS_USED`
+- [x] 薄兼容：工作室 collect 写 `flight`；`lexiconAliasesUsed()` 在只收到旧键时记 `LEXICON_ALIAS_USED`（协议旧键仍双写，不塞进每次发卡对象）
 
 ### Phase 4 — 事件巷、声音、通知中心
 

@@ -2198,6 +2198,7 @@ function collect() {
       defaultMode: defaultMode
     },
     behaviorId: behaviorId,
+    flight: behaviorId,
     categories: categories,
     card: { activeType: activeType, types: types }
   };

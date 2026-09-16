@@ -109,6 +109,7 @@ test('visual settings collect emits ticker speedRandom from the random button', 
   ]);
   const collect = new Function('state', '$', `${source}; return collect();`)({ profile: {} }, (id) => values.get(id) ?? { value: '' });
   assert.equal(collect.behaviorId, 'ticker');
+  assert.equal(collect.flight, 'ticker');
   assert.equal(collect.ticker.speedPxPerSec, 520);
   assert.equal(collect.ticker.trackCount, 3);
   assert.equal(collect.ticker.bandRatio, 0.23);
@@ -872,6 +873,7 @@ test('ticker collect forces hover highlight off while click-through is on', () =
   ]);
   const collect = new Function('state', '$', `${source}; return collect();`)({ profile: {} }, (id) => values.get(id) ?? { value: '' });
   assert.equal(collect.behaviorId, 'ticker');
+  assert.equal(collect.flight, 'ticker');
   assert.equal(collect.ticker.clickThrough, true);
   assert.equal(collect.card.types.minimal.properties.interaction.hoverHighlight, 'off');
   assert.equal(collect.card.types.minimal.effects.slots.enter.effectId, 'fade');

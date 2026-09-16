@@ -19,3 +19,26 @@ export function withLexiconCode(error) {
   if (mapped && error.lexiconCode === undefined) error.lexiconCode = mapped;
   return error;
 }
+
+export const LEXICON_KEY_ALIASES = Object.freeze([
+  Object.freeze({ used: 'behaviorId', canonical: 'flight' }),
+  Object.freeze({ used: 'behaviorProfileId', canonical: 'flight' }),
+  Object.freeze({ used: 'behaviorChannelId', canonical: 'flightChannelId' }),
+  Object.freeze({ used: 'behaviorChannels', canonical: 'flightChannels' })
+]);
+
+export function lexiconAliasesUsed(input) {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) return [];
+  const notes = [];
+  for (const { used, canonical } of LEXICON_KEY_ALIASES) {
+    if (!Object.prototype.hasOwnProperty.call(input, used)) continue;
+    if (Object.prototype.hasOwnProperty.call(input, canonical)) continue;
+    notes.push(Object.freeze({
+      code: 'LEXICON_ALIAS_USED',
+      field: used,
+      expected: canonical,
+      actual: used
+    }));
+  }
+  return notes;
+}
