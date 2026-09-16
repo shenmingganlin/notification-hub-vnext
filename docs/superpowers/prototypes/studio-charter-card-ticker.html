@@ -1,0 +1,528 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>通知视觉 · 结构 A · 弹幕态</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #0e1513;
+      --surface: #17221f;
+      --raised: #1d2b27;
+      --text: #e7f2ee;
+      --muted: #9bb1a9;
+      --line: #304740;
+      --accent: #62d0a8;
+      --strong: #38b88d;
+      --ink: #092118;
+      --ticker: #56c8d8;
+      --popup: #f1c77a;
+      --radius: 7px;
+      --ctrl-h: 36px;
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; background: var(--bg); color: var(--text); }
+    body {
+      font: 14px/1.5 "Segoe UI", "Microsoft YaHei", sans-serif;
+      min-width: 320px;
+    }
+    button, input, select { font: inherit; color: inherit; }
+    button { cursor: pointer; }
+    [hidden] { display: none !important; }
+
+    .studio { width: min(1280px, 100%); margin: 0 auto; padding: 36px 40px 80px; }
+
+    .hero { display: flex; align-items: flex-start; justify-content: space-between; gap: 24px; margin-bottom: 24px; }
+    .hero h1 { margin: 0 0 6px; font-size: 23px; font-weight: 700; line-height: 1.2; }
+    .hero p { margin: 0; max-width: 38em; color: var(--muted); font-size: 14px; line-height: 1.5; }
+    .hero-side { display: grid; gap: 8px; justify-items: end; }
+    .screen-link { color: var(--muted); font-size: 12px; text-decoration: none; border-bottom: 1px solid var(--line); }
+    .screen-link:hover { color: var(--accent); border-color: var(--accent); }
+
+    .btn-primary {
+      min-width: 88px; height: var(--ctrl-h); padding: 0 18px;
+      border: 1px solid var(--strong); border-radius: var(--radius);
+      background: var(--strong); color: var(--ink); font-size: 14px; font-weight: 700;
+    }
+    .btn-primary:hover { background: var(--accent); border-color: var(--accent); }
+    .btn-primary:active { transform: translateY(1px); }
+    .btn-primary.is-saved { background: var(--raised); border-color: var(--line); color: var(--text); }
+    .btn-ghost {
+      height: var(--ctrl-h); padding: 0 14px;
+      border: 1px solid var(--line); border-radius: var(--radius);
+      background: transparent; color: var(--text); font-size: 13px; font-weight: 600;
+    }
+    .btn-ghost:hover { background: var(--raised); }
+
+    .btn-primary:focus-visible, .btn-ghost:focus-visible, .chip:focus-visible,
+    .band-hit:focus-visible, input:focus-visible, select:focus-visible, summary:focus-visible {
+      outline: 2px solid var(--accent); outline-offset: 2px;
+    }
+
+    .mode-block { margin-bottom: 32px; }
+    .mode-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+    .chip {
+      display: inline-flex; align-items: center; gap: 8px;
+      min-height: var(--ctrl-h); padding: 0 14px;
+      border: 1px solid var(--line); border-radius: var(--radius);
+      background: var(--raised); color: var(--text); font-size: 13px; font-weight: 600;
+    }
+    .chip:hover { border-color: var(--accent); }
+    .chip.is-on { border-color: var(--strong); box-shadow: inset 0 -2px 0 var(--accent); }
+    .chip.is-locked { border-style: dashed; background: transparent; color: var(--muted); cursor: default; }
+    .chip.is-locked:hover { border-color: var(--line); background: transparent; }
+    .chip-badge {
+      padding: 1px 7px; border: 1px solid #6d5b32; border-radius: 999px;
+      color: var(--popup); font-size: 11px; font-weight: 600;
+    }
+    .mode-why { margin: 8px 0 0; color: var(--muted); font-size: 12px; line-height: 1.45; }
+
+    .group-name { margin: 0 0 12px; font-size: 13px; font-weight: 700; color: var(--text); }
+    .group.is-quiet .group-name { color: var(--muted); font-weight: 600; }
+    .group-hint { margin: -6px 0 14px; color: var(--muted); font-size: 12px; }
+    .split { height: 1px; background: var(--line); margin: 32px 0; border: 0; }
+    .gap-32 { margin-top: 32px; }
+
+    .charter { display: grid; gap: 20px; max-width: 560px; }
+    .fields { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px 20px; max-width: 720px; }
+    .field { display: grid; gap: 6px; min-width: 0; }
+    .field label, .field .label { font-size: 12px; color: var(--muted); line-height: 1.3; }
+    .field input[type="number"], .field input[type="text"], .field select, .field input[type="color"] {
+      width: 100%; height: var(--ctrl-h); padding: 0 10px;
+      border: 1px solid var(--line); border-radius: 6px; background: var(--raised); color: var(--text);
+    }
+    .field input[type="color"] { padding: 4px; cursor: pointer; }
+    .field input:disabled { opacity: 0.48; cursor: not-allowed; }
+    .field-note { margin: 0; color: var(--muted); font-size: 12px; }
+    .chip-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+
+    .band {
+      position: relative; width: 220px; height: 96px;
+      border: 1px solid var(--line); border-radius: var(--radius);
+      background: var(--bg); overflow: hidden;
+    }
+    .band-fill {
+      position: absolute; left: 0; right: 0; height: 28%;
+      background: rgba(86, 200, 216, 0.18); border: 1px solid var(--ticker); pointer-events: none;
+    }
+    .band[data-side="top"] .band-fill { top: 0; border-width: 0 0 1px; }
+    .band[data-side="bottom"] .band-fill { bottom: 0; border-width: 1px 0 0; }
+    .band-hit {
+      position: absolute; left: 0; right: 0; height: 50%;
+      border: 0; background: transparent; color: var(--muted);
+      font-size: 12px; font-weight: 600; text-align: left; padding: 8px 10px;
+    }
+    .band-hit.top { top: 0; }
+    .band-hit.bottom { bottom: 0; }
+    .band-hit:hover { color: var(--text); }
+    .band[data-side="top"] .band-hit.top,
+    .band[data-side="bottom"] .band-hit.bottom { color: var(--text); }
+
+    .slider-row { display: grid; grid-template-columns: minmax(0, 1fr) 64px; gap: 12px; align-items: center; }
+    input[type="range"] {
+      width: 100%; height: var(--ctrl-h); margin: 0;
+      accent-color: var(--accent); background: transparent;
+    }
+    .slider-val {
+      height: var(--ctrl-h); display: grid; place-items: center;
+      border: 1px solid var(--line); border-radius: 6px; background: var(--raised);
+      font-size: 13px; font-variant-numeric: tabular-nums;
+    }
+    .slider-val.is-muted { color: var(--muted); opacity: 0.55; }
+    .gaps { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px 20px; }
+    .ticker-flow-random { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+    .ticker-flow-random .field-note { flex: 1 1 200px; }
+    #ticker-track-count { max-width: 160px; }
+
+    .preview-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
+    .preview-head h2 { margin: 0; font-size: 13px; font-weight: 700; }
+    .preview-head span { display: block; margin-top: 2px; color: var(--muted); font-size: 12px; font-weight: 400; }
+    .stage {
+      position: relative; height: 280px; overflow: hidden;
+      border: 1px solid var(--line); border-radius: var(--radius); background: #0a100f;
+    }
+    .stage-label { position: absolute; top: 10px; left: 12px; z-index: 2; color: var(--muted); font-size: 12px; }
+    .ticker-band {
+      position: absolute; left: 0; right: 0; overflow: hidden;
+      background: rgba(86, 200, 216, 0.06);
+    }
+    .stage[data-side="top"] .ticker-band { top: 0; }
+    .stage[data-side="bottom"] .ticker-band { bottom: 0; }
+    .ticker-lane { position: relative; height: 36px; }
+    .ticker-card {
+      position: absolute; top: 2px; left: 0;
+      display: flex; align-items: center; gap: 10px;
+      width: 240px; height: 32px; padding: 0 12px;
+      border: 1px solid var(--ticker); border-radius: 6px;
+      background: #10262a; white-space: nowrap;
+      animation: ticker-left 4.8s linear infinite;
+    }
+    .stage[data-dir="right"] .ticker-card { animation-name: ticker-right; }
+    .ticker-card strong { font-size: 12px; }
+    .ticker-card small { color: var(--muted); font-size: 12px; }
+    @keyframes ticker-left {
+      from { transform: translateX(720px); }
+      to { transform: translateX(-260px); }
+    }
+    @keyframes ticker-right {
+      from { transform: translateX(-260px); }
+      to { transform: translateX(720px); }
+    }
+
+    .toast { min-height: 20px; margin-top: 8px; color: var(--muted); font-size: 12px; }
+    .toast.ok { color: var(--accent); }
+
+    .secondary { margin-top: 40px; border-top: 1px solid var(--line); padding-top: 8px; }
+    .fold { border-bottom: 1px solid var(--line); }
+    .fold > summary {
+      list-style: none; display: flex; align-items: center; justify-content: space-between;
+      min-height: 44px; cursor: pointer; font-size: 13px; font-weight: 700;
+    }
+    .fold > summary::-webkit-details-marker { display: none; }
+    .fold > summary:hover { color: var(--accent); }
+    .fold > summary small { font-weight: 400; color: var(--muted); }
+    .fold-body { padding: 0 0 20px; display: grid; gap: 12px; max-width: 720px; }
+    .pack-item {
+      display: flex; justify-content: space-between; gap: 12px;
+      padding: 10px 0; border-top: 1px solid var(--line); font-size: 13px;
+    }
+    .muted { color: var(--muted); font-size: 12px; }
+
+    @media (max-width: 820px) {
+      .studio { padding: 28px 20px 64px; }
+      .band { width: 100%; }
+      .stage { height: 240px; }
+    }
+    @media (max-width: 560px) {
+      .studio { padding: 20px 14px 56px; }
+      .hero { flex-direction: column; align-items: stretch; gap: 12px; }
+      .hero-side { justify-items: stretch; }
+      .btn-primary, .btn-ghost { width: 100%; }
+      .fields, .gaps { grid-template-columns: 1fr; }
+      .preview-head { flex-direction: column; align-items: stretch; }
+      .stage { height: 220px; }
+      #ticker-track-count { max-width: none; }
+      .fold > summary { flex-direction: column; align-items: flex-start; gap: 4px; padding: 10px 0; }
+    }
+  </style>
+</head>
+<body>
+  <div class="studio" data-mode="ticker">
+    <header class="hero">
+      <div>
+        <h1>通知视觉</h1>
+        <p>先定通道（全池一份法律），再定这张卡怎么走、活多久。换飞法只换这两组。</p>
+      </div>
+      <div class="hero-side">
+        <button type="button" class="btn-primary" id="save">保存</button>
+        <a class="screen-link" href="studio-charter-card-stack.html">对照堆叠态</a>
+      </div>
+    </header>
+
+    <div class="mode-block">
+      <h2 class="group-name" style="margin-bottom:10px">飞法</h2>
+      <div class="mode-row" role="group" aria-label="飞法">
+        <a class="chip" href="studio-charter-card-stack.html" data-axis="behavior" data-value="stack" style="text-decoration:none">堆叠</a>
+        <button type="button" class="chip is-on" data-axis="behavior" data-value="ticker" aria-pressed="true">弹幕</button>
+        <button type="button" class="chip is-locked" data-axis="behavior" data-value="popup" aria-disabled="true" aria-describedby="popup-why">
+          突脸 <span class="chip-badge">未实现</span>
+        </button>
+      </div>
+      <p class="mode-why" id="mode-face-hint">换堆叠或弹幕，卡面不另起一套。</p>
+      <p class="mode-why" id="popup-why">突脸还在开发中，暂时不能选择。现在只能用堆叠或弹幕。</p>
+    </div>
+
+    <section class="group" id="ticker-charter" aria-label="通道">
+      <h2 class="group-name">通道</h2>
+      <p class="group-hint">全池一份法律。带子、轨道、净空、点穿，改了所有弹幕卡都听。</p>
+      <div class="charter">
+        <div class="field">
+          <span class="label">带子</span>
+          <div class="band" id="ticker-band-control" data-side="top">
+            <div class="band-fill" id="ticker-band-fill"></div>
+            <button type="button" class="band-hit top" data-band="top">贴顶</button>
+            <button type="button" class="band-hit bottom" data-band="bottom">贴底</button>
+          </div>
+          <select id="ticker-band" hidden>
+            <option value="top" selected>顶部</option>
+            <option value="bottom">底部</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="ticker-track-count">轨道数（≥0）</label>
+          <input id="ticker-track-count" type="number" min="0" step="1" value="3">
+          <p class="field-note" id="track-note">填几就是几行。带子高度跟着变，贴顶或贴底。</p>
+        </div>
+        <div class="gaps">
+          <div class="field">
+            <label for="ticker-min-gap">同轨净空</label>
+            <div class="slider-row">
+              <input id="ticker-min-gap" type="range" min="24" max="160" value="64">
+              <div class="slider-val" id="ticker-min-gap-val">64</div>
+            </div>
+          </div>
+          <div class="field">
+            <label for="ticker-track-gap">异轨间距</label>
+            <div class="slider-row">
+              <input id="ticker-track-gap" type="range" min="0" max="48" value="8">
+              <div class="slider-val" id="ticker-track-gap-val">8</div>
+            </div>
+          </div>
+        </div>
+        <div class="field">
+          <span class="label">点穿</span>
+          <div class="chip-row">
+            <button type="button" id="ticker-click-through" class="chip is-on" aria-pressed="true">不挡点击</button>
+          </div>
+          <p class="field-note">开着：弹幕从鼠标上穿过，点不到、也拖不走。</p>
+        </div>
+      </div>
+    </section>
+
+    <hr class="split">
+
+    <section class="group" id="ticker-card" aria-label="这张卡">
+      <h2 class="group-name">这张卡</h2>
+      <p class="group-hint">只改这张卡的方向和速度。点穿开着时加亮点不到。</p>
+      <div class="charter">
+        <div class="field">
+          <span class="label">方向</span>
+          <div class="chip-row" role="group" aria-label="这张卡的方向">
+            <button type="button" class="chip is-on" data-ticker-direction="left" aria-pressed="true">右 → 左</button>
+            <button type="button" class="chip" data-ticker-direction="right" aria-pressed="false">左 → 右</button>
+          </div>
+          <select id="ticker-direction" hidden>
+            <option value="left" selected>右 → 左</option>
+            <option value="right">左 → 右</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="ticker-speed">速度</label>
+          <div class="slider-row">
+            <input id="ticker-speed" type="range" min="150" max="800" step="10" value="400">
+            <div class="slider-val" id="ticker-speed-val">400</div>
+          </div>
+          <p class="field-note" id="speed-note">400 ≈ 4.8 秒过屏</p>
+          <div class="ticker-flow-random">
+            <button type="button" id="ticker-speed-random" class="chip" aria-pressed="false">随机</button>
+            <p class="field-note">点随机：每条弹幕自己抽一个速度。滑杆是固定速度。</p>
+          </div>
+        </div>
+        <div class="field">
+          <span class="label">悬停加亮</span>
+          <button type="button" id="ticker-hover-highlight" class="chip is-locked" aria-pressed="false" aria-disabled="true" aria-describedby="ticker-hover-why">悬停加亮</button>
+          <p class="field-note" id="ticker-hover-why">不挡点击开着时，弹幕吃不到鼠标，没法加亮。</p>
+        </div>
+      </div>
+    </section>
+
+    <section class="group is-quiet gap-32" id="appearance-section" aria-label="卡面">
+      <h2 class="group-name">卡面</h2>
+      <p class="group-hint">堆叠和弹幕共用这一套样子。飞法换了，这里不另起一套。</p>
+      <div class="field" style="margin-bottom:16px">
+        <span class="label">零件</span>
+        <div class="chip-row">
+          <button type="button" class="chip is-on" data-part="root">根</button>
+          <button type="button" class="chip" data-part="title">标题</button>
+          <button type="button" class="chip" data-part="body">正文</button>
+          <button type="button" class="chip" data-part="close">关闭</button>
+          <button type="button" class="chip" data-part="icon">图标</button>
+          <button type="button" class="chip" data-part="assistantName">助手名</button>
+        </div>
+      </div>
+      <div class="fields">
+        <div class="field">
+          <label for="prop-size">尺寸</label>
+          <select id="prop-size">
+            <option>小</option>
+            <option selected>中</option>
+            <option>大</option>
+          </select>
+        </div>
+        <div class="field"><label for="prop-border-radius">圆角（0–480）</label><input id="prop-border-radius" type="number" value="16"></div>
+        <div class="field"><label for="skin-bg-color">背景色</label><input id="skin-bg-color" type="color" value="#0e1916"></div>
+        <div class="field"><label for="prop-opacity">背景透明度（0–1）</label><input id="prop-opacity" type="number" min="0" max="1" step="0.01" value="0.96"></div>
+      </div>
+    </section>
+
+    <section class="group gap-32" aria-label="预览">
+      <div class="preview-head">
+        <h2>预览 <span>只演弹幕。带子是通道，方向是这张卡。</span></h2>
+        <button type="button" class="btn-ghost" id="try-one">试一条</button>
+      </div>
+      <div class="stage" id="stage" data-side="top" data-dir="left">
+        <div class="stage-label">贴顶 · 右 → 左 · 点穿开</div>
+        <div class="ticker-band" id="live-band">
+          <div class="ticker-lane"><div class="ticker-card" style="animation-delay:-1.2s"><strong>通道法律</strong><small>全池一份</small></div></div>
+          <div class="ticker-lane"><div class="ticker-card" style="animation-delay:-2.6s"><strong>这张卡</strong><small>自己的速度</small></div></div>
+          <div class="ticker-lane"><div class="ticker-card" style="animation-delay:-0.4s"><strong>卡面共用</strong><small>不另起一套</small></div></div>
+        </div>
+      </div>
+      <p class="toast" id="toast"></p>
+    </section>
+
+    <div class="secondary">
+      <details class="fold">
+        <summary>配置包 <small>存一份、换一份</small></summary>
+        <div class="fold-body">
+          <p class="muted">配置包不含通道法律。点穿、轨道、带子留在本机；方向和速度可以跟这张卡走。</p>
+          <div class="pack-item"><span>满屏流</span><span class="muted">弹幕 · 本机</span></div>
+        </div>
+      </details>
+      <details class="fold">
+        <summary>应用于事件 <small>选事件再套这套样子</small></summary>
+        <div class="fold-body"><p class="muted">事件巷不是飞法池。满轨策略没有可见控件，不新造。</p></div>
+      </details>
+      <details class="fold">
+        <summary>诊断 <small>最近一次视觉操作</small></summary>
+        <div class="fold-body"><p class="muted">结构占位。不写通道说明书。</p></div>
+      </details>
+    </div>
+  </div>
+
+  <script>
+    const stage = document.getElementById("stage");
+    const band = document.getElementById("ticker-band-control");
+    const live = document.getElementById("live-band");
+    const toast = document.getElementById("toast");
+    const why = document.getElementById("ticker-hover-why");
+    const hoverBtn = document.getElementById("ticker-hover-highlight");
+    const clickBtn = document.getElementById("ticker-click-through");
+    const speed = document.getElementById("ticker-speed");
+    const speedVal = document.getElementById("ticker-speed-val");
+    const speedNote = document.getElementById("speed-note");
+    const randomBtn = document.getElementById("ticker-speed-random");
+    const tracks = document.getElementById("ticker-track-count");
+    const minGap = document.getElementById("ticker-min-gap");
+    const trackGap = document.getElementById("ticker-track-gap");
+
+    function secondsFor(px) {
+      return (1080 / px).toFixed(1);
+    }
+    function label() {
+      const side = band.dataset.side === "bottom" ? "贴底" : "贴顶";
+      const dir = stage.dataset.dir === "right" ? "左 → 右" : "右 → 左";
+      const pierce = clickBtn.classList.contains("is-on") ? "点穿开" : "点穿关";
+      stage.querySelector(".stage-label").textContent = side + " · " + dir + " · " + pierce;
+    }
+    function applySpeed() {
+      const random = randomBtn.classList.contains("is-on");
+      document.querySelectorAll(".ticker-card").forEach((card, i) => {
+        const px = random ? 220 + ((i * 97) % 400) : Number(speed.value);
+        card.style.animationDuration = secondsFor(px) + "s";
+      });
+    }
+    function rebuildTracks() {
+      const n = Math.max(0, Number(tracks.value) || 0);
+      const count = n === 0 ? 3 : n;
+      const gap = Number(trackGap.value);
+      live.style.height = (count * 36 + Math.max(0, count - 1) * gap) + "px";
+      live.style.paddingBottom = "8px";
+      live.innerHTML = "";
+      for (let i = 0; i < count; i++) {
+        const lane = document.createElement("div");
+        lane.className = "ticker-lane";
+        lane.style.marginBottom = i === count - 1 ? "0" : gap + "px";
+        const card = document.createElement("div");
+        card.className = "ticker-card";
+        card.style.animationDelay = (-i * 1.1) + "s";
+        card.innerHTML = "<strong>轨 " + (i + 1) + "</strong><small>同轨净空 " + minGap.value + "</small>";
+        lane.appendChild(card);
+        live.appendChild(lane);
+      }
+      applySpeed();
+    }
+
+    document.querySelectorAll("[data-band]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        band.dataset.side = btn.dataset.band;
+        stage.dataset.side = btn.dataset.band;
+        label();
+      });
+    });
+    document.querySelectorAll("[data-ticker-direction]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        document.querySelectorAll("[data-ticker-direction]").forEach((b) => {
+          b.classList.toggle("is-on", b === btn);
+          b.setAttribute("aria-pressed", b === btn ? "true" : "false");
+        });
+        stage.dataset.dir = btn.dataset.tickerDirection;
+        label();
+      });
+    });
+    clickBtn.addEventListener("click", () => {
+      const on = !clickBtn.classList.contains("is-on");
+      clickBtn.classList.toggle("is-on", on);
+      clickBtn.setAttribute("aria-pressed", on ? "true" : "false");
+      hoverBtn.classList.toggle("is-locked", on);
+      hoverBtn.setAttribute("aria-disabled", on ? "true" : "false");
+      if (on) {
+        hoverBtn.classList.remove("is-on");
+        hoverBtn.setAttribute("aria-pressed", "false");
+        why.hidden = false;
+      } else {
+        why.hidden = true;
+      }
+      label();
+    });
+    hoverBtn.addEventListener("click", () => {
+      if (hoverBtn.classList.contains("is-locked")) return;
+      const on = !hoverBtn.classList.contains("is-on");
+      hoverBtn.classList.toggle("is-on", on);
+      hoverBtn.setAttribute("aria-pressed", on ? "true" : "false");
+    });
+    randomBtn.addEventListener("click", () => {
+      const on = !randomBtn.classList.contains("is-on");
+      randomBtn.classList.toggle("is-on", on);
+      randomBtn.setAttribute("aria-pressed", on ? "true" : "false");
+      speed.disabled = on;
+      speedVal.classList.toggle("is-muted", on);
+      speedVal.textContent = on ? "随机" : speed.value;
+      speedNote.textContent = on ? "每条卡自己抽速度" : speed.value + " ≈ " + secondsFor(Number(speed.value)) + " 秒过屏";
+      applySpeed();
+    });
+    speed.addEventListener("input", () => {
+      if (randomBtn.classList.contains("is-on")) return;
+      speedVal.textContent = speed.value;
+      speedNote.textContent = speed.value + " ≈ " + secondsFor(Number(speed.value)) + " 秒过屏";
+      applySpeed();
+    });
+    minGap.addEventListener("input", () => {
+      document.getElementById("ticker-min-gap-val").textContent = minGap.value;
+      rebuildTracks();
+    });
+    trackGap.addEventListener("input", () => {
+      document.getElementById("ticker-track-gap-val").textContent = trackGap.value;
+      rebuildTracks();
+    });
+    tracks.addEventListener("input", () => {
+      document.getElementById("track-note").textContent = Number(tracks.value) === 0
+        ? "旧自动档，改数字即按条数主控"
+        : "填几就是几行。带子高度跟着变，贴顶或贴底。";
+      rebuildTracks();
+    });
+    document.getElementById("try-one").addEventListener("click", () => {
+      const lanes = live.querySelectorAll(".ticker-lane");
+      const lane = lanes[Math.floor(Math.random() * lanes.length)] || live;
+      const card = document.createElement("div");
+      card.className = "ticker-card";
+      card.innerHTML = "<strong>试一条</strong><small>这张卡自己飞</small>";
+      lane.appendChild(card);
+      applySpeed();
+      toast.textContent = "新卡进轨。通道没变。";
+      toast.className = "toast ok";
+    });
+    document.getElementById("save").addEventListener("click", () => {
+      const btn = document.getElementById("save");
+      btn.textContent = "已保存";
+      btn.classList.add("is-saved");
+      toast.textContent = "带子和点穿留下；方向和速度写进这张卡。";
+      toast.className = "toast ok";
+      setTimeout(() => { btn.textContent = "保存"; btn.classList.remove("is-saved"); }, 1400);
+    });
+    rebuildTracks();
+    label();
+  </script>
+</body>
+</html>

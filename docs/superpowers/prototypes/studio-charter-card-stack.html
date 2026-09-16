@@ -1,0 +1,508 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>通知视觉 · 结构 A · 堆叠态</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #0e1513;
+      --surface: #17221f;
+      --raised: #1d2b27;
+      --text: #e7f2ee;
+      --muted: #9bb1a9;
+      --line: #304740;
+      --accent: #62d0a8;
+      --strong: #38b88d;
+      --ink: #092118;
+      --ticker: #56c8d8;
+      --popup: #f1c77a;
+      --radius: 7px;
+      --ctrl-h: 36px;
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; background: var(--bg); color: var(--text); }
+    body {
+      font: 14px/1.5 "Segoe UI", "Microsoft YaHei", sans-serif;
+      min-width: 320px;
+    }
+    button, input, select { font: inherit; color: inherit; }
+    button { cursor: pointer; }
+    [hidden] { display: none !important; }
+
+    .studio { width: min(1280px, 100%); margin: 0 auto; padding: 36px 40px 80px; }
+
+    .hero { display: flex; align-items: flex-start; justify-content: space-between; gap: 24px; margin-bottom: 24px; }
+    .hero h1 { margin: 0 0 6px; font-size: 23px; font-weight: 700; line-height: 1.2; }
+    .hero p { margin: 0; max-width: 38em; color: var(--muted); font-size: 14px; line-height: 1.5; }
+    .hero-side { display: grid; gap: 8px; justify-items: end; }
+    .screen-link { color: var(--muted); font-size: 12px; text-decoration: none; border-bottom: 1px solid var(--line); }
+    .screen-link:hover { color: var(--accent); border-color: var(--accent); }
+
+    .btn-primary {
+      min-width: 88px; height: var(--ctrl-h); padding: 0 18px;
+      border: 1px solid var(--strong); border-radius: var(--radius);
+      background: var(--strong); color: var(--ink); font-size: 14px; font-weight: 700;
+    }
+    .btn-primary:hover { background: var(--accent); border-color: var(--accent); }
+    .btn-primary:active { transform: translateY(1px); }
+    .btn-primary.is-saved { background: var(--raised); border-color: var(--line); color: var(--text); }
+    .btn-ghost {
+      height: var(--ctrl-h); padding: 0 14px;
+      border: 1px solid var(--line); border-radius: var(--radius);
+      background: transparent; color: var(--text); font-size: 13px; font-weight: 600;
+    }
+    .btn-ghost:hover { background: var(--raised); }
+
+    .btn-primary:focus-visible, .btn-ghost:focus-visible, .chip:focus-visible,
+    .dock-cell:focus-visible, .grow-cell:focus-visible, input:focus-visible,
+    select:focus-visible, summary:focus-visible {
+      outline: 2px solid var(--accent); outline-offset: 2px;
+    }
+
+    .mode-block { margin-bottom: 32px; }
+    .mode-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+    .chip {
+      display: inline-flex; align-items: center; gap: 8px;
+      min-height: var(--ctrl-h); padding: 0 14px;
+      border: 1px solid var(--line); border-radius: var(--radius);
+      background: var(--raised); color: var(--text); font-size: 13px; font-weight: 600;
+    }
+    .chip:hover { border-color: var(--accent); }
+    .chip.is-on { border-color: var(--strong); box-shadow: inset 0 -2px 0 var(--accent); }
+    .chip.is-locked { border-style: dashed; background: transparent; color: var(--muted); cursor: default; }
+    .chip.is-locked:hover { border-color: var(--line); background: transparent; }
+    .chip.is-off { opacity: 0.35; cursor: not-allowed; }
+    .chip-badge {
+      padding: 1px 7px; border: 1px solid #6d5b32; border-radius: 999px;
+      color: var(--popup); font-size: 11px; font-weight: 600;
+    }
+    .mode-why { margin: 8px 0 0; color: var(--muted); font-size: 12px; line-height: 1.45; }
+
+    .group { margin-bottom: 0; }
+    .group-name { margin: 0 0 12px; font-size: 13px; font-weight: 700; color: var(--text); }
+    .group.is-quiet .group-name { color: var(--muted); font-weight: 600; }
+    .group-hint { margin: -6px 0 14px; color: var(--muted); font-size: 12px; }
+    .split { height: 1px; background: var(--line); margin: 32px 0; border: 0; }
+    .gap-32 { margin-top: 32px; }
+
+    .charter-layout {
+      display: grid;
+      grid-template-columns: 168px 168px minmax(200px, 1fr);
+      gap: 16px 24px;
+      align-items: start;
+      max-width: 720px;
+    }
+    .fields { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px 20px; max-width: 720px; }
+    .field { display: grid; gap: 6px; min-width: 0; }
+    .field.span-2 { grid-column: 1 / -1; }
+    .field label, .field .label { font-size: 12px; color: var(--muted); line-height: 1.3; }
+    .field input[type="number"], .field input[type="text"], .field select, .field input[type="color"] {
+      width: 100%; height: var(--ctrl-h); padding: 0 10px;
+      border: 1px solid var(--line); border-radius: 6px; background: var(--raised); color: var(--text);
+    }
+    .field input[type="color"] { padding: 4px; cursor: pointer; }
+    .field input:disabled, .field select:disabled { opacity: 0.48; cursor: not-allowed; }
+    .field-note { margin: 0; color: var(--muted); font-size: 12px; }
+    .chip-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+
+    .dock, .grow {
+      width: 168px; height: 112px;
+      display: grid; gap: 4px; padding: 6px;
+      border: 1px solid var(--line); border-radius: var(--radius); background: var(--bg);
+    }
+    .dock { grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; }
+    .grow { grid-template-columns: 1fr 1fr 1fr; grid-template-rows: 1fr 1fr 1fr; }
+    .dock-cell, .grow-cell {
+      border: 1px solid var(--line); border-radius: 5px; background: var(--raised);
+      color: var(--muted); font-size: 12px; font-weight: 600;
+      height: auto; min-height: 0; padding: 0; display: grid; place-items: center;
+    }
+    .dock-cell:hover, .grow-cell:hover { border-color: var(--accent); color: var(--text); }
+    .dock-cell.is-on {
+      border-color: var(--strong); background: var(--surface); color: var(--text);
+      box-shadow: inset 0 0 0 1px var(--accent);
+    }
+    .grow-cell.is-on { background: var(--accent); color: var(--ink); border-color: var(--accent); }
+    .grow-cell.is-off, .grow-cell.is-off:hover { opacity: 0.35; cursor: not-allowed; border-color: var(--line); color: var(--muted); }
+    .grow-center, .grow-spacer { border-radius: 5px; }
+    .grow-center { background: var(--raised); opacity: 0.35; }
+
+    .card-row { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(88px, 0.6fr) minmax(0, 0.8fr); gap: 16px 20px; max-width: 720px; align-items: start; }
+
+    .preview-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
+    .preview-head h2 { margin: 0; font-size: 13px; font-weight: 700; }
+    .preview-head span { display: block; margin-top: 2px; color: var(--muted); font-size: 12px; font-weight: 400; }
+    .stage {
+      position: relative; height: 280px; overflow: hidden;
+      border: 1px solid var(--line); border-radius: var(--radius); background: #0a100f;
+    }
+    .stage-label { position: absolute; top: 10px; left: 12px; z-index: 2; color: var(--muted); font-size: 12px; }
+    .stack-card {
+      position: absolute; width: 220px; padding: 12px 14px;
+      border: 1px solid #6d817a; border-radius: 8px; background: #14201c;
+    }
+    .stack-card strong { display: block; font-size: 13px; }
+    .stack-card small { color: var(--muted); font-size: 12px; }
+    .stack-card .x { position: absolute; top: 8px; right: 10px; color: var(--muted); font-size: 12px; }
+    .stage[data-anchor="bottom-right"] .stack-card { right: 16px; bottom: 16px; }
+    .stage[data-anchor="bottom-left"] .stack-card { left: 16px; bottom: 16px; }
+    .stage[data-anchor="top-right"] .stack-card { right: 16px; top: 28px; }
+    .stage[data-anchor="top-left"] .stack-card { left: 16px; top: 28px; }
+    .stage[data-grow="up"] .stack-card:nth-child(3) { transform: translateY(-14px); opacity: 0.86; }
+    .stage[data-grow="up"] .stack-card:nth-child(4) { transform: translateY(-28px); opacity: 0.7; }
+    .stage[data-grow="down"] .stack-card:nth-child(3) { transform: translateY(14px); opacity: 0.86; }
+    .stage[data-grow="down"] .stack-card:nth-child(4) { transform: translateY(28px); opacity: 0.7; }
+    .stage[data-grow="left"] .stack-card:nth-child(3) { transform: translateX(-14px); opacity: 0.86; }
+    .stage[data-grow="left"] .stack-card:nth-child(4) { transform: translateX(-28px); opacity: 0.7; }
+    .stage[data-grow="right"] .stack-card:nth-child(3) { transform: translateX(14px); opacity: 0.86; }
+    .stage[data-grow="right"] .stack-card:nth-child(4) { transform: translateX(28px); opacity: 0.7; }
+
+    .toast { min-height: 20px; margin-top: 8px; color: var(--muted); font-size: 12px; }
+    .toast.ok { color: var(--accent); }
+
+    .secondary { margin-top: 40px; border-top: 1px solid var(--line); padding-top: 8px; }
+    .fold { border-bottom: 1px solid var(--line); }
+    .fold > summary {
+      list-style: none; display: flex; align-items: center; justify-content: space-between;
+      min-height: 44px; cursor: pointer; font-size: 13px; font-weight: 700;
+    }
+    .fold > summary::-webkit-details-marker { display: none; }
+    .fold > summary:hover { color: var(--accent); }
+    .fold > summary small { font-weight: 400; color: var(--muted); }
+    .fold-body { padding: 0 0 20px; display: grid; gap: 12px; max-width: 720px; }
+    .pack-item {
+      display: flex; justify-content: space-between; gap: 12px;
+      padding: 10px 0; border-top: 1px solid var(--line); font-size: 13px;
+    }
+    .muted { color: var(--muted); font-size: 12px; }
+
+    @media (max-width: 820px) {
+      .studio { padding: 28px 20px 64px; }
+      .charter-layout { grid-template-columns: 168px 168px; }
+      .charter-layout .stack-wrap { grid-column: 1 / -1; }
+      .stage { height: 240px; }
+    }
+    @media (max-width: 560px) {
+      .studio { padding: 20px 14px 56px; }
+      .hero { flex-direction: column; align-items: stretch; gap: 12px; }
+      .hero-side { justify-items: stretch; }
+      .btn-primary, .btn-ghost { width: 100%; }
+      .charter-layout, .fields, .card-row { grid-template-columns: 1fr; }
+      .dock, .grow { width: 100%; }
+      .preview-head { flex-direction: column; align-items: stretch; }
+      .stage { height: 220px; }
+      .fold > summary { flex-direction: column; align-items: flex-start; gap: 4px; padding: 10px 0; }
+    }
+  </style>
+</head>
+<body>
+  <div class="studio" data-mode="stack">
+    <header class="hero">
+      <div>
+        <h1>通知视觉</h1>
+        <p>先定通道（全池一份法律），再定这张卡怎么走、活多久。换飞法只换这两组。</p>
+      </div>
+      <div class="hero-side">
+        <button type="button" class="btn-primary" id="save">保存</button>
+        <a class="screen-link" href="studio-charter-card-ticker.html">对照弹幕态</a>
+      </div>
+    </header>
+
+    <div class="mode-block">
+      <h2 class="group-name" style="margin-bottom:10px">飞法</h2>
+      <div class="mode-row" role="group" aria-label="飞法">
+        <button type="button" class="chip is-on" data-axis="behavior" data-value="stack" aria-pressed="true">堆叠</button>
+        <a class="chip" href="studio-charter-card-ticker.html" data-axis="behavior" data-value="ticker" style="text-decoration:none">弹幕</a>
+        <button type="button" class="chip is-locked" data-axis="behavior" data-value="popup" aria-disabled="true" aria-describedby="popup-why">
+          突脸 <span class="chip-badge">未实现</span>
+        </button>
+      </div>
+      <p class="mode-why" id="mode-face-hint">换堆叠或弹幕，卡面不另起一套。</p>
+      <p class="mode-why" id="popup-why">突脸还在开发中，暂时不能选择。现在只能用堆叠或弹幕。</p>
+    </div>
+
+    <section class="group" id="stack-charter" aria-label="通道">
+      <h2 class="group-name">通道</h2>
+      <p class="group-hint">全池一份法律。停靠、往哪长、走线、边距，改了所有堆叠卡都听。</p>
+      <div class="charter-layout">
+        <div class="field">
+          <span class="label">停靠</span>
+          <div class="dock" role="group" aria-label="停靠在屏幕哪个角">
+            <button type="button" class="dock-cell" data-anchor="top-left">左上</button>
+            <button type="button" class="dock-cell" data-anchor="top-right">右上</button>
+            <button type="button" class="dock-cell" data-anchor="bottom-left">左下</button>
+            <button type="button" class="dock-cell is-on" data-anchor="bottom-right">右下</button>
+          </div>
+          <select id="prop-anchor" hidden>
+            <option value="bottom-right" selected>右下</option>
+          </select>
+        </div>
+        <div class="field">
+          <span class="label">往哪长</span>
+          <div class="grow" role="group" aria-label="往哪长">
+            <span class="grow-spacer"></span>
+            <button type="button" class="grow-cell is-on" data-grow="up">上</button>
+            <span class="grow-spacer"></span>
+            <button type="button" class="grow-cell" data-grow="left">左</button>
+            <span class="grow-center" aria-hidden="true"></span>
+            <button type="button" class="grow-cell is-off" data-grow="right" aria-disabled="true">右</button>
+            <span class="grow-spacer"></span>
+            <button type="button" class="grow-cell is-off" data-grow="down" aria-disabled="true">下</button>
+            <span class="grow-spacer"></span>
+          </div>
+          <p class="field-note">对着墙的两边是灰的。</p>
+          <select id="prop-grow" hidden><option value="up" selected>up</option></select>
+        </div>
+        <div class="field stack-wrap">
+          <span class="label" id="prop-wrap-open-label">开新列</span>
+          <div class="chip-row" role="group" aria-label="新列或新行">
+            <button type="button" class="chip is-on" data-wrap-open="off" aria-pressed="true">关</button>
+            <button type="button" class="chip" data-wrap-open="on" aria-pressed="false">开</button>
+          </div>
+          <span class="label">走线</span>
+          <div class="chip-row" role="group" aria-label="走线">
+            <button type="button" class="chip is-off" data-wrap-path="parallel" aria-disabled="true">平行</button>
+            <button type="button" class="chip is-off" data-wrap-path="snake" aria-disabled="true">蛇形</button>
+          </div>
+          <p class="field-note" id="prop-wrap-note">满了掀最旧</p>
+          <select id="prop-wrap" hidden><option value="off" selected>off</option></select>
+        </div>
+      </div>
+      <div class="fields gap-32" style="margin-top:20px">
+        <div class="field"><label for="prop-margin-left">距左（≥0）</label><input id="prop-margin-left" type="number" min="0" value="18" disabled></div>
+        <div class="field"><label for="prop-margin-right">距右（≥0）</label><input id="prop-margin-right" type="number" min="0" value="18"></div>
+        <div class="field"><label for="prop-margin-top">距上（≥0）</label><input id="prop-margin-top" type="number" min="0" value="18" disabled></div>
+        <div class="field"><label for="prop-margin-bottom">距下（≥0）</label><input id="prop-margin-bottom" type="number" min="0" value="18"></div>
+        <div class="field"><label for="prop-gap">卡片间距</label><input id="prop-gap" type="number" min="0" value="8"></div>
+      </div>
+      <p class="field-note" style="margin-top:8px">只改停靠那两面。另外两面灰色，不挤空间。</p>
+    </section>
+
+    <hr class="split">
+
+    <section class="group" id="stack-card" aria-label="这张卡">
+      <h2 class="group-name">这张卡</h2>
+      <p class="group-hint">只改这张卡的关闭、停留、加亮。别的卡不受影响。</p>
+      <div class="card-row">
+        <div class="field">
+          <span class="label">关闭方式</span>
+          <div class="chip-row" role="group" aria-label="关闭方式">
+            <button type="button" id="prop-dismiss-close" class="chip is-on" data-dismiss="closeButton" aria-pressed="true">关闭按钮</button>
+            <button type="button" id="prop-dismiss-anywhere" class="chip" data-dismiss="anywhere" aria-pressed="false">任意点击</button>
+            <button type="button" id="prop-dismiss-auto" class="chip" data-auto-dismiss="on" aria-pressed="false">超时自动收</button>
+          </div>
+          <select id="prop-dismiss-mode" hidden><option value="closeButton" selected>关闭按钮</option></select>
+        </div>
+        <div class="field">
+          <label for="hold-seconds">停留（秒）</label>
+          <input id="hold-seconds" type="number" min="1" max="120" value="30">
+        </div>
+        <div class="field">
+          <span class="label">悬停加亮</span>
+          <button type="button" id="prop-hover-highlight" class="chip" aria-pressed="false">悬停加亮</button>
+        </div>
+      </div>
+      <p class="field-note" style="margin-top:10px">停留 1–120 秒。悬停加亮默认关。不要把 PID 或跟随放这里。</p>
+    </section>
+
+    <section class="group is-quiet gap-32" id="appearance-section" aria-label="卡面">
+      <h2 class="group-name">卡面</h2>
+      <p class="group-hint">堆叠和弹幕共用这一套样子。没选中孩子就是在编根。</p>
+      <div class="field" style="margin-bottom:16px">
+        <span class="label">零件</span>
+        <div class="chip-row" id="part-chip-row">
+          <button type="button" class="chip is-on" data-part="root" aria-pressed="true">根</button>
+          <button type="button" class="chip" data-part="title">标题</button>
+          <button type="button" class="chip" data-part="body">正文</button>
+          <button type="button" class="chip" data-part="close">关闭</button>
+          <button type="button" class="chip" data-part="icon">图标</button>
+          <button type="button" class="chip" data-part="assistantName">助手名</button>
+        </div>
+      </div>
+      <div class="fields">
+        <div class="field">
+          <label for="prop-size">尺寸</label>
+          <select id="prop-size">
+            <option>小</option>
+            <option selected>中</option>
+            <option>大</option>
+          </select>
+        </div>
+        <div class="field"><label for="prop-border-radius">圆角（0–480）</label><input id="prop-border-radius" type="number" min="0" max="480" value="16"></div>
+        <div class="field"><label for="prop-width">宽（1–1920）</label><input id="prop-width" type="number" value="420"></div>
+        <div class="field"><label for="prop-height">高（1–1080）</label><input id="prop-height" type="number" value="220"></div>
+        <div class="field"><label for="skin-bg-color">背景色</label><input id="skin-bg-color" type="color" value="#0e1916"></div>
+        <div class="field"><label for="prop-opacity">背景透明度（0–1）</label><input id="prop-opacity" type="number" min="0" max="1" step="0.01" value="0.96"></div>
+      </div>
+    </section>
+
+    <section class="group gap-32" aria-label="预览">
+      <div class="preview-head">
+        <h2>预览 <span>只演堆叠。通道改角，这张卡自己叠上来。</span></h2>
+        <button type="button" class="btn-ghost" id="try-one">试一条</button>
+      </div>
+      <div class="stage" id="stage" data-anchor="bottom-right" data-grow="up">
+        <div class="stage-label">右下 · 往上长</div>
+        <article class="stack-card"><span class="x">×</span><strong>通道试运行</strong><small>停在角落等你看完</small></article>
+        <article class="stack-card"><span class="x">×</span><strong>这张卡</strong><small>关闭、停留只属于它</small></article>
+      </div>
+      <p class="toast" id="toast"></p>
+    </section>
+
+    <div class="secondary">
+      <details class="fold">
+        <summary>配置包 <small>存一份、换一份</small></summary>
+        <div class="fold-body">
+          <p class="muted">配置包不含通道法律。飞法、这张卡、卡面可以带走；停靠和带子留在本机通道。</p>
+          <div class="pack-item"><span>安静绿</span><span class="muted">堆叠 · 本机</span></div>
+        </div>
+      </details>
+      <details class="fold">
+        <summary>应用于事件 <small>选事件再套这套样子</small></summary>
+        <div class="fold-body"><p class="muted">事件巷不是飞法池。这里不放停靠、带子、点穿。</p></div>
+      </details>
+      <details class="fold">
+        <summary>诊断 <small>最近一次视觉操作</small></summary>
+        <div class="fold-body"><p class="muted">结构占位。不写通道说明书。</p></div>
+      </details>
+    </div>
+  </div>
+
+  <script>
+    const stage = document.getElementById("stage");
+    const toast = document.getElementById("toast");
+    const wrapNote = document.getElementById("prop-wrap-note");
+    const wrapLabel = document.getElementById("prop-wrap-open-label");
+    const walls = {
+      "top-left": { up: false, left: false, down: true, right: true },
+      "top-right": { up: false, right: false, down: true, left: true },
+      "bottom-left": { down: false, left: false, up: true, right: true },
+      "bottom-right": { down: false, right: false, up: true, left: true }
+    };
+    const defaultGrow = { "top-left": "down", "top-right": "down", "bottom-left": "up", "bottom-right": "up" };
+    const labels = { "top-left": "左上", "top-right": "右上", "bottom-left": "左下", "bottom-right": "右下" };
+    const growName = { up: "往上长", down: "往下长", left: "往左长", right: "往右长" };
+
+    function currentAnchor() {
+      return document.querySelector(".dock-cell.is-on")?.dataset.anchor || "bottom-right";
+    }
+    function currentGrow() {
+      return document.querySelector(".grow-cell.is-on")?.dataset.grow || "up";
+    }
+    function refreshWalls(anchor) {
+      const allow = walls[anchor];
+      document.querySelectorAll(".grow-cell").forEach((cell) => {
+        const ok = allow[cell.dataset.grow];
+        cell.classList.toggle("is-off", !ok);
+        cell.setAttribute("aria-disabled", ok ? "false" : "true");
+        if (!ok) cell.classList.remove("is-on");
+      });
+      let on = document.querySelector(".grow-cell.is-on:not(.is-off)");
+      if (!on) {
+        on = document.querySelector('.grow-cell[data-grow="' + defaultGrow[anchor] + '"]');
+        on?.classList.add("is-on");
+      }
+      const vertical = currentGrow() === "up" || currentGrow() === "down";
+      wrapLabel.textContent = vertical ? "开新列" : "开新行";
+      const m = {
+        left: anchor.endsWith("left"),
+        right: anchor.endsWith("right"),
+        top: anchor.startsWith("top"),
+        bottom: anchor.startsWith("bottom")
+      };
+      document.getElementById("prop-margin-left").disabled = !m.left;
+      document.getElementById("prop-margin-right").disabled = !m.right;
+      document.getElementById("prop-margin-top").disabled = !m.top;
+      document.getElementById("prop-margin-bottom").disabled = !m.bottom;
+      stage.dataset.anchor = anchor;
+      stage.dataset.grow = currentGrow();
+      stage.querySelector(".stage-label").textContent = labels[anchor] + " · " + growName[currentGrow()];
+    }
+
+    document.querySelectorAll(".dock-cell").forEach((cell) => {
+      cell.addEventListener("click", () => {
+        document.querySelectorAll(".dock-cell").forEach((c) => c.classList.remove("is-on"));
+        cell.classList.add("is-on");
+        refreshWalls(cell.dataset.anchor);
+      });
+    });
+    document.querySelectorAll(".grow-cell").forEach((cell) => {
+      cell.addEventListener("click", () => {
+        if (cell.classList.contains("is-off")) return;
+        document.querySelectorAll(".grow-cell").forEach((c) => c.classList.remove("is-on"));
+        cell.classList.add("is-on");
+        refreshWalls(currentAnchor());
+      });
+    });
+    document.querySelectorAll("[data-wrap-open]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        document.querySelectorAll("[data-wrap-open]").forEach((b) => {
+          b.classList.toggle("is-on", b === btn);
+          b.setAttribute("aria-pressed", b === btn ? "true" : "false");
+        });
+        const open = btn.dataset.wrapOpen === "on";
+        document.querySelectorAll("[data-wrap-path]").forEach((p) => {
+          p.classList.toggle("is-off", !open);
+          p.setAttribute("aria-disabled", open ? "false" : "true");
+          if (!open) {
+            p.classList.remove("is-on");
+            p.setAttribute("aria-pressed", "false");
+          } else if (p.dataset.wrapPath === "parallel") {
+            p.classList.add("is-on");
+            p.setAttribute("aria-pressed", "true");
+          }
+        });
+        wrapNote.textContent = open ? "满了沿另一边开列" : "满了掀最旧";
+      });
+    });
+    document.querySelectorAll("[data-wrap-path]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        if (btn.classList.contains("is-off")) return;
+        document.querySelectorAll("[data-wrap-path]").forEach((b) => {
+          b.classList.toggle("is-on", b === btn);
+          b.setAttribute("aria-pressed", b === btn ? "true" : "false");
+        });
+        wrapNote.textContent = btn.dataset.wrapPath === "snake"
+          ? "折返，二维满了掀最旧。停靠是最先来的那张。"
+          : "满了沿另一边开列";
+      });
+    });
+    document.querySelectorAll("[data-dismiss]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        document.querySelectorAll("[data-dismiss]").forEach((b) => {
+          b.classList.toggle("is-on", b === btn);
+          b.setAttribute("aria-pressed", b === btn ? "true" : "false");
+        });
+      });
+    });
+    document.getElementById("prop-dismiss-auto").addEventListener("click", (e) => {
+      const on = !e.currentTarget.classList.contains("is-on");
+      e.currentTarget.classList.toggle("is-on", on);
+      e.currentTarget.setAttribute("aria-pressed", on ? "true" : "false");
+    });
+    document.getElementById("prop-hover-highlight").addEventListener("click", (e) => {
+      const on = !e.currentTarget.classList.contains("is-on");
+      e.currentTarget.classList.toggle("is-on", on);
+      e.currentTarget.setAttribute("aria-pressed", on ? "true" : "false");
+    });
+    document.getElementById("try-one").addEventListener("click", () => {
+      const card = document.createElement("article");
+      card.className = "stack-card";
+      card.innerHTML = "<span class=\"x\">×</span><strong>试一条</strong><small>这张卡刚叠上来</small>";
+      stage.appendChild(card);
+      toast.textContent = "又叠了一张。通道没变。";
+      toast.className = "toast ok";
+    });
+    document.getElementById("save").addEventListener("click", () => {
+      const btn = document.getElementById("save");
+      btn.textContent = "已保存";
+      btn.classList.add("is-saved");
+      toast.textContent = "通道法律留下；这张卡和卡面写进方案。";
+      toast.className = "toast ok";
+      setTimeout(() => { btn.textContent = "保存"; btn.classList.remove("is-saved"); }, 1400);
+    });
+  </script>
+</body>
+</html>

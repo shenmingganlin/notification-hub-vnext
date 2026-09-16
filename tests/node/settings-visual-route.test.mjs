@@ -50,7 +50,8 @@ test('ticker behavior renders live parameter controls only when selected', () =>
   assert.match(html, /id="ticker-speed"[\s\S]*id="ticker-speed-val"[\s\S]*ticker-flow-random[\s\S]*id="ticker-speed-random"/);
   assert.doesNotMatch(html, /slider-row with-action/);
   assert.match(html, /id="ticker-click-through"[^>]*aria-pressed="true"/);
-  assert.match(html, /id="ticker-click-through"[\s\S]{0,500}id="ticker-hover-highlight"/);
+  assert.match(html, /id="ticker-charter"[\s\S]*id="ticker-click-through"/);
+  assert.match(html, /id="ticker-card"[\s\S]*id="ticker-hover-highlight"/);
   assert.match(html, /id="ticker-hover-highlight"[^>]*is-locked/);
   assert.match(html, /id="ticker-hover-highlight"[^>]*aria-disabled="true"/);
   assert.match(html, /id="ticker-hover-highlight"[^>]*title="不挡点击开着时，弹幕吃不到鼠标，没法加亮。"/);
@@ -123,16 +124,16 @@ test('visual settings page renders card studio layout', () => {
     status: 'applied'
   });
   assert.match(html, /通知视觉/);
-  assert.match(html, /选一种出现方式/);
-  assert.match(html, /出现方式/);
+  assert.match(html, /先定通道（全池一份法律）/);
+  assert.match(html, /飞法/);
   assert.match(html, /mode-block panel/);
-  assert.match(html, /换堆叠或弹幕，外观不会另起一套/);
+  assert.match(html, /换堆叠或弹幕，卡面不另起一套/);
   assert.match(html, /pipeline-behavior/);
   assert.match(html, /堆叠/);
   assert.match(html, /未实现/);
   assert.match(html, /pipeline-type/);
   assert.match(html, /极简/);
-  assert.match(html, /卡片外观/);
+  assert.match(html, /卡面/);
   assert.match(html, /skin-bg-color/);
   assert.doesNotMatch(html, /管理视觉素材/);
   assert.doesNotMatch(html, /visual-assets-open/);
@@ -955,9 +956,9 @@ test('visual settings fragment passes studio structure', () => {
     status: 'saved'
   });
   assert.match(fragment, /class="studio"/);
-  assert.match(fragment, /出现方式/);
-  assert.match(fragment, /换堆叠或弹幕，外观不会另起一套/);
-  assert.match(fragment, /卡片外观/);
+  assert.match(fragment, /飞法/);
+  assert.match(fragment, /换堆叠或弹幕，卡面不另起一套/);
+  assert.match(fragment, /卡面/);
   assert.match(fragment, /pipeline-type/);
   assert.match(fragment, /pipeline-behavior/);
   assert.match(fragment, /syncPreview/);
@@ -1289,14 +1290,15 @@ test('studio setting groups use fold and referenced profiles can be deleted', ()
       { code: 'VISUAL_EVENT_BINDING_PROFILE_MISSING', stage: 'EVENT_CARD', message: 'missing', level: 'error', details: { eventId: 'chat.assistant_reply.completed' }, timestamp: 't' }
     ]
   });
-  assert.match(html, /id="stack-section"[^>]*open/);
+  assert.match(html, /id="stack-section"(?![^>]*hidden)/);
+  assert.match(html, /id="stack-charter"/);
+  assert.match(html, /id="stack-card"/);
   assert.match(html, /id="appearance-section"[^>]*open/);
   assert.doesNotMatch(html, /id="visual-preview"[^a-zA-Z0-9_-]/);
   assert.doesNotMatch(html, /id="visual-preview">/);
   assert.match(html, /class="hero-preview-status"/);
-  assert.match(html, /<summary>堆叠怎么出现/);
-  assert.match(html, /<summary>弹幕怎么流/);
-  assert.match(html, /<summary>卡片外观/);
+  assert.doesNotMatch(html, /出现方式|堆叠怎么出现|弹幕怎么流/);
+  assert.match(html, /<summary>卡面/);
   assert.doesNotMatch(html, /<summary>预览/);
   assert.match(html, /class="secondary profile-delete" data-profile-id="visual.bound"/);
   assert.match(html, /visual-delete-dialog/);

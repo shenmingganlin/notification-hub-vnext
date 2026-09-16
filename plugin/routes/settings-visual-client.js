@@ -1046,13 +1046,9 @@ function applyModeEditor(value, restorePart) {
 function setFoldVisibility(id, visible) {
   var el = $(id);
   if (!el) return;
-  if (visible) {
-    el.removeAttribute("hidden");
-    el.open = true;
-  } else {
-    el.setAttribute("hidden", "");
-    el.open = false;
-  }
+  if (visible) el.removeAttribute("hidden");
+  else el.setAttribute("hidden", "");
+  if ("open" in el) el.open = !!visible;
 }
 function applyTickerDirection(dir) {
   dir = dir === "right" ? "right" : "left";

@@ -12,8 +12,9 @@ Native 内部 `FlightChannelState`；scene-state JSON 仍叫 `behaviorChannels`�
 `createFlightProfile` 只组装门票 + `CardLife`；`maxVisible` 仍挂着兼容，容量真正在 policy。
 事件巷正本是 `event-lane.js`；`behavior-channel.js` 只留别名。
 Phase 4 文案与诊断码：诊断页「飞法通道与卡片」；设置壳「通知/显示策略」；`VISUAL_BEHAVIOR_*` 仍抛旧码，并行 `lexiconCode`/`FLIGHT_*`。声音 `channel`/`quiet-mode` 是音频语义，未改名。通知中心无飞法撞名文案。
+工作室 A：上通道、下这张卡。规格 `docs/superpowers/specs/2026-09-16-studio-charter-card-layout.md`。生产页已按此重组，预览仍走标题行按钮。
 
-未做：工作室 A 排版、PID follow、路径飞法、淡入、VERSION 0.1.8。
+未做：PID follow、路径飞法、淡入、VERSION 0.1.8。
 
 ## 2026-09-15 0.1.7 开线
 
