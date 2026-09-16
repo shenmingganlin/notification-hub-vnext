@@ -24,9 +24,20 @@ int main() {
     }
     assert(output.available());
     assert(output.buffer_frames() > 0);
-    std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    assert(!output.current_device_id().empty());
+    const auto first_device = output.current_device_id();
+    output.request_reopen();
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(1500);
+    while (std::chrono::steady_clock::now() < deadline) {
+        if (output.available() && output.current_device_id() == first_device && output.buffer_frames() > 0) break;
+        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    }
+    assert(output.available());
+    assert(output.buffer_frames() > 0);
+    assert(output.current_device_id() == first_device);
     output.stop();
     assert(!output.running());
+    assert(output.current_device_id().empty());
 #else
     assert(!started);
     assert(!error.empty());

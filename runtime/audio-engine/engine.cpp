@@ -152,6 +152,8 @@ int run_audio_engine(std::string_view pipe_name) {
                 std::ostringstream result;
                 result << "{\"ready\":" << (output.available() ? "true" : "false")
                        << ",\"deviceAvailable\":" << (output.available() ? "true" : "false")
+                       << ",\"followsSystemDefault\":true"
+                       << ",\"currentDeviceId\":\"" << output.current_device_id() << "\""
                        << ",\"activeVoices\":" << mixer.active_voice_count()
                        << ",\"cachedAssets\":" << cache.size()
                        << ",\"bufferFrames\":" << output.buffer_frames() << "}";

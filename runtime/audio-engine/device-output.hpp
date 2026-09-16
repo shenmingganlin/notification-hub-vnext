@@ -21,6 +21,8 @@ public:
     bool running() const noexcept;
     std::size_t buffer_frames() const noexcept;
     std::string last_error() const;
+    std::string current_device_id() const;
+    void request_reopen();
 
 private:
     struct Impl;

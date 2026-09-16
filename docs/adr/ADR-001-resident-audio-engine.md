@@ -92,4 +92,4 @@ ready → stopping → stopped
 
 - 第一阶段使用稳定的 WASAPI Shared Mode buffer，不强求独占模式或极小 buffer；由实测决定后续调优。
 - Media Foundation 解码作为后续独立阶段，不与引擎骨架和首次 PCM 验收混合。
-- 设备热插拔第一阶段至少要返回 `deviceAvailable=false` 和可恢复诊断；自动重连在宿主级验证后实现。
+- 输出跟随系统默认播放设备（`eRender` + `eConsole`）。默认设备变化或当前流失效时，引擎重开 WASAPI Shared 流，不另选私有设备。

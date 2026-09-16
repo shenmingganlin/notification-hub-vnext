@@ -13,6 +13,9 @@ Native 内部 `FlightChannelState`；scene-state JSON 仍叫 `behaviorChannels`�
 事件巷正本是 `event-lane.js`；`behavior-channel.js` 只留别名。
 Phase 4 文案与诊断码：诊断页「飞法通道与卡片」；设置壳「通知/显示策略」；`VISUAL_BEHAVIOR_*` 仍抛旧码，并行 `lexiconCode`/`FLIGHT_*`。声音 `channel`/`quiet-mode` 是音频语义，未改名。通知中心无飞法撞名文案。
 工作室 A：上通道、下这张卡。规格 `docs/superpowers/specs/2026-09-16-studio-charter-card-layout.md`。生产页已按此重组，预览仍走标题行按钮。
+工作室 collect 同时写 `flight`；只收到旧键时 `lexiconAliasesUsed()` 记 `LEXICON_ALIAS_USED`。
+
+声音引擎：WASAPI 跟系统默认播放设备（eConsole）。插拔耳机/切换默认输出会重开流，不再绑死启动时那块扬声器。真机需换上新的 `notification-hub-audio-engine.exe`。
 
 未做：PID follow、路径飞法、淡入、VERSION 0.1.8。
 
