@@ -7,6 +7,11 @@ import {
   createBehaviorChannels,
   resolveBehaviorChannel
 } from '../../plugin/domain/behavior-channel.js';
+import {
+  DEFAULT_EVENT_LANE_ID,
+  createEventLane,
+  resolveEventLane
+} from '../../plugin/domain/event-lane.js';
 
 test('behavior channel is a user-named behavior unit with its own profile and policy', () => {
   const channel = createBehaviorChannel({
@@ -31,4 +36,11 @@ test('behavior channels provide a default and resolve unknown names safely', () 
 
 test('behavior channel rejects unsupported profile modes', () => {
   assert.throws(() => createBehaviorChannel({ channelId: 'bad', behaviorProfileId: 'unknown' }), (error) => error.code === 'BEHAVIOR_CHANNEL_PROFILE_INVALID');
+});
+
+test('event lane is the same routing unit under the new name', () => {
+  assert.equal(DEFAULT_EVENT_LANE_ID, DEFAULT_BEHAVIOR_CHANNEL_ID);
+  const lane = createEventLane({ channelId: 'mail', behaviorProfileId: 'stack' });
+  assert.equal(lane.channelId, 'mail');
+  assert.equal(resolveEventLane({ channelId: 'mail', channels: { mail: lane } }).channelId, 'mail');
 });

@@ -343,15 +343,15 @@ public:
                 channel_it = behavior_channels.emplace(channel_id, std::move(channel)).first;
                 behavior_channel_order.push_back(channel_id);
             }
-            if (card_it->second.visual.ticker_specified) {
+            if (card_it->second.visual.ticker_specified && !channel_it->second.ticker_options_specified) {
+                // Seed TickerCharter once. Later cards must not rewrite band/tracks/gap.
+                // Direction and speed are TickerMotion on the card, applied at spawn.
                 auto& options = channel_it->second.ticker_options;
-                options.speed_px_per_second = static_cast<double>(card_it->second.visual.ticker_speed_px_per_second);
                 options.band_top = card_it->second.visual.ticker_band != "bottom";
                 options.band_ratio = card_it->second.visual.ticker_band_ratio;
                 options.track_count = card_it->second.visual.ticker_track_count;
                 options.track_gap_px = card_it->second.visual.ticker_track_gap_px;
                 options.min_gap_px = card_it->second.visual.ticker_min_gap_px;
-                options.direction = card_it->second.visual.ticker_direction == "right" ? "right" : "left";
                 channel_it->second.ticker_options_specified = true;
             }
             channel_it->second.card_order.push_back(id);
@@ -479,8 +479,10 @@ bool RuntimeSceneController::Impl::place_ticker_channel(
         auto motion_it = ticker_motions.find(id);
         if (motion_it == ticker_motions.end()) {
             // 新卡：按「进屏点前方的净空」选轨（契约 §4），不是按轨道里卡片的数量。
-            // 方向取当前池设置；已在飞的卡锁出生方向，这里不算掉头。
-            const auto fly_right = ticker.direction == "right";
+            // 方向是这张卡的动态；已在飞的卡锁出生方向，这里不算掉头。
+            const auto fly_right = card_it->second.visual.ticker_specified
+                ? card_it->second.visual.ticker_direction == "right"
+                : ticker.direction == "right";
             const auto card_width = card_it->second.layout_width > 0
                 ? card_it->second.layout_width
                 : card_it->second.window.width;

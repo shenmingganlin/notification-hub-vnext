@@ -48,3 +48,27 @@ test('visual profile defaultMode is off, stack or ticker and migrates minimal', 
   assert.equal(createVisualProfile({ global: { defaultMode: 'minimal' } }).global.defaultMode, 'stack');
   assert.throws(() => createVisualProfile({ global: { defaultMode: 'popup' } }), (error) => error.code === 'VISUAL_PROFILE_FIELD_INVALID');
 });
+
+test('visual settings own flight channels and keep behaviorId as the ticket alias', () => {
+  const settings = createVisualSettings({
+    profile: {
+      behaviorId: 'ticker',
+      ticker: { band: 'bottom', direction: 'right', speedPxPerSec: 500, minGapPx: 80 },
+      card: { types: { minimal: { properties: { space: { anchor: 'top-left', gap: 12 } } } } }
+    }
+  });
+  assert.equal(settings.profile.behaviorId, 'ticker');
+  assert.equal(settings.profile.flight, 'ticker');
+  assert.equal(settings.channels.ticker.band, 'bottom');
+  assert.equal(settings.channels.ticker.minGapPx, 80);
+  assert.equal('direction' in settings.channels.ticker, false);
+  assert.equal(settings.profile.ticker.direction, 'right');
+  assert.equal(settings.channels.stack.anchor, 'top-left');
+  assert.equal(settings.channels.stack.settle, 'snap');
+});
+
+test('stale flight key does not override a newer behaviorId ticket', () => {
+  const profile = createVisualProfile({ flight: 'stack', behaviorId: 'ticker' });
+  assert.equal(profile.flight, 'ticker');
+  assert.equal(profile.behaviorId, 'ticker');
+});

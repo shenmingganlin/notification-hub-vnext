@@ -1,6 +1,7 @@
 import { basename } from 'node:path';
 import { createHash } from 'node:crypto';
 import AdmZip from 'adm-zip';
+import { stripCharterFromExport } from './channel-charter.js';
 import { createVisualPackageManifest, validateVisualPackageEntries, VISUAL_PACKAGE_FORMAT, VISUAL_PACKAGE_CAPABILITIES } from './visual-package-manifest.js';
 
 const PACKAGE_VERSION = '1.0.0';
@@ -56,7 +57,7 @@ async function collectPackageData({ profileRegistry, bindingRegistry, assetLibra
   for (const profileId of profileIdsToExport) {
     const record = profileRegistry.get(profileId);
     if (!record) throw packageError('VISUAL_PACKAGE_IO_PROFILE_NOT_FOUND', `Unknown profile: ${profileId}`, { profileId });
-    profiles.push({ profileId: record.profileId, name: record.name, profile: clone(record.profile) });
+    profiles.push({ profileId: record.profileId, name: record.name, profile: stripCharterFromExport(clone(record.profile)) });
     const entryPath = `settings/profiles/${profileId}.json`;
     entries.push(entryPath);
 

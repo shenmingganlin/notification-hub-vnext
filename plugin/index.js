@@ -53,6 +53,7 @@ import {
 } from './domain/sidebar-display-settings.js';
 import { createSidebarDisplaySettingsPersistence } from './domain/sidebar-display-settings-persistence.js';
 import { VisualSettingsStore } from './domain/visual-settings-store.js';
+import { isTickerFlight } from './domain/channel-charter.js';
 import { createVisualProfile, resolveTickerMotion } from './domain/visual-settings.js';
 import { CARD_ANCHORS, CARD_ASPECT_RATIOS, CARD_BOUNDARIES, CARD_LAYOUTS, CARD_SIZES, MINIMAL_CARD_DEFAULTS, PROPERTIES_DEFAULTS } from './domain/card-visual-settings.js';
 import { createBehaviorManager } from './domain/notification-behavior-manager.js';
@@ -358,7 +359,7 @@ function notificationCardText(value, fallback, maxLength) {
 }
 
 function isTickerBehavior(behaviorId) {
-  return behaviorId === 'ticker' || behaviorId === 'danmaku';
+  return isTickerFlight(behaviorId);
 }
 
 function notificationCardDimensions(appearance = {}, cardType = 'minimal', behaviorId = 'stack') {

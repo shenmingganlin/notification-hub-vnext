@@ -1,4 +1,6 @@
 export const BEHAVIOR_MODES = Object.freeze(['stack', 'danmaku', 'ticker', 'popup']);
+/** @deprecated 用 FLIGHT_IDS（channel-charter.js）。此处只为事件巷/旧 manager 兼容。 */
+export const FLIGHT_MODES = BEHAVIOR_MODES;
 
 function behaviorError(code, message, field, details = {}) {
   const error = new Error(message);

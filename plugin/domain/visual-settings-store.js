@@ -1,5 +1,6 @@
 import { EventEmitter } from 'node:events';
-import { createVisualSettings, validateVisualSettings } from './visual-settings.js';
+import { createFlightChannels } from './channel-charter.js';
+import { createVisualProfile, createVisualSettings, validateVisualSettings } from './visual-settings.js';
 
 export const VISUAL_SETTINGS_STORE_VERSION = 1;
 export const VISUAL_SETTINGS_STATUSES = Object.freeze({ SAVED: 'saved', APPLIED: 'applied', APPLY_FAILED: 'apply-failed' });
@@ -28,7 +29,13 @@ export class VisualSettingsStore extends EventEmitter {
   getSnapshot() { return this.#snapshot; }
   updateVisualSettings(patch = {}) {
     if (!plain(patch)) throw fail('VISUAL_SETTINGS_PATCH_INVALID', 'Visual settings patch must be a plain object');
-    const next = createVisualSettings(merge(this.#snapshot.settings, patch));
+    const merged = merge(this.#snapshot.settings, patch);
+    // Studio still posts profile only. Re-copy charter from that profile so band/dock changes land on the machine-wide channels.
+    if (plain(patch.profile) && patch.channels === undefined) {
+      const profile = createVisualProfile(merged.profile);
+      merged.channels = createFlightChannels({}, { profile });
+    }
+    const next = createVisualSettings(merged);
     this.#snapshot = this.#state(next, this.#snapshot.revision + 1, this.#snapshot.revision + 1, this.#snapshot.appliedRevision, VISUAL_SETTINGS_STATUSES.SAVED, null);
     this.emit('change', this.#snapshot);
     return this.#snapshot;

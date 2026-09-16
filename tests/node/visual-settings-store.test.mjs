@@ -20,3 +20,20 @@ test('visual store snapshot is versioned and frozen', () => {
   assert.equal(Object.isFrozen(snapshot), true);
   assert.throws(() => store.restoreSnapshot({ ...snapshot, revision: 0 }), (error) => error.code === 'VISUAL_SETTINGS_SNAPSHOT_INVALID');
 });
+
+test('profile-only studio save recopies charter onto machine channels', () => {
+  const store = new VisualSettingsStore({
+    initialSettings: {
+      profile: { behaviorId: 'ticker', ticker: { band: 'top', minGapPx: 64, direction: 'left' } }
+    }
+  });
+  assert.equal(store.getSnapshot().settings.channels.ticker.band, 'top');
+  store.updateVisualSettings({
+    profile: { behaviorId: 'ticker', ticker: { band: 'bottom', minGapPx: 80, direction: 'right' } }
+  });
+  const settings = store.getSnapshot().settings;
+  assert.equal(settings.channels.ticker.band, 'bottom');
+  assert.equal(settings.channels.ticker.minGapPx, 80);
+  assert.equal(settings.profile.ticker.direction, 'right');
+  assert.equal('direction' in settings.channels.ticker, false);
+});

@@ -1,14 +1,14 @@
 # 当前状态快照（2026-08-15，Windows）
 
-## 2026-09-16 词表 + 通道规约（0.1.8 入口）
+## 2026-09-16 词表 + 通道规约（0.1.8 进行中）
 
-计划：`docs/superpowers/plans/2026-09-16-lexicon-and-channel-charter.md`。
+计划：`docs/superpowers/plans/2026-09-16-lexicon-and-channel-charter.md`。ADR-006 已写。
 
-已拍板：通道规约 vs 卡片动态/寿命；配置包不含规约；弹幕方向=卡；点穿=平动规约；同轨净空不动；函数路径=以后新池；淡入=以后特效；PID 不做，只留 `settle:snap`。
+Git：`f389d29` 为 0.1.7 回滚点；分支 `reform/0.1.8-lexicon`。
 
-Git：仓库已在，`HEAD`=`29480dc`（0.1.6）。0.1.7 工作区未提交。下一步 Phase 0：快照提交后开 `reform/0.1.8-lexicon`。
+已落地：`channel-charter` 户口（stack/ticker 规约、ticker 动态、settle=snap）；视觉设置带 `channels` + `flight`；工作室只存 profile 时会重抄规约；配置包 strip 规约；Native 不再用后一张卡覆盖带子/净空，出生方向读这张卡。
 
-两套通道不能混：事件巷（`behavior-channel.js`）vs 飞法通道（堆叠/弹幕池）。
+未做：工作室 A 排版、PID follow、路径飞法、淡入、VERSION 0.1.8、事件巷文件改名切换。
 
 ## 2026-09-15 0.1.7 开线
 

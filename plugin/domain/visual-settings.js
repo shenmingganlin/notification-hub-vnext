@@ -1,4 +1,5 @@
 import { createCardVisualSettings, cardVisualDefaults, createCardProperties, createCardSkin, createCardEffect } from './card-visual-settings.js';
+import { createFlightChannels, resolveFlightId } from './channel-charter.js';
 import { migrateVisualProfile } from './visual-profile-migration.js';
 
 export const VISUAL_PROFILE_VERSION = 2;
@@ -36,7 +37,7 @@ export const VISUAL_CATEGORIES = Object.freeze(['chat', 'channel', 'tool', 'erro
 export const VISUAL_PRESETS = Object.freeze(['minimal', 'soft', 'accent', 'warning', 'critical']);
 export const VISUAL_INTENSITIES = Object.freeze(['reduced', 'balanced', 'expressive']);
 
-const PROFILE_FIELDS = Object.freeze(['version', 'global', 'categories', 'visualProfiles', 'rules', 'card', 'behaviorId', 'ticker', 'propertiesId', 'skinId', 'effectConfigId']);
+const PROFILE_FIELDS = Object.freeze(['version', 'global', 'categories', 'visualProfiles', 'rules', 'card', 'behaviorId', 'flight', 'ticker', 'propertiesId', 'skinId', 'effectConfigId']);
 const POLICY_FIELDS = Object.freeze(['enabled', 'preset', 'intensity', 'defaultMode']);
 const VISUAL_PROFILE_ID_PATTERN = /^[a-z0-9][a-z0-9._-]{0,79}$/i;
 const CATEGORY_DEFAULTS = Object.freeze({
@@ -162,8 +163,18 @@ export function createVisualProfile(input = {}) {
   input = migrateVisualProfile(input, VISUAL_PROFILE_VERSION).profile;
   for (const key of Object.keys(input)) if (!PROFILE_FIELDS.includes(key)) throw fail('VISUAL_PROFILE_FIELD_UNKNOWN', `Unknown profile field: ${key}`, { field: key });
   if ('version' in input && input.version !== VISUAL_PROFILE_VERSION) throw fail('VISUAL_PROFILE_VERSION_INVALID', 'Unsupported visual profile version', { field: 'version' });
-  const behaviorId = input.behaviorId ?? DEFAULT_VISUAL_BEHAVIOR_ID;
-  if (!VISUAL_BEHAVIOR_IDS.includes(behaviorId)) throw fail('VISUAL_PROFILE_BEHAVIOR_INVALID', `Unknown visual behavior: ${behaviorId}`, { field: 'behaviorId' });
+  const flightField = input.behaviorId !== undefined ? 'behaviorId' : (input.flight !== undefined ? 'flight' : 'behaviorId');
+  let behaviorId;
+  try {
+    // behaviorId wins over flight: deep-merge can leave a stale flight next to a new ticket.
+    behaviorId = resolveFlightId(input.behaviorId ?? input.flight ?? DEFAULT_VISUAL_BEHAVIOR_ID, flightField);
+  } catch (cause) {
+    if (cause.code === 'FLIGHT_ID_INVALID') {
+      throw fail('VISUAL_PROFILE_BEHAVIOR_INVALID', cause.message, cause.details);
+    }
+    throw cause;
+  }
+  if (!VISUAL_BEHAVIOR_IDS.includes(behaviorId)) throw fail('VISUAL_PROFILE_BEHAVIOR_INVALID', `Unknown visual behavior: ${behaviorId}`, { field: flightField });
   if ('global' in input) validatePolicy(input.global, 'global');
   if ('categories' in input) {
     if (!plain(input.categories)) throw fail('VISUAL_PROFILE_FIELD_INVALID', 'categories must be a plain object', { field: 'categories' });
@@ -195,6 +206,7 @@ export function createVisualProfile(input = {}) {
     visualProfiles: freeze(visualProfiles),
     rules: clone(input.rules ?? []),
     behaviorId,
+    flight: behaviorId,
     // 仅在显式携带时出现：保持既有 profile 形状稳定，旧数据不受影响。
     ...(input.ticker === undefined ? {} : { ticker: createTickerSettings(input.ticker) }),
     card: createCardVisualSettings(input.card ?? {}),
@@ -206,8 +218,12 @@ export function createVisualProfile(input = {}) {
 
 export function createVisualSettings(input = {}) {
   if (!plain(input)) throw fail('VISUAL_SETTINGS_FIELD_INVALID', 'settings must be a plain object');
-  for (const key of Object.keys(input)) if (!['profile'].includes(key)) throw fail('VISUAL_SETTINGS_FIELD_UNKNOWN', `Unknown settings field: ${key}`, { field: key });
-  return freeze({ profile: createVisualProfile(input.profile ?? {}) });
+  for (const key of Object.keys(input)) if (!['profile', 'channels'].includes(key)) throw fail('VISUAL_SETTINGS_FIELD_UNKNOWN', `Unknown settings field: ${key}`, { field: key });
+  const profile = createVisualProfile(input.profile ?? {});
+  return freeze({
+    profile,
+    channels: createFlightChannels(input.channels ?? {}, { profile })
+  });
 }
 
 export const VISUAL_SETTINGS_DEFAULTS = createVisualSettings();

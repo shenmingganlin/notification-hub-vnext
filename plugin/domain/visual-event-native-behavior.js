@@ -10,14 +10,20 @@ export const TEST_EVENT_PRESENTATION_IDS = Object.freeze({
 });
 
 export function resolveVisualEventNativeBehavior(profile) {
-  const behaviorId = typeof profile?.behaviorId === 'string' ? profile.behaviorId : '';
-  if (behaviorId === 'ticker' || behaviorId === 'danmaku') {
+  const flight = typeof profile?.behaviorId === 'string'
+    ? profile.behaviorId
+    : (typeof profile?.flight === 'string' ? profile.flight : '');
+  if (flight === 'ticker' || flight === 'danmaku') {
     return Object.freeze({
+      flight: 'ticker',
+      flightChannelId: VISUAL_EVENT_TICKER_CHANNEL,
       behaviorProfileId: 'ticker',
       behaviorChannelId: VISUAL_EVENT_TICKER_CHANNEL
     });
   }
   return Object.freeze({
+    flight: 'stack',
+    flightChannelId: VISUAL_EVENT_STACK_CHANNEL,
     behaviorProfileId: 'stack',
     behaviorChannelId: VISUAL_EVENT_STACK_CHANNEL
   });

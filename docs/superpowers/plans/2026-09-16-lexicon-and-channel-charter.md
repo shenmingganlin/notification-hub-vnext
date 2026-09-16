@@ -106,25 +106,25 @@ Native 新字段只垫结构体末尾。能改归属的就改归属，不靠加 
 
 ### Phase 0 — 回滚点
 
-- [ ] 提交 0.1.7 快照
-- [ ] 开 `reform/0.1.8-lexicon`
-- [ ] 本计划与 `CURRENT-STATUS.md`、计划索引已指向这份文件（本步）
+- [x] 提交 0.1.7 快照（`f389d29`）
+- [x] 开 `reform/0.1.8-lexicon`
+- [x] 本计划与 `CURRENT-STATUS.md`、计划索引已指向这份文件（本步）
 
 ### Phase 1 — ADR-006 + 检索清单
 
-- [ ] 写 `docs/adr/ADR-006-flight-channel-charter.md`
+- [x] 写 `docs/adr/ADR-006-flight-channel-charter.md`
 - [ ] 产出旧词检索表（`behaviorId`、`behaviorProfileId`、`behaviorChannelId`、`BEHAVIOR_`、`ticker.` 混装字段），按文件归到：飞法 / 事件巷 / 兼容别名 / 待删
-- [ ] 事件巷改名方案写入 ADR，避免和飞法通道抢 `channel`
+- [x] 事件巷改名方案写入 ADR，避免和飞法通道抢 `channel`（`event-lane.js` 别名已立）
 
 ### Phase 2 — 户口（观感不变，权威搬家）
 
-- [ ] `visual-settings` 增加本机 `channels.stack` / `channels.ticker`（规约）
-- [ ] 方案去掉作为权威的停靠/带子；迁移：从现用方案抄一份规约
-- [ ] 配置包导入导出 **丢弃** 规约
-- [ ] `scene.set-mode` 只发堆叠规约；弹幕规约走通道写入，不再靠卡 visual 覆盖
-- [ ] Native：通道规约不从最后一张卡重建；卡只贡献 `TickerMotion`（速度、方向）
-- [ ] 同轨净空、点穿、满轨仍在 `TickerCharter`
-- [ ] 错误：规约校验失败写 `CHARTER_*`，动态校验写 `MOTION_*`，带 field / expected / actual
+- [x] `visual-settings` 增加本机 `channels.stack` / `channels.ticker`（规约）
+- [x] 方案去掉作为权威的停靠/带子；迁移：从现用方案抄一份规约（工作室只存 profile 时重抄）
+- [x] 配置包导入导出 **丢弃** 规约
+- [ ] `scene.set-mode` 只发堆叠规约；弹幕规约走通道写入，不再靠卡 visual 覆盖（Native 已改为首次播种，尚未独立 set-charter）
+- [x] Native：通道规约不从最后一张卡重建；出生方向读这张卡
+- [x] 同轨净空、点穿、满轨仍在 `TickerCharter`
+- [x] 错误：规约校验失败写 `CHARTER_*`，动态校验写 `MOTION_*`，带 field / expected / actual
 
 验收：两张弹幕不同方向/速度可并存；后进的卡不能改带子和净空。
 
