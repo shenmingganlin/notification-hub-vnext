@@ -1,6 +1,6 @@
 import { createVisualProfileRegistry } from './visual-profile-registry.js';
 import { createEventBindingRegistry } from './event-binding-registry.js';
-import { resolveVisualEventNativeBehavior } from './visual-event-native-behavior.js';
+import { resolveVisualEventNativeFlight } from './visual-event-native-flight.js';
 
 export const VISUAL_REGISTRY_SNAPSHOT_VERSION = 1;
 function error(code, message, field) { return Object.assign(new Error(message), { code, details: field ? { field } : {} }); }
@@ -44,7 +44,7 @@ export function projectVisualRegistryToEventSettings({ settings, bindingRegistry
       behaviorProfileId: 'stack',
       behaviorChannelId: 'stack.main'
     };
-    const native = resolveVisualEventNativeBehavior(profileRegistry?.get?.(binding.visualProfileId)?.profile);
+    const native = resolveVisualEventNativeFlight(profileRegistry?.get?.(binding.visualProfileId)?.profile);
     events[binding.eventId] = {
       ...current,
       visualProfileId: text('visualProfileId', binding.visualProfileId),

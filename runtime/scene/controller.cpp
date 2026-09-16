@@ -233,12 +233,11 @@ std::string change_json(
 
 class RuntimeSceneController::Impl {
 public:
-    struct BehaviorChannelState {
+    struct FlightChannelState {
         std::string channel_id;
         std::string profile_id;
         std::vector<std::string> card_order;
-        // 通道取最新一张 ticker 卡的 band / 轨道 / 间距；速度在出生时抄到每张卡上，
-        // 飞行中的卡不跟着改，试一条才能立刻用上新旋钮。
+        // 弹幕公路法：优先 explicit_ticker_charter；否则第一张 ticker 卡播种。后卡不得覆盖。
         TickerChannelOptions ticker_options{};
         bool ticker_options_specified{};
     };
@@ -258,10 +257,10 @@ public:
             : "stack";
     }
 
-    bool has_explicit_behavior_channels() const {
+    bool has_explicit_flight_channels() const {
         return std::any_of(
-            behavior_channel_order.begin(),
-            behavior_channel_order.end(),
+            flight_channel_order.begin(),
+            flight_channel_order.end(),
             [](const std::string& channel_id) { return channel_id != "__legacy__"; });
     }
 
@@ -333,18 +332,18 @@ public:
         }
     }
 
-    void rebuild_behavior_channels() {
-        behavior_channels.clear();
-        behavior_channel_order.clear();
+    void rebuild_flight_channels() {
+        flight_channels.clear();
+        flight_channel_order.clear();
         for (const auto& id : card_order) {
             const auto card_it = cards.find(id);
             if (card_it == cards.end()) continue;
             const auto channel_id = channel_id_for(card_it->second);
-            auto channel_it = behavior_channels.find(channel_id);
-            if (channel_it == behavior_channels.end()) {
-                BehaviorChannelState channel{channel_id, profile_id_for(card_it->second), {}};
-                channel_it = behavior_channels.emplace(channel_id, std::move(channel)).first;
-                behavior_channel_order.push_back(channel_id);
+            auto channel_it = flight_channels.find(channel_id);
+            if (channel_it == flight_channels.end()) {
+                FlightChannelState channel{channel_id, profile_id_for(card_it->second), {}};
+                channel_it = flight_channels.emplace(channel_id, std::move(channel)).first;
+                flight_channel_order.push_back(channel_id);
             }
             const bool ticker_card = card_it->second.visual.ticker_specified
                 || is_ticker_profile(channel_it->second.profile_id);
@@ -382,7 +381,7 @@ public:
 
     // Ticker 通道摆位（契约 §3 / §4）。返回 false 表示几何无法应用。
     bool place_ticker_channel(
-        const BehaviorChannelState& channel,
+        const FlightChannelState& channel,
         const StackLayoutOptions& options,
         std::string& error_code,
         std::string& error_message);
@@ -397,8 +396,8 @@ public:
     std::unordered_map<std::string, SceneCardState> cards;
     std::unordered_map<std::string, std::unique_ptr<SceneWindow>> card_windows;
     std::vector<std::string> card_order;
-    std::unordered_map<std::string, BehaviorChannelState> behavior_channels;
-    std::vector<std::string> behavior_channel_order;
+    std::unordered_map<std::string, FlightChannelState> flight_channels;
+    std::vector<std::string> flight_channel_order;
     StackLayoutOptions active_layout{};
     bool has_active_layout{};
     bool active_layout_uses_provider{};
@@ -433,7 +432,7 @@ public:
 };
 
 bool RuntimeSceneController::Impl::place_ticker_channel(
-    const BehaviorChannelState& channel,
+    const FlightChannelState& channel,
     const StackLayoutOptions& options,
     std::string& error_code,
     std::string& error_message) {
@@ -786,7 +785,7 @@ bool RuntimeSceneController::create_card(
     impl_->cards.emplace(card.id, stored_card);
     impl_->card_windows.emplace(card.id, std::move(window));
     impl_->card_order.push_back(card.id);
-    impl_->rebuild_behavior_channels();
+    impl_->rebuild_flight_channels();
 
     if (impl_->has_active_layout) {
         auto reapply_options = impl_->active_layout;
@@ -805,7 +804,7 @@ bool RuntimeSceneController::create_card(
             impl_->card_order.pop_back();
             impl_->card_windows.erase(card.id);
             impl_->cards.erase(card.id);
-            impl_->rebuild_behavior_channels();
+            impl_->rebuild_flight_channels();
             error_code = layout_error_code;
             error_message = layout_error_message;
             return false;
@@ -815,7 +814,7 @@ bool RuntimeSceneController::create_card(
         impl_->card_order.pop_back();
         impl_->card_windows.erase(card.id);
         impl_->cards.erase(card.id);
-        impl_->rebuild_behavior_channels();
+        impl_->rebuild_flight_channels();
         error_code = "RUNTIME_SCENE_WINDOW_APPLY_FAILED";
         error_message = "scene.create could not show the card window at its final position";
         return false;
@@ -911,7 +910,7 @@ bool RuntimeSceneController::update_card(
         ? Impl::channel_id_for(*previous_state)
         : std::string{};
     impl_->cards[card.id] = stored_card;
-    impl_->rebuild_behavior_channels();
+    impl_->rebuild_flight_channels();
     const auto channel_changed = previous_channel_id != Impl::channel_id_for(stored_card);
     if (impl_->has_active_layout && channel_changed) {
         auto reapply_options = impl_->active_layout;
@@ -928,7 +927,7 @@ bool RuntimeSceneController::update_card(
         std::string layout_error_message;
         if (!apply_stack_layout(reapply_options, layout_error_code, layout_error_message)) {
             if (previous_state.has_value()) impl_->cards[card.id] = *previous_state;
-            impl_->rebuild_behavior_channels();
+            impl_->rebuild_flight_channels();
             error_code = layout_error_code;
             error_message = layout_error_message;
             return false;
@@ -957,7 +956,7 @@ bool RuntimeSceneController::dismiss_card(
     impl_->card_order.erase(
         std::remove(impl_->card_order.begin(), impl_->card_order.end(), id),
         impl_->card_order.end());
-    impl_->rebuild_behavior_channels();
+    impl_->rebuild_flight_channels();
 
     if (impl_->has_active_layout && !impl_->card_order.empty()) {
         auto reapply_options = impl_->active_layout;
@@ -976,7 +975,7 @@ bool RuntimeSceneController::dismiss_card(
             impl_->cards.emplace(card_id, removed_state);
             impl_->card_windows.emplace(card_id, std::move(removed_card));
             impl_->card_order = removed_order;
-            impl_->rebuild_behavior_channels();
+            impl_->rebuild_flight_channels();
             error_code = layout_error_code;
             error_message = "scene.dismiss removed card but could not reflow remaining cards: " + layout_error_message;
             impl_->pending_change_metadata_json = change_json(
@@ -1034,18 +1033,18 @@ bool RuntimeSceneController::apply_channel_layout(
         options.work_area_is_fallback = effective_work_area.is_fallback;
     }
 
-    impl_->rebuild_behavior_channels();
-    if (impl_->behavior_channel_order.size() > 1 || impl_->has_explicit_behavior_channels()) {
+    impl_->rebuild_flight_channels();
+    if (impl_->flight_channel_order.size() > 1 || impl_->has_explicit_flight_channels()) {
         auto card_is_ticker = [&](const std::string& id) {
             const auto card_it = impl_->cards.find(id);
             if (card_it == impl_->cards.end()) return false;
             return is_ticker_profile(Impl::profile_id_for(card_it->second));
         };
-        const auto channel_count = static_cast<int>(impl_->behavior_channel_order.size());
+        const auto channel_count = static_cast<int>(impl_->flight_channel_order.size());
         for (int channel_index = 0; channel_index < channel_count; ++channel_index) {
-            const auto& channel_id = impl_->behavior_channel_order[static_cast<std::size_t>(channel_index)];
-            const auto channel_it = impl_->behavior_channels.find(channel_id);
-            if (channel_it == impl_->behavior_channels.end()) continue;
+            const auto& channel_id = impl_->flight_channel_order[static_cast<std::size_t>(channel_index)];
+            const auto channel_it = impl_->flight_channels.find(channel_id);
+            if (channel_it == impl_->flight_channels.end()) continue;
             const auto profile_id = channel_it->second.profile_id;
 
             auto channel_options = options;
@@ -1257,7 +1256,7 @@ bool RuntimeSceneController::apply_ticker_charter(
     if (impl_ == nullptr) impl_ = new Impl();
     impl_->explicit_ticker_charter = options;
     impl_->explicit_ticker_charter_specified = true;
-    impl_->rebuild_behavior_channels();
+    impl_->rebuild_flight_channels();
     static_cast<void>(error_code);
     static_cast<void>(error_message);
     return true;
@@ -1384,13 +1383,14 @@ std::string RuntimeSceneController::scene_state_snapshot_json() const {
         }
     }
     result += "],\"cards\":" + cards_json();
-    if (impl_ != nullptr && impl_->has_explicit_behavior_channels()) {
+    if (impl_ != nullptr && impl_->has_explicit_flight_channels()) {
+        // Protocol JSON keeps behaviorChannels as the alias; internal type is FlightChannelState.
         result += ",\"behaviorChannels\":[";
         bool first_channel = true;
-        for (const auto& channel_id : impl_->behavior_channel_order) {
+        for (const auto& channel_id : impl_->flight_channel_order) {
             if (channel_id == "__legacy__") continue;
-            const auto channel_it = impl_->behavior_channels.find(channel_id);
-            if (channel_it == impl_->behavior_channels.end()) continue;
+            const auto channel_it = impl_->flight_channels.find(channel_id);
+            if (channel_it == impl_->flight_channels.end()) continue;
             if (!first_channel) result += ',';
             first_channel = false;
             result += "{\"channelId\":" + json_string(channel_it->second.channel_id)

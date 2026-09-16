@@ -121,13 +121,13 @@ import { createVisualRegistrySnapshot, projectVisualRegistryToEventSettings } fr
 import { createVisualEventSettingsApi } from './domain/visual-event-settings-api.js';
 import {
   hasExplicitVisualBinding,
-  resolveVisualEventNativeBehavior,
+  resolveVisualEventNativeFlight,
   resolveVisualEventCardIntent as resolveVisualEventCardIntentFromState,
   classifyVisualDiagnosticLevel,
   visualPreviewFingerprint,
   TEST_EVENT_PRESENTATION_IDS,
   VISUAL_EVENT_TICKER_CHANNEL
-} from './domain/visual-event-native-behavior.js';
+} from './domain/visual-event-native-flight.js';
 import { createVisualAssetLibrary } from './domain/visual-asset-library.js';
 import { createVisualAssetStorage } from './domain/visual-asset-storage.js';
 import { loadVisualAssetSnapshot, saveVisualAssetSnapshot } from './domain/visual-asset-persistence.js';
@@ -359,13 +359,9 @@ function notificationCardText(value, fallback, maxLength) {
   return nonEmptyText(value, fallback, maxLength);
 }
 
-function isTickerBehavior(behaviorId) {
-  return isTickerFlight(behaviorId);
-}
-
 function notificationCardDimensions(appearance = {}, cardType = 'minimal', behaviorId = 'stack') {
   // 弹幕默认 480×76，不复用堆叠的 420×220，也不被 wide 抬到 160。
-  if (isTickerBehavior(behaviorId)) {
+  if (isTickerFlight(behaviorId)) {
     const width = Number.isInteger(appearance.width) ? Math.max(1, Math.min(1920, appearance.width)) : 480;
     const height = Number.isInteger(appearance.height) ? Math.max(1, Math.min(1080, appearance.height)) : 76;
     return { width, height };
@@ -488,7 +484,7 @@ function notificationIdentity(record, ctx = null) {
 
 function notificationCardPayload(record, index, workArea, layout, visual, presentation = null, behavior = null, ctx = null) {
   const cardType = visual?.cardType ?? 'minimal';
-  const behaviorId = isTickerBehavior(visual?.behaviorId) || isTickerBehavior(behavior?.behaviorProfileId)
+  const behaviorId = isTickerFlight(visual?.behaviorId) || isTickerFlight(behavior?.behaviorProfileId)
     ? 'ticker'
     : (visual?.behaviorId ?? 'stack');
   const space = visual?.space ?? {};
@@ -503,7 +499,7 @@ function notificationCardPayload(record, index, workArea, layout, visual, presen
     anchor: space.anchor ?? 'bottom-right'
   };
   const position = notificationCardPosition(index, workArea, layout, dimensions, cardType);
-  const visualForNative = isTickerBehavior(behaviorId) && visual?.ticker
+  const visualForNative = isTickerFlight(behaviorId) && visual?.ticker
     ? { ...visual, ticker: resolveTickerMotion(visual.ticker) }
     : (visual?.ticker ? (({ ticker, ...rest }) => rest)(visual) : visual);
   const showIcon = visual?.parts?.icon?.show === true;
@@ -514,9 +510,9 @@ function notificationCardPayload(record, index, workArea, layout, visual, presen
       createDefaultTextPartTree({
         width: dimensions.width,
         height: dimensions.height,
-        ticker: isTickerBehavior(behaviorId),
+        ticker: isTickerFlight(behaviorId),
         popup: cardType === 'popup',
-        close: !isTickerBehavior(behaviorId) && (visual?.interaction?.dismissMode ?? 'closeButton') !== 'anywhere',
+        close: !isTickerFlight(behaviorId) && (visual?.interaction?.dismissMode ?? 'closeButton') !== 'anywhere',
         title: visual?.parts?.title?.show !== false,
         body: visual?.parts?.body?.show !== false,
         icon: showIcon,
@@ -2559,7 +2555,7 @@ export default class NotificationHubVNextPlugin {
           behaviorId: storeProfile?.global?.defaultMode,
           ...(storeProfile?.global?.defaultMode === 'ticker' ? { ticker: storeProfile.ticker ?? intent.visualProfile?.ticker ?? {} } : {})
         });
-        intent.nativeBehavior = resolveVisualEventNativeBehavior(intent.visualProfile);
+        intent.nativeBehavior = resolveVisualEventNativeFlight(intent.visualProfile);
       } catch {
         /* keep the unfrozen default-mode profile if studio draft is incomplete */
       }
@@ -2640,7 +2636,7 @@ export default class NotificationHubVNextPlugin {
   }
 
   buildNotificationScenePayload({ record, health, layout, retainedNotificationCards, visualPayload, presentation, behavior } = {}) {
-    const tickerFlight = isTickerBehavior(visualPayload?.behaviorId) || isTickerBehavior(behavior?.behaviorProfileId);
+    const tickerFlight = isTickerFlight(visualPayload?.behaviorId) || isTickerFlight(behavior?.behaviorProfileId);
     return notificationCardPayload(
       record,
       tickerFlight ? 0 : retainedNotificationCards.length,
@@ -2658,7 +2654,7 @@ export default class NotificationHubVNextPlugin {
 
   async ensureNativeFlightCharter(host, visual) {
     if (!host?.client?.request) return;
-    if (isTickerBehavior(visual?.behaviorId)) {
+    if (isTickerFlight(visual?.behaviorId)) {
       await host.client.request(
         'scene.set-charter',
         toNativeTickerCharterPayload(splitLegacyTicker(visual?.ticker ?? {}).charter, VISUAL_EVENT_TICKER_CHANNEL),
@@ -2809,7 +2805,7 @@ export default class NotificationHubVNextPlugin {
       ...(visual.glossary ? { glossary: visual.glossary } : {})
     };
     const channelId = behavior?.behaviorChannelId ?? '__legacy__';
-    const retainedNotificationCards = notificationCards.filter((card) => !isTickerBehavior(card?.behavior?.behaviorProfileId));
+    const retainedNotificationCards = notificationCards.filter((card) => !isTickerFlight(card?.behavior?.behaviorProfileId));
     this.shadowEnqueueVisualRuntime(record, selector, visualPayload);
     const presentation = selector ? {
       eventId: selector.eventId,
@@ -2822,7 +2818,7 @@ export default class NotificationHubVNextPlugin {
       eventTypeId: intent.eventId,
       visualProfileId: intent.binding?.visualProfileId ?? 'visual.default'
     };
-    const tickerFlight = isTickerBehavior(visualPayload?.behaviorId) || isTickerBehavior(behavior?.behaviorProfileId);
+    const tickerFlight = isTickerFlight(visualPayload?.behaviorId) || isTickerFlight(behavior?.behaviorProfileId);
     let liveHealth = health;
     let liveLayout = layout;
     let liveRetained = retainedNotificationCards;
@@ -2864,7 +2860,7 @@ export default class NotificationHubVNextPlugin {
         const existingAgain = Array.isArray(healthAgain.sceneCards) ? healthAgain.sceneCards : [];
         liveRetained = existingAgain.filter((item) => {
           const id = notificationIdFromCardId(item?.id);
-          return id && !isTickerBehavior(item?.behavior?.behaviorProfileId);
+          return id && !isTickerFlight(item?.behavior?.behaviorProfileId);
         });
         card = this.buildNotificationScenePayload({
           record,
@@ -3699,7 +3695,7 @@ export default class NotificationHubVNextPlugin {
       context: { globalEnabled: profile.global?.enabled !== false }
     });
     const activeType = profile?.card?.types?.[profile.card.activeType ?? 'minimal'] ?? {};
-    const nativeBehavior = resolveVisualEventNativeBehavior(profile);
+    const nativeBehavior = resolveVisualEventNativeFlight(profile);
     const visualPayload = resolveVisualDraftPayload({
       enabled: visual.enabled,
       preset: visual.preset,

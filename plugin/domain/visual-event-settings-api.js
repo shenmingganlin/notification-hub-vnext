@@ -1,6 +1,6 @@
 import { projectVisualRegistryToEventSettings } from './visual-registry-persistence.js';
 import { listEventDefinitions } from './notification-event-catalog.js';
-import { resolveVisualEventNativeBehavior, TEST_EVENT_PRESENTATION_IDS } from './visual-event-native-behavior.js';
+import { resolveVisualEventNativeFlight, TEST_EVENT_PRESENTATION_IDS } from './visual-event-native-flight.js';
 
 function apiError(code, message, field) { return Object.assign(new Error(message), { code, details: field ? { field } : {} }); }
 function text(field, value) { if (typeof value !== 'string' || !value.trim()) throw apiError('VISUAL_EVENT_SETTINGS_API_INVALID', `${field} must be a non-empty string`, field); return value.trim(); }
@@ -14,7 +14,7 @@ export function createVisualEventSettingsApi({ store, profileRegistry, bindingRe
     if (input.behaviorChannelId) return input;
     const profileId = typeof input.profileId === 'string' ? input.profileId.trim() : '';
     if (!profileId || !profileRegistry.has(profileId)) return input;
-    const native = resolveVisualEventNativeBehavior(profileRegistry.get(profileId)?.profile);
+    const native = resolveVisualEventNativeFlight(profileRegistry.get(profileId)?.profile);
     return { ...input, behaviorChannelId: native.behaviorChannelId };
   };
   const commit = () => {

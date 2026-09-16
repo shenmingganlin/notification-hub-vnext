@@ -5,44 +5,48 @@ import {
   VISUAL_EVENT_STACK_CHANNEL,
   VISUAL_EVENT_TICKER_CHANNEL,
   hasExplicitVisualBinding,
+  resolveVisualEventNativeFlight,
   resolveVisualEventNativeBehavior,
   resolveVisualEventCardIntent,
   classifyVisualDiagnosticLevel,
   visualPreviewFingerprint
-} from '../../plugin/domain/visual-event-native-behavior.js';
+} from '../../plugin/domain/visual-event-native-flight.js';
+import { resolveVisualEventNativeBehavior as resolveFromShim } from '../../plugin/domain/visual-event-native-behavior.js';
+
+const tickerNative = {
+  flight: 'ticker',
+  flightChannelId: VISUAL_EVENT_TICKER_CHANNEL,
+  behaviorProfileId: 'ticker',
+  behaviorChannelId: VISUAL_EVENT_TICKER_CHANNEL
+};
+const stackNative = {
+  flight: 'stack',
+  flightChannelId: VISUAL_EVENT_STACK_CHANNEL,
+  behaviorProfileId: 'stack',
+  behaviorChannelId: VISUAL_EVENT_STACK_CHANNEL
+};
 
 test('ticker and danmaku profiles fly on the event ticker channel', () => {
-  assert.deepEqual(resolveVisualEventNativeBehavior({ behaviorId: 'ticker' }), {
-    behaviorProfileId: 'ticker',
-    behaviorChannelId: VISUAL_EVENT_TICKER_CHANNEL
-  });
-  assert.deepEqual(resolveVisualEventNativeBehavior({ behaviorId: 'danmaku' }), {
-    behaviorProfileId: 'ticker',
-    behaviorChannelId: VISUAL_EVENT_TICKER_CHANNEL
-  });
+  assert.deepEqual(resolveVisualEventNativeFlight({ behaviorId: 'ticker' }), tickerNative);
+  assert.deepEqual(resolveVisualEventNativeFlight({ behaviorId: 'danmaku' }), tickerNative);
+  assert.deepEqual(resolveVisualEventNativeFlight({ flight: 'ticker' }), tickerNative);
+});
+
+test('behaviorId ticket wins over a stale flight key', () => {
+  assert.deepEqual(resolveVisualEventNativeFlight({ behaviorId: 'stack', flight: 'ticker' }), stackNative);
 });
 
 test('stack, popup and missing profiles stack on the event stack channel', () => {
-  assert.deepEqual(resolveVisualEventNativeBehavior({ behaviorId: 'stack' }), {
-    behaviorProfileId: 'stack',
-    behaviorChannelId: VISUAL_EVENT_STACK_CHANNEL
-  });
-  assert.deepEqual(resolveVisualEventNativeBehavior({ behaviorId: 'popup' }), {
-    behaviorProfileId: 'stack',
-    behaviorChannelId: VISUAL_EVENT_STACK_CHANNEL
-  });
-  assert.deepEqual(resolveVisualEventNativeBehavior({}), {
-    behaviorProfileId: 'stack',
-    behaviorChannelId: VISUAL_EVENT_STACK_CHANNEL
-  });
-  assert.deepEqual(resolveVisualEventNativeBehavior(null), {
-    behaviorProfileId: 'stack',
-    behaviorChannelId: VISUAL_EVENT_STACK_CHANNEL
-  });
-  assert.deepEqual(resolveVisualEventNativeBehavior(undefined), {
-    behaviorProfileId: 'stack',
-    behaviorChannelId: VISUAL_EVENT_STACK_CHANNEL
-  });
+  assert.deepEqual(resolveVisualEventNativeFlight({ behaviorId: 'stack' }), stackNative);
+  assert.deepEqual(resolveVisualEventNativeFlight({ behaviorId: 'popup' }), stackNative);
+  assert.deepEqual(resolveVisualEventNativeFlight({}), stackNative);
+  assert.deepEqual(resolveVisualEventNativeFlight(null), stackNative);
+  assert.deepEqual(resolveVisualEventNativeFlight(undefined), stackNative);
+});
+
+test('legacy resolver name and shim file still export the same mapping', () => {
+  assert.equal(resolveVisualEventNativeBehavior, resolveVisualEventNativeFlight);
+  assert.deepEqual(resolveFromShim({ behaviorId: 'ticker' }), tickerNative);
 });
 
 test('explicit visual binding is only true when the registry has that event', () => {
@@ -66,6 +70,7 @@ test('visual event card intent prefers global off, then binding, then defaultMod
   const bound = resolveVisualEventCardIntent({ eventId: 'chat.assistant_reply.completed', globalEnabled: true, defaultMode: 'stack', binding, boundProfile, storeProfile });
   assert.equal(bound.showCard, true);
   assert.equal(bound.reason, 'bound');
+  assert.equal(bound.nativeFlight.flight, 'ticker');
   assert.equal(bound.nativeBehavior.behaviorProfileId, 'ticker');
   const unboundOff = resolveVisualEventCardIntent({ eventId: 'chat.assistant_reply.completed', globalEnabled: true, defaultMode: 'off', storeProfile });
   assert.equal(unboundOff.showCard, false);
@@ -73,9 +78,11 @@ test('visual event card intent prefers global off, then binding, then defaultMod
   const unboundStack = resolveVisualEventCardIntent({ eventId: 'chat.assistant_reply.completed', globalEnabled: true, defaultMode: 'stack', storeProfile });
   assert.equal(unboundStack.showCard, true);
   assert.equal(unboundStack.visualProfile.behaviorId, 'stack');
+  assert.equal(unboundStack.visualProfile.flight, 'stack');
   const unboundTicker = resolveVisualEventCardIntent({ eventId: 'chat.assistant_reply.completed', globalEnabled: true, defaultMode: 'ticker', storeProfile });
   assert.equal(unboundTicker.showCard, true);
   assert.equal(unboundTicker.nativeBehavior.behaviorChannelId, VISUAL_EVENT_TICKER_CHANNEL);
+  assert.equal(unboundTicker.nativeFlight.flightChannelId, VISUAL_EVENT_TICKER_CHANNEL);
   assert.equal(resolveVisualEventCardIntent({ eventId: 'x', globalEnabled: true, defaultMode: 'stack', binding, boundProfile: null }).reason, 'missing-profile');
 });
 
