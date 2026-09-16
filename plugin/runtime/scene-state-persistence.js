@@ -1,7 +1,14 @@
 import { EventEmitter } from 'node:events';
+import path from 'node:path';
 
 import { saveSceneState } from './scene-state-store.js';
 import { validateSceneState } from './scene-state.js';
+
+export const SCENE_STATE_PERSISTENCE_DEFAULTS = Object.freeze({
+  enabled: true,
+  relativePath: 'scene-state.json',
+  debounceMs: 100
+});
 
 function persistenceError(code, message, details = {}) {
   return Object.assign(new Error(message), { code, details });
@@ -9,6 +16,66 @@ function persistenceError(code, message, details = {}) {
 
 function cloneSceneState(state) {
   return JSON.parse(JSON.stringify(state));
+}
+
+function readConfig(config) {
+  try {
+    if (config?.getAll) return config.getAll() || {};
+    if (config?.get) return config.get() || {};
+  } catch (error) {
+    throw persistenceError(
+      'RUNTIME_SCENE_STATE_CONFIG_READ_FAILED',
+      'Failed to read SceneState persistence configuration',
+      { cause: error.message }
+    );
+  }
+  return config && typeof config === 'object' ? config : {};
+}
+
+function resolvePath(dataDir, configuredPath) {
+  if (typeof configuredPath !== 'string' || configuredPath.trim().length === 0) {
+    throw persistenceError(
+      'RUNTIME_SCENE_STATE_PATH_INVALID',
+      'SceneState persistence path must be a non-empty string'
+    );
+  }
+  if (path.isAbsolute(configuredPath)) return path.normalize(configuredPath);
+  if (typeof dataDir !== 'string' || dataDir.trim().length === 0) {
+    throw persistenceError(
+      'RUNTIME_SCENE_STATE_DATA_DIR_INVALID',
+      'A non-empty dataDir is required for a relative SceneState persistence path'
+    );
+  }
+  return path.resolve(dataDir, configuredPath);
+}
+
+export function resolveSceneStatePersistenceConfig({ dataDir, config, overrides = {} } = {}) {
+  const raw = { ...readConfig(config), ...overrides };
+  const enabled = raw.sceneStatePersistenceEnabled
+    ?? SCENE_STATE_PERSISTENCE_DEFAULTS.enabled;
+  if (typeof enabled !== 'boolean') {
+    throw persistenceError(
+      'RUNTIME_SCENE_STATE_CONFIG_INVALID',
+      'sceneStatePersistenceEnabled must be a boolean'
+    );
+  }
+  if (!enabled) return { enabled: false, filePath: null, debounceMs: null };
+
+  const configuredPath = raw.sceneStatePersistencePath
+    ?? SCENE_STATE_PERSISTENCE_DEFAULTS.relativePath;
+  const debounceMs = raw.sceneStatePersistenceDebounceMs
+    ?? SCENE_STATE_PERSISTENCE_DEFAULTS.debounceMs;
+  if (!Number.isFinite(debounceMs) || debounceMs < 0) {
+    throw persistenceError(
+      'RUNTIME_SCENE_STATE_DEBOUNCE_INVALID',
+      'sceneStatePersistenceDebounceMs must be a non-negative finite number'
+    );
+  }
+  return {
+    enabled: true,
+    filePath: resolvePath(dataDir, configuredPath),
+    debounceMs
+  };
 }
 
 export class SceneStatePersistenceCoordinator extends EventEmitter {
@@ -101,4 +168,31 @@ export class SceneStatePersistenceCoordinator extends EventEmitter {
       timestamp: new Date().toISOString()
     });
   }
+}
+
+export function createSceneStatePersistenceFromHostContext(context, options = {}) {
+  return createSceneStatePersistence({
+    dataDir: context?.dataDir,
+    config: context?.config,
+    ...options
+  });
+}
+
+export function createSceneStatePersistence({
+  dataDir,
+  config,
+  overrides,
+  save,
+  schedule,
+  cancel
+} = {}) {
+  const resolved = resolveSceneStatePersistenceConfig({ dataDir, config, overrides });
+  if (!resolved.enabled) return null;
+  return new SceneStatePersistenceCoordinator({
+    filePath: resolved.filePath,
+    debounceMs: resolved.debounceMs,
+    save,
+    schedule,
+    cancel
+  });
 }

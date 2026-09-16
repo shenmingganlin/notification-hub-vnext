@@ -32,7 +32,7 @@ ADR-002 只做一件事：把被揉在一起的「卡片种类」与「出现方
 设置页 behaviorId
   → 视觉 Profile（plugin/domain/visual-settings.js:83）
   → 运行时快照 behaviorId
-  → scene payload 的 behavior.behaviorProfileId（plugin/runtime/scene-state-projection.js:41）
+  → scene payload 的 behavior.behaviorProfileId（plugin/runtime/scene-state.js；card.behavior）
   → Native card.behavior_profile_id（runtime/transport/named_pipe.cpp:382）
   → profile_id_for(card)（runtime/scene/controller.cpp:213）
   → 行为通道布局分派（runtime/scene/controller.cpp:691-700）

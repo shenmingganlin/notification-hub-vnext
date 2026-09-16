@@ -1,6 +1,6 @@
-import { dirname } from 'node:path';
-import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
+import { readFile } from 'node:fs/promises';
 
+import { replaceFileAtomically } from '../persistence/atomic-file-replace.js';
 import { PROTOCOL_VERSION } from '../protocol/index.js';
 
 export const RECOVERY_SNAPSHOT_VERSION = 1;
@@ -94,6 +94,12 @@ function validateSceneModePayload(payload) {
       || !Number.isInteger(payload.workAreaHeight) || payload.workAreaHeight <= 0
       || typeof payload.dpiScale !== 'number' || !Number.isFinite(payload.dpiScale) || payload.dpiScale <= 0))) {
     throw recoveryError('RUNTIME_RECOVERY_INVALID_PAYLOAD', 'scene.set-mode requires a valid stack or shelf layout payload');
+  }
+  for (const field of ['marginLeft', 'marginRight', 'marginTop', 'marginBottom']) {
+    if (!(field in payload)) continue;
+    if (!Number.isInteger(payload[field]) || payload[field] < 0) {
+      throw recoveryError('RUNTIME_RECOVERY_INVALID_PAYLOAD', 'scene.set-mode requires a valid stack or shelf layout payload');
+    }
   }
   return payload;
 }
@@ -194,28 +200,17 @@ export async function saveRecoverySnapshot(snapshot, filePath) {
   if (typeof filePath !== 'string' || filePath.trim().length === 0) {
     throw recoveryError('RUNTIME_RECOVERY_PATH_INVALID', 'Recovery snapshot path must be a non-empty string');
   }
-
-  const temporaryPath = `${filePath}.tmp-${process.pid}-${Date.now()}`;
   try {
-    await mkdir(dirname(filePath), { recursive: true });
-    await writeFile(temporaryPath, `${serializeRecoverySnapshot(snapshot)}\n`, 'utf8');
-    try {
-      await rename(temporaryPath, filePath);
-    } catch (error) {
-      if (!['EEXIST', 'EPERM', 'ENOTEMPTY'].includes(error.code)) throw error;
-      await rm(filePath, { force: true });
-      await rename(temporaryPath, filePath);
-    }
+    return await replaceFileAtomically(filePath, `${serializeRecoverySnapshot(snapshot)}\n`);
   } catch (error) {
-    await rm(temporaryPath, { force: true }).catch(() => {});
     if (error.code?.startsWith('RUNTIME_RECOVERY_')) throw error;
     throw recoveryError('RUNTIME_RECOVERY_PERSIST_FAILED', 'Failed to persist recovery snapshot', {
       path: filePath,
       cause: error.message,
-      code: error.code
+      code: error.code,
+      ...(error.details ?? {})
     });
   }
-  return filePath;
 }
 
 export async function loadRecoverySnapshot(filePath) {

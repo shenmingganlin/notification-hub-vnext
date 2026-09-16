@@ -85,6 +85,10 @@ test('notification center renders event-first filters and advanced source contro
   assert.match(page, /id="model-service-error-event-filter"/);
   assert.match(page, /producer-filter/);
   assert.match(page, /channel-filter/);
+  assert.match(page, />频道<\/option>/);
+  assert.match(page, />私信<\/option>/);
+  assert.doesNotMatch(page, /桌面卡片持续时间/);
+  assert.doesNotMatch(page, /lifetime-select/);
   assert.match(page, /notification-search/);
   assert.match(page, /&search=/);
   assert.match(page, /filterState/);

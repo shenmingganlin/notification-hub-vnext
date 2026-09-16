@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { stripInternalReflectionBlocks } from '../domain/internal-message-filter.js';
+import { resolveIdentity } from '../domain/agent-identity.js';
 
 function normalizeDiagnostic(error, stage) {
   return {
@@ -435,7 +436,7 @@ function extractSystemWarning(event) {
   };
 }
 
-export function createNotificationEventAdapter({ notificationApi, log = {} } = {}) {
+export function createNotificationEventAdapter({ notificationApi, log = {}, ctx = null } = {}) {
   const seenEventIds = new Set();
   const toolChannelContexts = new Map();
   const diagnostics = [];
@@ -572,7 +573,11 @@ export function createNotificationEventAdapter({ notificationApi, log = {} } = {
               ...(resolveTimestamp(event) ? { createdAt: resolveTimestamp(event) } : {}),
               session: sessionPath || null,
               channel: resolveChannel(event, sessionPath, cachedToolChannel),
-              metadata: notificationMetadata
+              metadata: notificationMetadata,
+              ...(function agentField() {
+                const identity = resolveIdentity({ event, sessionPath, ctx: ctx ?? {} });
+                return identity?.id ? { agent: { id: identity.id, name: identity.name } } : {};
+              }())
             }
           });
         }

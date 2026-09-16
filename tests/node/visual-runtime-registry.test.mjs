@@ -3,8 +3,6 @@ import test from 'node:test';
 
 import { createRuntimeRegistry } from '../../plugin/runtime/runtime-registry.js';
 import { createRuntimeClock } from '../../plugin/runtime/runtime-clock.js';
-import { projectRuntimeToSceneState } from '../../plugin/runtime/scene-state-projection.js';
-import { validateSceneState } from '../../plugin/runtime/scene-state.js';
 
 test('runtime registry creates isolated channels and aggregates metrics', () => {
   const registry = createRuntimeRegistry();
@@ -72,18 +70,3 @@ test('runtime clock expires active cards and leaves queued cards alone', () => {
   assert.deepEqual(channel.snapshot().queuedCardIds, []);
 });
 
-test('scene state projection is read-only and passes the existing SceneState validator', () => {
-  const registry = createRuntimeRegistry();
-  const channel = registry.getOrCreateChannel({ channelId: 'stack.main', behaviorId: 'stack' });
-  channel.enqueue({ cardId: 'card-1', notificationId: 'notice-1', createdAt: 0 });
-  channel.start('card-1', 10);
-  const state = projectRuntimeToSceneState(registry, {
-    updatedAt: new Date(100).toISOString(),
-    workArea: { left: 0, top: 0, width: 1280, height: 720, dpiScale: 1, source: 'test' }
-  });
-  validateSceneState(state);
-  assert.deepEqual(state.cardOrder, ['card-1']);
-  assert.deepEqual(state.behaviorChannels[0].cardOrder, ['card-1']);
-  assert.equal(state.cards[0].behavior.behaviorChannelId, 'stack.main');
-  assert.equal(Object.isFrozen(state), true);
-});

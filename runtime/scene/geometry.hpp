@@ -20,10 +20,10 @@ struct CloseButtonBounds {
 };
 
 inline CardBounds card_bounds(float width, float height) noexcept {
-    // 76px 弹幕条用 10px inset 会把字挤进 56px；矮卡收成 4px。
-    const float inset = height < 96.0f ? 4.0f : 10.0f;
+    // 窗口就是可见卡面；不再写死 10/4 板内缩，否则 gap 0 仍会露 8~20px 缝。
+    // 圆角仍按高度：矮卡/弹幕 10，堆叠卡 14。
     const float radius = height < 96.0f ? 10.0f : 14.0f;
-    return CardBounds{inset, inset, width - inset, height - inset, radius};
+    return CardBounds{0.0f, 0.0f, width, height, radius};
 }
 
 inline CloseButtonBounds close_button_bounds(float width, float height) noexcept {
@@ -40,6 +40,36 @@ inline CloseButtonBounds close_button_bounds(float width, float height) noexcept
 inline bool point_inside_close_button(float x, float y, float width, float height) noexcept {
     const auto bounds = close_button_bounds(width, height);
     return x >= bounds.left && x <= bounds.right && y >= bounds.top && y <= bounds.bottom;
+}
+
+inline int clamp_paint_overflow(int value) noexcept {
+    if (value < 0) return 0;
+    if (value > 240) return 240;
+    return value;
+}
+
+struct PaintBox {
+    int x{};
+    int y{};
+    int width{};
+    int height{};
+};
+
+inline PaintBox paint_box_from_hit_box(int x, int y, int width, int height, int overflow) noexcept {
+    overflow = clamp_paint_overflow(overflow);
+    return PaintBox{x - overflow, y - overflow, width + (overflow * 2), height + (overflow * 2)};
+}
+
+inline void paint_origin_to_hit_origin(int& x, int& y, int overflow) noexcept {
+    overflow = clamp_paint_overflow(overflow);
+    x += overflow;
+    y += overflow;
+}
+
+inline void client_to_hit_box(float& x, float& y, int overflow) noexcept {
+    overflow = clamp_paint_overflow(overflow);
+    x -= static_cast<float>(overflow);
+    y -= static_cast<float>(overflow);
 }
 
 inline bool point_inside_card(float x, float y, float width, float height) noexcept {

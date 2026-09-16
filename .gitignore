@@ -24,6 +24,14 @@ diagnostics-output/
 # Local visual registry snapshots written by runs/tests at repo root
 /visual-assets.json
 /visual-registry.json
+/font-assets.json
+/sound-assets.json
+/Hanadata/
+/agent-avatar-cache/
+/_css_extract.txt
+/diagnostic-*.json
+/tmp-diagnostics*.json
+/*.png
 
 # Local configuration and secrets
 .local/

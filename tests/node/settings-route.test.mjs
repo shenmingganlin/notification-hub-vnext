@@ -23,12 +23,15 @@ function createRouteHarness() {
     delete(path, handler) { routes.set(`DELETE ${path}`, handler); }
   };
   const json = (value, status = 200) => ({ value, status, kind: 'json' });
-  const html = (value, status = 200) => ({ value, status, kind: 'html' });
-  const contextFor = (body = {}, url = '/settings') => ({
-    req: { url, json: async () => body, parseBody: async () => body, param: (key) => ({ kind: 'sound', ruleId: 'sound-1' }[key]) },
-    json,
-    html
-  });
+  const contextFor = (body = {}, url = '/settings') => {
+    const headers = {};
+    return {
+      req: { url, json: async () => body, parseBody: async () => body, param: (key) => ({ kind: 'sound', ruleId: 'sound-1' }[key]) },
+      json,
+      header(name, value) { headers[name] = value; },
+      html(value, status = 200) { return { value, status, kind: 'html', headers: { ...headers } }; }
+    };
+  };
   return { app, routes, contextFor };
 }
 
@@ -113,8 +116,21 @@ test('settings page is one shell with internal settings views', async () => {
   assert.doesNotMatch(page.value, /mountInitialView/);
   assert.match(page.value, /scripts\.forEach/);
   assert.match(page.value, /settings-content\?view=/);
+  assert.match(page.value, /_ts=/);
+  assert.match(page.value, /cache: "no-store"/);
   assert.match(page.value, /window\.hana\.api\.fetch/);
   assert.match(page.value, /notification-hub-view-before-unload/);
+  assert.match(page.value, /replaceChildren\(fragment\)/);
+  assert.match(page.value, /addEventListener\("wheel"/);
+  assert.match(page.value, /closest\("input, select, textarea"\)/);
+  assert.doesNotMatch(page.value, /settings-visual-park/);
+  assert.doesNotMatch(page.value, /function parkVisualView/);
+  assert.doesNotMatch(page.value, /function restoreVisualPark/);
+  assert.match(page.value, /data-settings-view-root="visual"/);
+  const visualFragment = harness.routes.get('GET /settings-content')(harness.contextFor({}, '/settings-content?view=visual'));
+  assert.equal(visualFragment.headers['Cache-Control'], 'no-store');
+  assert.match(visualFragment.value, /data-settings-view-style/);
+  assert.match(visualFragment.value, /data-settings-view-root="visual"/);
   assert.match(page.value, /SETTINGS_VIEW_SCRIPT_MOUNT_FAILED/);
   assert.doesNotMatch(page.value, /document\.open\(\)/);
   assert.doesNotMatch(page.value, /document\.write\(/);

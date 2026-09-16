@@ -28,6 +28,7 @@ struct SceneCardState {
     std::string id;
     std::string title;
     std::string body;
+    std::string assistant_name;
     SceneWindowState window{};
     int layout_width{};
     int layout_height{};
@@ -40,6 +41,7 @@ struct SceneCardState {
     bool behavior_specified{};
     std::string behavior_profile_id;
     std::string behavior_channel_id;
+    std::vector<CardPart> parts;
 };
 
 class RuntimeSceneController {
@@ -60,8 +62,12 @@ public:
         std::string_view reason = "scene.dismiss");
     bool apply_stack_layout(const StackLayoutOptions& options, std::string& error_code, std::string& error_message);
     void configure_visual_assets(const std::vector<VisualAssetRecord>& assets, std::string_view root_dir);
+    void configure_font_assets(const std::vector<VisualAssetRecord>& assets, std::string_view root_dir);
+    void configure_agent_avatars(const std::vector<VisualAssetRecord>& assets, std::string_view root_dir);
     bool has_visual_asset(std::string_view asset_id) const noexcept;
+    bool has_font_asset(std::string_view asset_id) const noexcept;
     std::size_t visual_asset_count() const noexcept;
+    std::size_t font_asset_count() const noexcept;
     bool get_window_state(SceneWindowState& state) const noexcept;
     std::string state_json() const;
     std::string cards_json() const;

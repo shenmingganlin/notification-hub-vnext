@@ -1,9 +1,10 @@
 # ADR-002：卡片种类与出现方式（行为）轴分离
 
-- 状态：Proposed
+- 状态：Superseded（被 ADR-005 取代）
 - 日期：2026-09-12
 - 范围：Notification Hub 视觉系统的领域模型、运行时投影与设置页
 - 关联：`docs/superpowers/plans/2026-08-18-visual-system-master-plan.md` §4、§5、§6；ADR-001
+- 注：`plugin/domain/card-composition-contract.js` 已删除。内容结构词表不再作为权威源，以 ADR-005 为准。
 
 ## 背景
 

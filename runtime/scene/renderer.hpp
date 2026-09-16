@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <memory>
 #include <string_view>
+#include <vector>
 
 #include "visual.hpp"
 
@@ -25,16 +26,18 @@ public:
 
     bool initialize(void* native_window, int width, int height);
     bool resize(int width, int height);
-    bool draw(std::wstring_view title, std::wstring_view body, const VisualStyle& visual = {}, bool capture_output = false);
+    bool draw(std::wstring_view title, std::wstring_view body, const VisualStyle& visual = {}, bool capture_output = false, const std::vector<CardPart>& parts = {}, bool hovered = false, std::wstring_view assistant_name = {});
     bool capture_pixels() const noexcept;
     bool sample_pixel(int x, int y, Pixel& pixel) const noexcept;
     void reset() noexcept;
     bool is_ready() const noexcept;
+    bool present_layered();
+    bool layered_present_origin(int& x, int& y) const noexcept;
 
 private:
     struct Impl;
-    bool capture_offscreen(std::wstring_view title, std::wstring_view body, const VisualStyle& visual);
-    bool load_background_bitmap(const VisualStyle& visual);
+    bool capture_offscreen(std::wstring_view title, std::wstring_view body, const VisualStyle& visual, const std::vector<CardPart>& parts, bool hovered, bool wait_for_wallpaper, std::wstring_view assistant_name = {});
+    bool ensure_background_bitmap(const VisualStyle& visual, float dest_left, float dest_top, float dest_right, float dest_bottom, bool wait_for_wallpaper);
     bool update_layered_window();
     std::unique_ptr<Impl> impl_;
 };

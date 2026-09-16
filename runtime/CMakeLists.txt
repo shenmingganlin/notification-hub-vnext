@@ -122,6 +122,7 @@ add_test(NAME runtime_ticker_self_test COMMAND notification-hub-runtime --ticker
 add_test(NAME runtime_dpi_self_test COMMAND notification-hub-runtime --dpi-self-test)
 add_test(NAME runtime_dpi_transition_self_test COMMAND notification-hub-runtime --dpi-transition-self-test)
 add_test(NAME runtime_scene_controller_self_test COMMAND notification-hub-runtime --scene-controller-self-test)
+add_test(NAME runtime_root_part_self_test COMMAND notification-hub-runtime --root-part-self-test)
 add_test(NAME runtime_controller_desktop_visual_self_test COMMAND notification-hub-runtime --controller-desktop-visual-self-test)
 add_test(NAME runtime_layout_self_test COMMAND notification-hub-runtime --layout-self-test)
 add_test(NAME runtime_work_area_self_test COMMAND notification-hub-runtime --work-area-self-test)

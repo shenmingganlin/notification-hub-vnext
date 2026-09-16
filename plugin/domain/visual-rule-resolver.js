@@ -50,7 +50,9 @@ function cardDecision(profile, strategy = null) {
     // Ticker 参数随决策下发（仅在 profile 显式携带时出现）。
     ...(profile.ticker ? { ticker: profile.ticker } : {}),
     appearance: active.appearance,
-    space: active.properties?.space
+    space: active.properties?.space,
+    ...(active.parts ? { parts: active.parts } : {}),
+    ...(active.glossary ? { glossary: active.glossary } : {})
   };
 }
 

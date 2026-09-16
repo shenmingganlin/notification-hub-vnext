@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
-import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
+import { readFile, rename, rm } from 'node:fs/promises';
 import path from 'node:path';
+import { replaceFileAtomically } from '../persistence/atomic-file-replace.js';
 import { SOUND_PACKAGE_MAX_ASSET_BYTES } from './sound-package.js';
 import { SOUND_ASSET_FORMATS, createSoundAsset, normalizeSoundId } from './custom-sound-asset.js';
 import { normalizeSoundBindingInput, soundIdForBinding } from './sound-binding.js';
@@ -87,29 +88,25 @@ export async function importSoundAsset({ file, filePath, filename, assetRoot, re
   const root = path.resolve(assetRoot);
   const target = resolveTarget(root, asset.relativePath);
   const previousTarget = previous ? resolveTarget(root, previous.relativePath) : null;
-  const temporary = `${target}.tmp-${process.pid}-${Date.now()}`;
+  const samePath = Boolean(previousTarget && previousTarget === target);
   const backup = `${previousTarget || target}.backup-${process.pid}-${Date.now()}`;
   let movedPrevious = false;
   let registryChanged = false;
   try {
-    await mkdir(path.dirname(target), { recursive: true });
-    await writeFile(temporary, input.data, { flag: 'wx' });
-    if (previous) {
+    if (previous && previousTarget && !samePath) {
       try { await rename(previousTarget, backup); movedPrevious = true; } catch (cause) { if (cause.code !== 'ENOENT') throw cause; }
     }
-    await rename(temporary, target);
+    await replaceFileAtomically(target, input.data);
     if (previous) registry.remove(normalizedId);
     registry.add(asset);
     registryChanged = true;
     if (typeof commit === 'function') await commit(asset);
-    await rm(backup, { force: true });
-    if (previousTarget && previousTarget !== target) await rm(previousTarget, { force: true });
+    if (movedPrevious) await rm(backup, { force: true });
     return Object.freeze({ asset, path: target, replaced: Boolean(previous), binding: normalizedBinding });
   } catch (cause) {
-    await rm(temporary, { force: true }).catch(() => {});
     if (registryChanged) registry.remove(normalizedId);
     if (previous && !registry.get(normalizedId)) registry.add(previous);
-    await rm(target, { force: true }).catch(() => {});
+    if (!samePath) await rm(target, { force: true }).catch(() => {});
     if (movedPrevious) await rename(backup, previousTarget).catch(() => {});
     if (cause.code?.startsWith('SOUND_ASSET_')) throw cause;
     throw importerError('SOUND_ASSET_IMPORT_FAILED', '音频导入失败', { cause: cause.message });

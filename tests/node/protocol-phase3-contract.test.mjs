@@ -25,6 +25,8 @@ const envelope = (overrides = {}) => ({
 
 test('protocol registry and schema expose every non-visual command and event', () => {
   assert.ok(COMMAND_TYPES.includes('visual-assets.configure'));
+  assert.ok(COMMAND_TYPES.includes('font-assets.configure'));
+  assert.ok(COMMAND_TYPES.includes('agent-avatars.configure'));
   assert.ok(COMMAND_TYPES.includes('audio.play'));
   assert.deepEqual(EVENT_TYPES, ['scene.changed', 'audio.voice_finished']);
   assert.ok(schema.properties.type.enum.includes('visual-assets.configure'));

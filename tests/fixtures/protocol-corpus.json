@@ -26,6 +26,22 @@
     },
     {
       "protocolVersion": 1,
+      "requestId": "req-corpus-fonts",
+      "traceId": "trace-corpus-fonts",
+      "type": "font-assets.configure",
+      "timestamp": "2026-08-01T00:00:00.000Z",
+      "payload": { "version": 1, "assets": [] }
+    },
+    {
+      "protocolVersion": 1,
+      "requestId": "req-corpus-agent-avatars",
+      "traceId": "trace-corpus-agent-avatars",
+      "type": "agent-avatars.configure",
+      "timestamp": "2026-08-01T00:00:00.000Z",
+      "payload": { "version": 1, "items": [] }
+    },
+    {
+      "protocolVersion": 1,
       "requestId": "evt-corpus-scene",
       "traceId": "trace-corpus-scene",
       "type": "event",

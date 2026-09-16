@@ -91,6 +91,8 @@ export function visualPreviewFingerprint(profile = {}) {
   return JSON.stringify({
     behaviorId: profile?.behaviorId ?? 'stack',
     anchor: space.anchor ?? 'bottom-right',
+    grow: space.grow ?? null,
+    wrap: space.wrap ?? null,
     marginLeft: space.marginLeft ?? legacyMargin,
     marginRight: space.marginRight ?? legacyMargin,
     marginTop: space.marginTop ?? legacyMargin,

@@ -325,6 +325,31 @@ test('RuntimeHostAdapter classifies transport disconnects as recoverable retry d
   await adapter.stop();
 });
 
+test('RuntimeHostAdapter does not mark TRANSPORT_ACK_TIMEOUT as reconnecting', async () => {
+  const events = [];
+  let client;
+  const adapter = new RuntimeHostAdapter({
+    context: { dataDir: 'C:\\Hana\\data', config: { sceneStatePersistenceEnabled: false } },
+    runtimePath: 'runtime.exe',
+    pipeName: '\\\\.\\pipe\\host-adapter-ack-timeout',
+    loadPlan: async () => ({ source: 'empty', snapshot: createRecoverySnapshot(), diagnostics: [] }),
+    managerFactory: (options) => new FakeManager(options, events),
+    clientFactory: (options) => {
+      client = new FakeClient(options, events);
+      return client;
+    }
+  });
+
+  await adapter.start();
+  client.emit('diagnostic', {
+    code: 'TRANSPORT_ACK_TIMEOUT',
+    message: 'ACK timed out for req-node-914',
+    details: { requestId: 'req-node-914', requestType: 'scene.create' }
+  });
+  assert.equal(adapter.getRuntimeStatus().state, 'running');
+  await adapter.stop();
+});
+
 test('RuntimeHostAdapter reports stop-failed without masking the stop error', async () => {
   const events = [];
   let manager;

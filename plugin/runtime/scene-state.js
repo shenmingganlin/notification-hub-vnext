@@ -140,10 +140,12 @@ function validateNativeVisual(visual) {
       || !VISUAL_CLOSE_BUTTON_POSITIONS.has(interaction.closeButtonPosition)
       || !Number.isInteger(interaction.timeoutMs)
       || interaction.timeoutMs < 1000
-      || interaction.timeoutMs > 60000) {
+      || interaction.timeoutMs > 120000
+      || ('hoverHighlight' in interaction && interaction.hoverHighlight !== true)
+      || ('autoDismiss' in interaction && interaction.autoDismiss !== true)) {
       throw sceneStateError('RUNTIME_SCENE_STATE_CARD_INVALID', 'SceneState card visual interaction is invalid');
     }
-    assertExactFields(interaction, new Set(['dismissMode', 'closeButtonPosition', 'timeoutMs']), 'SceneState card visual interaction', 'RUNTIME_SCENE_STATE_CARD_INVALID');
+    assertExactFields(interaction, new Set(['dismissMode', 'closeButtonPosition', 'timeoutMs', 'hoverHighlight', 'autoDismiss']), 'SceneState card visual interaction', 'RUNTIME_SCENE_STATE_CARD_INVALID');
   }
   const appearance = visual.appearance;
   if (!isRecord(appearance)
@@ -158,17 +160,20 @@ function validateNativeVisual(visual) {
     || appearance.backgroundPadding > 40
     || !Number.isInteger(appearance.borderRadius)
     || appearance.borderRadius < 0
-    || appearance.borderRadius > 48
+    || appearance.borderRadius > 480
     || typeof appearance.opacity !== 'number'
     || !Number.isFinite(appearance.opacity)
     || appearance.opacity < 0
     || appearance.opacity > 1
-    || ('backgroundAssetId' in appearance && (typeof appearance.backgroundAssetId !== 'string' || !VISUAL_ASSET_ID.test(appearance.backgroundAssetId)))) {
+    || ('backgroundAssetId' in appearance && (typeof appearance.backgroundAssetId !== 'string' || !VISUAL_ASSET_ID.test(appearance.backgroundAssetId)))
+    || ('borderWidth' in appearance && (!Number.isInteger(appearance.borderWidth) || appearance.borderWidth < 0 || appearance.borderWidth > 32))
+    || ('borderColor' in appearance && (typeof appearance.borderColor !== 'string' || !VISUAL_BACKGROUND_COLOR.test(appearance.borderColor)))
+    || ('paintOverflow' in appearance && (!Number.isInteger(appearance.paintOverflow) || appearance.paintOverflow < 0 || appearance.paintOverflow > 240))) {
     throw sceneStateError('RUNTIME_SCENE_STATE_CARD_INVALID', 'SceneState card visual appearance is invalid');
   }
   assertExactFields(
     appearance,
-    new Set(['size', 'aspectRatio', 'backgroundColor', 'backgroundAssetId', 'backgroundFit', 'backgroundPadding', 'borderRadius', 'opacity']),
+    new Set(['size', 'aspectRatio', 'backgroundColor', 'backgroundAssetId', 'backgroundFit', 'backgroundPadding', 'borderRadius', 'opacity', 'borderWidth', 'borderColor', 'paintOverflow']),
     'SceneState card visual appearance',
     'RUNTIME_SCENE_STATE_CARD_INVALID'
   );

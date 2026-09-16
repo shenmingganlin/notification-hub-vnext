@@ -2,7 +2,11 @@ import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
 import test from 'node:test';
 
-import { RuntimeProcessManager } from '../../plugin/runtime/process-manager.js';
+import {
+  RuntimeProcessManager,
+  sceneStateFingerprint,
+  sceneStateSyncDelayMs
+} from '../../plugin/runtime/process-manager.js';
 import { SceneStatePersistenceCoordinator } from '../../plugin/runtime/scene-state-persistence.js';
 import { addRecoveryEntry, createRecoverySnapshot } from '../../plugin/runtime/recovery-snapshot.js';
 
@@ -436,4 +440,27 @@ test('RuntimeProcessManager ignores late SceneState responses after stop begins'
 
   await persistence.flush();
   assert.deepEqual(saved, [{ snapshot: nativeChangedSnapshot, filePath: 'scene-state.json' }]);
+});
+
+test('sceneStateFingerprint ignores updatedAt without cloning the snapshot', () => {
+  const left = {
+    ...nativeChangedSnapshot,
+    updatedAt: '2026-08-01T12:00:01.000Z',
+    cards: [{ id: 'card-a', title: 'A', body: 'BODY'.repeat(50), x: 1, y: 2 }]
+  };
+  const right = {
+    ...left,
+    updatedAt: '2026-08-01T12:00:09.000Z'
+  };
+  assert.equal(sceneStateFingerprint(left), sceneStateFingerprint(right));
+  assert.notEqual(
+    sceneStateFingerprint(left),
+    sceneStateFingerprint({ ...left, cards: [{ ...left.cards[0], x: 9 }] })
+  );
+});
+
+test('sceneStateSyncDelayMs backs off only for production idle polling', () => {
+  assert.equal(sceneStateSyncDelayMs({ intervalMs: 500, cardCount: 0 }), 2000);
+  assert.equal(sceneStateSyncDelayMs({ intervalMs: 500, cardCount: 2 }), 500);
+  assert.equal(sceneStateSyncDelayMs({ intervalMs: 5, cardCount: 0 }), 5);
 });

@@ -67,7 +67,7 @@ test('skin registry rejects invalid skin data', () => {
   const registry = createSkinRegistry();
   assert.throws(() => registry.register('bad id!', {}), (e) => e.code === 'VISUAL_SKIN_ID_INVALID');
   assert.throws(() => registry.register('skin.custom', 'not-a-plain-object'), (e) => e.code === 'VISUAL_SKIN_INVALID');
-  assert.throws(() => registry.register('skin.custom', { decoration: { borderRadius: 60 } }), (e) => e.code === 'CARD_VISUAL_FIELD_INVALID');
+  assert.throws(() => registry.register('skin.custom', { decoration: { borderRadius: 481 } }), (e) => e.code === 'CARD_VISUAL_FIELD_INVALID');
 });
 
 test('SKIN_REGISTRY_DEFAULTS has default skin', () => {

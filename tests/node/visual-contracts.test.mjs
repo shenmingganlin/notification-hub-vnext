@@ -9,10 +9,6 @@ import {
   CHANNEL_VISIBILITIES,
   createVisualChannelContract
 } from '../../plugin/domain/visual-channel-contract.js';
-import {
-  CARD_TYPE_IDS,
-  createCardCompositionContract
-} from '../../plugin/domain/card-composition-contract.js';
 
 test('behavior contract separates behavior identity from lifecycle and properties', () => {
   const behavior = createVisualBehaviorContract({
@@ -66,6 +62,7 @@ test('channel contract owns behavior composition and resource limits', () => {
   assert.equal(channel.visibility, 'private');
   assert.equal(channel.policy.maxActive, 1000);
   assert.equal(channel.policy.maxParticles, 0);
+  assert.deepEqual(CHANNEL_VISIBILITIES, ['private', 'shared', 'public']);
   assert.ok(Object.isFrozen(channel));
 });
 
@@ -83,32 +80,3 @@ test('channel contract accepts legacy channel fields through safe defaults', () 
   assert.equal(channel.owner.kind, 'system');
 });
 
-test('composition contract keeps content, properties, skin and effects as references', () => {
-  const composition = createCardCompositionContract({
-    cardTypeId: 'message',
-    contentSlots: { assistantName: true, avatar: true, title: true, body: true },
-    propertiesId: 'message.default',
-    skinId: 'mint-terminal',
-    effectConfigId: 'fade-scale'
-  });
-
-  assert.equal(composition.cardTypeId, 'message');
-  assert.equal(composition.contentSlots.body, true);
-  assert.equal(composition.propertiesId, 'message.default');
-  assert.equal(composition.skinId, 'mint-terminal');
-  assert.equal(composition.effectConfigId, 'fade-scale');
-  assert.ok(CARD_TYPE_IDS.includes('message'));
-  assert.ok(Object.isFrozen(composition));
-});
-
-test('composition contract rejects executable or arbitrary style payloads', () => {
-  assert.throws(
-    () => createCardCompositionContract({ cardTypeId: 'minimal', renderer: 'custom.js' }),
-    (error) => error.code === 'CARD_COMPOSITION_FIELD_UNKNOWN'
-  );
-  assert.throws(
-    () => createCardCompositionContract({ cardTypeId: 'minimal', style: { cssText: 'body{}' } }),
-    (error) => error.code === 'CARD_COMPOSITION_FIELD_UNKNOWN'
-  );
-  assert.deepEqual(CHANNEL_VISIBILITIES, ['private', 'shared', 'public']);
-});

@@ -23,7 +23,8 @@ test('ticker settings accept a full valid payload and freeze it', () => {
     hoverPause: true,
     overflow: 'queue',
     speedRandom: true,
-    clickThrough: false
+    clickThrough: false,
+    direction: 'right'
   });
   assert.deepEqual(ticker, {
     speedPxPerSec: 800,
@@ -35,7 +36,8 @@ test('ticker settings accept a full valid payload and freeze it', () => {
     speedRandom: true,
     clickThrough: false,
     hoverPause: true,
-    overflow: 'queue'
+    overflow: 'queue',
+    direction: 'right'
   });
   assert.ok(Object.isFrozen(ticker));
 });
@@ -59,7 +61,9 @@ test('ticker rejects out-of-range values', () => {
     { hoverPause: 'yes' },
     { overflow: 'drop' },
     { speedRandom: 'yes' },
-    { clickThrough: 'yes' }
+    { clickThrough: 'yes' },
+    { direction: 'up' },
+    { direction: 'vertical' }
   ]) {
     assert.throws(() => createTickerSettings(bad), (error) => error.code === 'VISUAL_PROFILE_TICKER_INVALID',
       `expected VISUAL_PROFILE_TICKER_INVALID for ${JSON.stringify(bad)}`);
@@ -106,7 +110,8 @@ test('native projection clamps out-of-range ticker values', () => {
     minGapPx: 24,
     clickThrough: true,
     hoverPause: false,
-    overflow: 'avoid'
+    overflow: 'avoid',
+    direction: 'left'
   });
 });
 
@@ -123,8 +128,24 @@ test('native projection forwards valid ticker values unchanged', () => {
     minGapPx: 64,
     clickThrough: true,
     hoverPause: false,
-    overflow: 'avoid'
+    overflow: 'avoid',
+    direction: 'left'
   });
+});
+
+test('native projection forwards ticker direction and falls back to left', () => {
+  const right = projectNativeVisualPayload({
+    ticker: { speedPxPerSec: 400, band: 'top', bandRatio: 0.28, trackCount: 3, minGapPx: 64, direction: 'right' }
+  });
+  assert.equal(right.ticker.direction, 'right');
+  const missing = projectNativeVisualPayload({
+    ticker: { speedPxPerSec: 400, band: 'top', bandRatio: 0.28, trackCount: 3, minGapPx: 64 }
+  });
+  assert.equal(missing.ticker.direction, 'left');
+  const invalid = projectNativeVisualPayload({
+    ticker: { speedPxPerSec: 400, band: 'top', bandRatio: 0.28, trackCount: 3, minGapPx: 64, direction: 'up' }
+  });
+  assert.equal(invalid.ticker.direction, 'left');
 });
 
 test('resolveTickerMotion rolls speed only when speedRandom is on', () => {

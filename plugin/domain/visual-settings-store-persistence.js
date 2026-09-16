@@ -1,6 +1,6 @@
 import { EventEmitter } from 'node:events';
-import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
-import path from 'node:path';
+import { readFile } from 'node:fs/promises';
+import { replaceFileAtomically } from '../persistence/atomic-file-replace.js';
 import { createVisualSettingsStoreSnapshot, VISUAL_SETTINGS_STORE_VERSION } from './visual-settings-store.js';
 
 const fail = (code, message, details = {}) => Object.assign(new Error(message), { code, details });
@@ -9,9 +9,8 @@ const decode = (text) => { let value; try { value = JSON.parse(text); } catch { 
 
 export async function saveVisualSettingsSnapshot(snapshot, filePath) {
   if (typeof filePath !== 'string' || !filePath.trim()) throw fail('VISUAL_SETTINGS_PATH_INVALID', 'Visual settings path must be non-empty');
-  const temporaryPath = `${filePath}.tmp-${process.pid}-${Date.now()}`;
-  try { await mkdir(path.dirname(filePath), { recursive: true }); await writeFile(temporaryPath, encode(snapshot), { encoding: 'utf8', flag: 'wx' }); await rename(temporaryPath, filePath); return filePath; }
-  catch (cause) { await rm(temporaryPath, { force: true }).catch(() => {}); throw fail('VISUAL_SETTINGS_PERSIST_FAILED', 'Failed to persist visual settings', { path: filePath, cause: cause.message }); }
+  try { return await replaceFileAtomically(filePath, encode(snapshot)); }
+  catch (cause) { if (cause.code?.startsWith('VISUAL_SETTINGS_')) throw cause; throw fail('VISUAL_SETTINGS_PERSIST_FAILED', 'Failed to persist visual settings', { path: filePath, cause: cause.message }); }
 }
 export async function loadVisualSettingsSnapshot(filePath) {
   try { return decode(await readFile(filePath, 'utf8')); }

@@ -1,5 +1,6 @@
 import path from 'node:path';
-import { access, cp, mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
+import { access, cp, mkdir, readFile } from 'node:fs/promises';
+import { replaceFileAtomically } from '../persistence/atomic-file-replace.js';
 
 const PRODUCT_DATA_FOLDER = 'HanaAgent';
 const PLUGIN_DATA_FOLDER = 'notification-hub-vnext';
@@ -31,15 +32,8 @@ export async function migrateSoundAssetStorage(paths) {
   const known = new Set(current.assets.map((asset) => asset?.soundId).filter(Boolean));
   const additions = legacy.assets.filter((asset) => asset?.soundId && !known.has(asset.soundId));
   if (additions.length === 0 && await exists(paths.registryPath)) return { migrated: false, reason: 'already-merged' };
-  const merged = JSON.stringify({ version: 1, assets: [...current.assets, ...additions] }) + '\n';
-  const temporaryPath = `${paths.registryPath}.migration-${process.pid}-${Date.now()}`;
-  try {
-    await writeFile(temporaryPath, merged, { encoding: 'utf8', flag: 'wx' });
-    await rename(temporaryPath, paths.registryPath);
-  } catch (error) {
-    await rm(temporaryPath, { force: true }).catch(() => {});
-    throw error;
-  }
+  const merged = `${JSON.stringify({ version: 1, assets: [...current.assets, ...additions] })}\n`;
+  await replaceFileAtomically(paths.registryPath, merged);
   return { migrated: true, from: paths.legacyRoot, to: paths.root, importedAssets: additions.length };
 }
 

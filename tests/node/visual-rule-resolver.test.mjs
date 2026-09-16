@@ -154,3 +154,43 @@ test('visual resolver safely falls back for invalid input or profile', () => {
   });
   assert.ok(Object.isFrozen(result));
 });
+
+test('visual resolver carries part paint from the active card type', () => {
+  const result = resolveVisualRule({
+    visualInput: { labels: ['chat'], categoryId: 'chat', status: 'ok', importance: 'normal' },
+    profile: {
+      ...profile,
+      card: {
+        activeType: 'minimal',
+        types: {
+          minimal: {
+            ...minimalType,
+            parts: { title: { fill: '#ffaa00', strokeWidth: 2, stroke: '#00ffaa' } }
+          }
+        }
+      }
+    }
+  });
+  assert.deepEqual(result.parts, { title: { fill: '#ffaa00', stroke: '#00ffaa', strokeWidth: 2 } });
+});
+
+test('visual resolver carries glossary names from the active card type', () => {
+  const result = resolveVisualRule({
+    visualInput: { labels: ['chat'], categoryId: 'chat', status: 'ok', importance: 'normal' },
+    profile: {
+      ...profile,
+      card: {
+        activeType: 'minimal',
+        types: {
+          minimal: {
+            ...minimalType,
+            glossary: { '标题色': '#f2fff9' },
+            parts: { title: { fill: '标题色' } }
+          }
+        }
+      }
+    }
+  });
+  assert.deepEqual(result.glossary, { '标题色': '#f2fff9' });
+  assert.deepEqual(result.parts, { title: { fill: '标题色' } });
+});

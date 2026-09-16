@@ -20,15 +20,17 @@ export const TICKER_DEFAULTS = Object.freeze({
   speedRandom: false,
   clickThrough: true,
   hoverPause: false,
-  overflow: 'avoid'
+  overflow: 'avoid',
+  direction: 'left'
 });
 export const TICKER_BANDS = Object.freeze(['top', 'bottom']);
+export const TICKER_DIRECTIONS = Object.freeze(['left', 'right']);
 export const TICKER_OVERFLOWS = Object.freeze(['avoid', 'queue']);
 export const TICKER_SPEED_BOUNDS = Object.freeze({ min: 150, max: 800 });
 export const TICKER_BAND_RATIO_BOUNDS = Object.freeze({ min: 0.15, max: 1 });
 export const TICKER_MIN_GAP_BOUNDS = Object.freeze({ min: 24, max: 160 });
 export const TICKER_TRACK_GAP_BOUNDS = Object.freeze({ min: 0, max: 48 });
-const TICKER_FIELDS = Object.freeze(['speedPxPerSec', 'band', 'bandRatio', 'trackCount', 'trackGapPx', 'minGapPx', 'speedRandom', 'clickThrough', 'hoverPause', 'overflow']);
+const TICKER_FIELDS = Object.freeze(['speedPxPerSec', 'band', 'bandRatio', 'trackCount', 'trackGapPx', 'minGapPx', 'speedRandom', 'clickThrough', 'hoverPause', 'overflow', 'direction']);
 export { createCardVisualSettings, cardVisualDefaults, createCardProperties, createCardSkin, createCardEffect } from './card-visual-settings.js';
 export const VISUAL_CATEGORIES = Object.freeze(['chat', 'channel', 'tool', 'error', 'plugin', 'model_service']);
 export const VISUAL_PRESETS = Object.freeze(['minimal', 'soft', 'accent', 'warning', 'critical']);
@@ -137,7 +139,9 @@ export function createTickerSettings(input = {}) {
   if (typeof hoverPause !== 'boolean') throw fail('VISUAL_PROFILE_TICKER_INVALID', 'ticker.hoverPause must be boolean', { field: 'ticker.hoverPause' });
   const overflow = input.overflow ?? TICKER_DEFAULTS.overflow;
   if (!TICKER_OVERFLOWS.includes(overflow)) throw fail('VISUAL_PROFILE_TICKER_INVALID', 'ticker.overflow must be "avoid" or "queue"', { field: 'ticker.overflow' });
-  return freeze({ speedPxPerSec, band, bandRatio, trackCount, trackGapPx, minGapPx, speedRandom, clickThrough, hoverPause, overflow });
+  const direction = input.direction ?? TICKER_DEFAULTS.direction;
+  if (!TICKER_DIRECTIONS.includes(direction)) throw fail('VISUAL_PROFILE_TICKER_INVALID', 'ticker.direction must be "left" or "right"', { field: 'ticker.direction' });
+  return freeze({ speedPxPerSec, band, bandRatio, trackCount, trackGapPx, minGapPx, speedRandom, clickThrough, hoverPause, overflow, direction });
 }
 
 export function rollTickerSpeed(random = Math.random) {

@@ -5,7 +5,7 @@ import {
   createSceneStatePersistence,
   createSceneStatePersistenceFromHostContext,
   resolveSceneStatePersistenceConfig
-} from '../../plugin/runtime/scene-state-config.js';
+} from '../../plugin/runtime/scene-state-persistence.js';
 
 test('SceneState persistence config resolves a relative path below dataDir', () => {
   const resolved = resolveSceneStatePersistenceConfig({

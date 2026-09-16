@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { randomUUID } from 'node:crypto';
 import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
 import { EventEmitter } from 'node:events';
 import os from 'node:os';
@@ -85,6 +86,17 @@ class FakeAdapter extends EventEmitter {
             }
           };
         }
+        if (type === 'visual-assets.configure' || type === 'font-assets.configure' || type === 'agent-avatars.configure') {
+          return {
+            type: 'ack',
+            payload: {
+              result: {
+                applied: true,
+                assetCount: Array.isArray(payload?.assets) ? payload.assets.length : 0
+              }
+            }
+          };
+        }
         return { type: 'ack', payload: { result: { sceneCards: [] } } };
       }
     };
@@ -121,7 +133,7 @@ function context(config = {}, extras = {}) {
   const logs = [];
   return {
     pluginDir: 'C:\\Hana\\plugins\\notification-hub-vnext',
-    dataDir: 'C:\\Hana\\data\\notification-hub-vnext',
+    dataDir: path.join(os.tmpdir(), `nh-vnext-lifecycle-${randomUUID()}`),
     config,
     log: {
       info: (...args) => logs.push(['info', ...args]),
@@ -452,6 +464,7 @@ test('active audio engine backend falls back to legacy playCue after engine fail
 test('promotion queue is closed during plugin unload and rejects pending work', async () => {
   const plugin = new NotificationHubVNextPlugin(context({ notificationPersistenceEnabled: false }), { adapterFactory: () => new FakeAdapter() });
   await plugin.onload();
+  plugin.promoteNotificationScene = () => new Promise(() => {});
   const pending = plugin.notificationPromotionQueue.enqueue({ record: { notificationId: 'unload-pending' }, promotedCard: {}, channelId: 'test' });
   const rejection = assert.rejects(pending, /promotion queue closed/);
   await plugin.onunload();
@@ -490,7 +503,7 @@ test('vNext plugin owns one isolated RuntimeHostAdapter through onload/onunload'
 
   await plugin.onload();
   assert.equal(pluginName, 'notification-hub-vnext');
-  assert.equal(pluginVersion, '0.1.6');
+  assert.equal(pluginVersion, '0.1.7');
   assert.equal(adapter.started, 1);
   assert.equal(plugin.runtimeHost, adapter);
   assert.equal(ctx.logs.some(([level, ...args]) => level === 'debug' && args.some((value) => JSON.stringify(value).includes('TEST_DIAGNOSTIC'))), true);
@@ -1150,8 +1163,9 @@ test('vNext plugin restores and applies settings after Runtime startup', async (
   assert.deepEqual(events, ['restore', 'observe']);
   assert.equal(plugin.settingsStore.getSnapshot().revision, 4);
   assert.equal(plugin.settingsStore.getSnapshot().status, 'applied');
-  assert.equal(adapter.client.requests.filter((request) => request.type === 'config.update').length, 1);
-  assert.equal(adapter.client.requests.at(-1).payload.revision, 4);
+  const configUpdates = adapter.client.requests.filter((request) => request.type === 'config.update');
+  assert.equal(configUpdates.length, 1);
+  assert.equal(configUpdates.at(-1).payload.revision, 4);
   const settingsStatus = await plugin.getSettingsStatus();
   assert.equal(settingsStatus.revision, 4);
   assert.equal(settingsStatus.appliedRevision, 4);
@@ -1655,7 +1669,7 @@ test('vNext plugin instance exposes a JSON-safe install response boundary', asyn
   const serialized = JSON.stringify({ id: pluginName, ctx, instance: plugin });
 
   assert.match(serialized, /"pluginName":"notification-hub-vnext"/);
-  assert.match(serialized, /"pluginVersion":"0\.1\.6"/);
+  assert.match(serialized, /"pluginVersion":"0\.1\.7"/);
   await plugin.onunload();
 });
 
@@ -1865,7 +1879,7 @@ test('vNext notification scene carries one resolved visual decision', async () =
   await plugin.onload();
   plugin.stopNotificationSceneSubscription();
   await plugin.updateVisualSettings({ profile: {
-    global: { enabled: true, preset: 'minimal', intensity: 'balanced' },
+    global: { enabled: true, defaultMode: 'stack', preset: 'minimal', intensity: 'balanced' },
     categories: { error: { enabled: true, preset: 'warning', intensity: 'expressive' } },
     card: { types: { minimal: { properties: { space: { anchor: 'top-right', gap: 20, margin: 24 } }, appearance: { size: 'large', aspectRatio: 'wide', width: 600, backgroundColor: '#123456', backgroundAssetId: null, borderRadius: 24, opacity: 0.82 } } } }
   } });
@@ -1904,7 +1918,7 @@ test('vNext notification scene carries one resolved visual decision', async () =
   });
   assert.deepEqual(create.payload.behavior, {
     behaviorProfileId: 'stack',
-    behaviorChannelId: 'tool.main'
+    behaviorChannelId: 'visual.event.stack'
   });
 
   await plugin.onunload();
@@ -1920,7 +1934,7 @@ test('vNext notification scene applies an explicit event visual profile before l
   await plugin.onload();
   plugin.stopNotificationSceneSubscription();
   await plugin.updateVisualSettings({ profile: {
-    global: { enabled: true, preset: 'minimal', intensity: 'balanced' },
+    global: { enabled: true, defaultMode: 'stack', preset: 'minimal', intensity: 'balanced' },
     categories: { tool: { enabled: true, preset: 'accent', intensity: 'balanced' } },
     visualProfiles: { 'visual.tool.default': { preset: 'soft', intensity: 'expressive' } }
   } });
@@ -1954,7 +1968,7 @@ test('vNext notification scene applies an explicit event visual profile before l
   });
   assert.deepEqual(create?.payload.behavior, {
     behaviorProfileId: 'stack',
-    behaviorChannelId: 'tool.main'
+    behaviorChannelId: 'visual.event.stack'
   });
 
   await plugin.onunload();
@@ -1976,16 +1990,15 @@ test('vNext notification scene resolves the applied Registry profile in legacy R
   const record = plugin.notificationApi.createNotification({ notificationId: 'notification-applied-profile', traceId: 'trace-applied-profile', type: 'tool_completed', source: 'test', title: '应用方案', content: 'body' });
   await plugin.showNotificationScene(record);
   const create = adapter.client.requests.find((request) => request.type === 'scene.create');
-  assert.equal(create.payload.behavior.behaviorChannelId, 'applied.main');
+  assert.equal(create.payload.behavior.behaviorChannelId, 'visual.event.stack');
   assert.equal(create.payload.visual.preset, 'critical');
   assert.equal(create.payload.visual.appearance.size, 'large');
   await plugin.onunload();
 });
 
-test('vNext notification scene evicts the oldest visible notification before Shelf overflow', async () => {
-  // Isolate from the host data directory and give the existing cards their real channel
-  // identity: overflow eviction is scoped per behavior channel, so cards without a channel
-  // (the legacy placeholder) are intentionally not evicted by a chat.main card.
+test('vNext notification scene no longer evicts stack cards for leftover shelf width', async () => {
+  // Isolate from the host data directory and give the existing cards the same channel
+  // as unbound defaultMode stack. Plugin no longer lifts oldest cards for 8-count or shelf width.
   const ctx = context({ notificationPersistenceEnabled: false, eventPresentationSettingsPersistenceEnabled: false });
   const adapter = new FakeAdapter();
   const sceneCards = [
@@ -1997,7 +2010,7 @@ test('vNext notification scene evicts the oldest visible notification before She
       y: 0,
       width: 420,
       height: 220,
-      behavior: { behaviorProfileId: 'stack', behaviorChannelId: 'chat.main' }
+      behavior: { behaviorProfileId: 'stack', behaviorChannelId: 'visual.event.stack' }
     })),
     { id: 'user-card', title: 'User', body: 'keep', x: 0, y: 300, width: 360, height: 180 }
   ];
@@ -2024,12 +2037,24 @@ test('vNext notification scene evicts the oldest visible notification before She
       sceneCards.push({ ...payload });
       return { type: 'ack', payload: { result: { status: 'created' } } };
     }
+    if (type === 'visual-assets.configure' || type === 'font-assets.configure' || type === 'agent-avatars.configure') {
+      return {
+        type: 'ack',
+        payload: {
+          result: {
+            applied: true,
+            assetCount: Array.isArray(payload?.items) ? payload.items.length : (Array.isArray(payload?.assets) ? payload.assets.length : 0)
+          }
+        }
+      };
+    }
     return { type: 'ack', payload: { result: {} } };
   };
   const plugin = new NotificationHubVNextPlugin(ctx, { adapterFactory: () => adapter });
 
   await plugin.onload();
   plugin.stopNotificationSceneSubscription();
+  await plugin.updateVisualSettings({ profile: { global: { enabled: true, defaultMode: 'stack' } } });
   const record = plugin.notificationApi.createNotification({
     notificationId: 'notification-overflow',
     traceId: 'trace-overflow',
@@ -2044,9 +2069,7 @@ test('vNext notification scene evicts the oldest visible notification before She
     .filter((request) => request.type === 'scene.dismiss')
     .map((request) => request.payload.id);
   const create = adapter.client.requests.find((request) => request.type === 'scene.create' && request.payload.id.includes('notification-overflow'));
-  // 4 existing chat.main cards + the incoming card exceed the 1920px work area at 420px+12px
-  // per card, so exactly the oldest one is evicted before the new card is created.
-  assert.deepEqual(dismissals, ['nh-vnext-notification-existing-0']);
+  assert.deepEqual(dismissals, []);
   assert.ok(create);
 
   await plugin.onunload();
@@ -2060,6 +2083,7 @@ test('vNext forwards a real notification into a Native Scene card', async () => 
   const plugin = new NotificationHubVNextPlugin(ctx, { adapterFactory: () => adapter });
 
   await plugin.onload();
+  await plugin.updateVisualSettings({ profile: { global: { enabled: true, defaultMode: 'stack' } } });
   harness.emit({
     type: 'message_end',
     message: {
@@ -2104,8 +2128,7 @@ test('vNext uses configured card lifetime including zero seconds for new notific
   await plugin.showNotificationScene(record);
   await new Promise((resolve) => setTimeout(resolve, 10));
   const dismissRequest = adapter.client.requests.find((request) => request.type === 'scene.dismiss' && request.payload.id === 'nh-vnext-notification-lifetime-zero');
-  assert.ok(dismissRequest);
-  assert.equal(dismissRequest.options?.timeoutMs, 10000);
+  assert.equal(dismissRequest, undefined);
   await plugin.onunload();
 });
 
@@ -2117,6 +2140,7 @@ test('vNext reconciles Native Scene dismissal for notification cards', async () 
   const plugin = new NotificationHubVNextPlugin(ctx, { adapterFactory: () => adapter });
 
   await plugin.onload();
+  await plugin.updateVisualSettings({ profile: { global: { enabled: true, defaultMode: 'stack' } } });
   for (const [id, text] of [['scene-dismiss-1', '第一张'], ['scene-dismiss-2', '第二张']]) {
     harness.emit({
       type: 'message_end',

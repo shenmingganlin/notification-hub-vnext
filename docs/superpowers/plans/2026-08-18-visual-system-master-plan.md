@@ -1,11 +1,36 @@
+# 视觉系统总计划
 
-  "packageName": "...",
-  "runtimeMinVersion": "0.1.0",
-  "createdAt": "..."
-}
+日期：2026-08-18
+心智模型：见 `2026-09-13-card-face-and-channel.md`（2026-09-13）
+状态：工程百科。0.1.6 工作室已冻结。视觉本体以 09-13 卡面与通道为准。
+
+> 配置包定义视觉，事件绑定分配视觉，行为通道共同运行，诊断解释一切。
+
+---
+
+# 1. 现行设计（指向）
+
+四条并行轴、卡片种类、内容轴已作废。现行设计：
+
+```text
+docs/superpowers/plans/2026-09-13-card-face-and-channel.md
 ```
 
-配置包目录约定：
+一句话：卡面是根零件带着孩子；通道是一种飞法一个池；皮和交互长在每个零件上。
+
+## 当前进度
+
+- 0.1.6 已冻结：默认安静、事件自选飞或叠、弹幕怎么流、随机速度。
+- Native 目前只画标题 + 正文，坐标写死。零件树还没有。
+- 下一刀产品（解冻后）：Native 读最小零件树。不改本冻结包。
+
+---
+
+# 2. 配置包与素材
+
+配置包只含声明和素材，不含代码。
+
+目录约定：
 
 ```text
 manifest.json
@@ -15,6 +40,7 @@ settings/profiles.json
 settings/event-bindings.json
 behaviors/*.json
 card-types/*.json
+card-content/*.json
 properties/*.json
 skins/*.json
 effects/*.json
@@ -119,16 +145,14 @@ SVG 暂不作为第一阶段必需格式；未来如支持，必须清洗脚本�
 共享容量和溢出策略
 ```
 
-同一行为可以有多个通道：
+一种飞法一个池（现行，见 09-13）。不为外部插件开池。下面这种「同一行为多通道 / 插件私有通道」已作废：
 
 ```text
 ticker
   ├── danmaku-normal
   ├── danmaku-chaos
-  └── plugin-x-ticker
+  └── plugin-x-ticker    ← 不作外部接入方式
 ```
-
-外部插件可以申请或创建独立通道；默认只能修改自己拥有的 private channel，复用 shared/public channel 需要明确授权。
 
 ## 3.2 通道建议模型
 
@@ -174,152 +198,32 @@ Properties：参数、数值和启用开关。
 速度、间距、位置、尺寸、持续时间、动画名称、动画开关、粒子数量、交互方式。
 ```
 
-关闭逻辑拆分：
+关闭逻辑拆分（现行，见 09-13）：
 
 ```text
-Card Type：是否有关闭按钮、操作插槽。
-Properties：dismissMode、closeButtonSize、clickOutsideDismiss、hoverPause。
-Behavior：关闭后执行何种离场和布局重算。
+关闭是根里的孩子零件（默认最上层）。
+怎么关、关掉之后怎么离场：根的飞法所在的那个池负责重排。
 ```
 
 ---
 
 # 4. 卡片组合模型
 
-## 4.1 Card Type：内容结构
-
-卡片种类只能使用已有运行时结构，用户通过配置决定内容插槽：
+本节的种类 / 内容 / 并列四轴已作废。现行组合见：
 
 ```text
-Minimal：标题 + 短内容。
-Message：助手名称、头像、标题、正文、展开。
-Detail：标题、状态、元数据、详情。
-Progress：标题、进度、状态、剩余时间。
-Character：头像、助手名称、正文、角色装饰和操作。
-System：状态、级别、操作按钮。
+2026-09-13-card-face-and-channel.md
 ```
-
-卡片种类配置：
-
-```js
-{
-  cardTypeId: 'message',
-  contentSlots: {
-    assistantName: true,
-    avatar: true,
-    icon: false,
-    title: true,
-    body: true,
-    metadata: false,
-    actions: false
-  },
-  textLayout: {
-    titleMaxLines: 1,
-    bodyMaxLines: 4,
-    assistantNamePosition: 'header'
-  },
-  interactionSlots: {
-    closeButton: true,
-    expandButton: true
-  }
-}
-```
-
-## 4.2 Card Properties：物理、时间、交互和资源参数
-
-空间：
 
 ```text
-width、height、min/maxWidth、anchor、offset、margin、gap、screenPadding、zIndex。
+方案 = 通道 + 卡面 + 素材
+卡面 = 根零件（可点框 / 绘制框）+ 孩子
+通道 = 一种飞法一个池，只承载根
+皮与交互长在每个零件上
 ```
 
-外形参数：
-
-```text
-borderRadius、opacity、blur、shadow、borderWidth。
-```
-
-排版参数：
-
-```text
-titleLines、bodyLines、fontScale、lineHeight、textOverflow。
-```
-
-生命周期：
-
-```text
-durationMs、enterDurationMs、holdDurationMs、exitDurationMs。
-```
-
-交互：
-
-```text
-dismissMode：none|close-button|anywhere|outside|button-only|timeout
-closeButtonSize、closeButtonPosition、hoverPause、pauseOnFocus、expandable、clickable。
-```
-
-资源边界：
-
-```text
-maxVisible、maxActive、maxParticles、maxAnimationInstances、overflow。
-```
-
-## 4.3 Skin：静态视觉语言
-
-Skin 负责：
-
-```text
-颜色、字体、背景、边框、阴影、图标、头像框、内边距、视觉密度、圆角、材质和装饰。
-```
-
-颜色按语义角色定义：
-
-```js
-{
-  colors: {
-    title: '#F2FFF9',
-    body: '#C5D8D0',
-    assistantName: '#62D0A8',
-    metadata: '#8EA69C',
-    status: '#F1C77A'
-  }
-}
-```
-
-Card Type 定义语义角色，Skin 定义默认颜色，Properties 允许用户覆盖。
-
-## 4.4 Effects：可选的时间效果
-
-固定生命周期槽位：
-
-```text
-enter
-idle
-exit
-enterParticles
-idleParticles
-exitParticles
-```
-
-每个槽位至少有：
-
-```js
-{
-  enabled: true,
-  effectId: 'fade-scale',
-  durationMs: 260,
-  maxParticles: 18,
-  assetId: 'visual-asset-001'
-}
-```
-
-用户可以独立开关：
-
-```text
-入场开、持续关、出场开、入场粒子关、持续粒子关、消失粒子开。
-```
-
-特效配置只引用已有特效算法和素材，不携带代码。
+已落地飞法：`stack` 堆叠、`ticker` 弹幕。未做：`popup` 及以后，一种飞法一个新池。
+弹幕的速度、轨道、带、间距是弹幕池的属性。
 
 ---
 
@@ -980,32 +884,37 @@ Event binding registry
 跨机器配置包可恢复素材
 ```
 
-## Phase 6：卡片种类和属性编辑器
+## Phase 6：最小零件树（解冻后）
+
+设计见 `2026-09-13-card-face-and-channel.md`。不恢复六种卡片种类。
 
 实现：
 
 ```text
-Minimal、Message、Detail、Progress、Character、System
-内容插槽
-助手名称、头像、图标、标题、正文、行数、状态、按钮
-尺寸、位置、时间、关闭方式、交互参数
+Native 读根 + 标题 + 正文三个零件
+选中才出该零件设置
+加件默认不叠
+堆叠池与弹幕池共用同一套卡面树
 ```
 
 验收：
 
 ```text
-同一行为可切换多个卡片种类
-内容结构与行为独立
-关闭方式符合配置
-文字层级和行数可预测
+真卡随零件树变，不是预览假象
+孩子只出现在根的可点框内
+换池（飞法）不丢这棵树
+未实现的零件诚实标注
 ```
+
+## Phase 6b：孩子零件与每件的皮
+
+图、关闭成为真零件。描边、填充长在零件上。悬停等交互后做。不单列皮肤大类。
 
 ## Phase 7：逐个新增高质量行为
 
-顺序：
+Ticker 已在 0.1.6 落地。一种飞法一个池。Popup 排在最小零件树之后。每种行为单独验收，不并行堆半成品。
 
 ```text
-Ticker/Danmaku
 Popup
 Aggregate
 Replace
@@ -1013,8 +922,6 @@ Pin
 Follow
 Scene
 ```
-
-每种行为完成独立测试、视觉验收、压力测试和诊断验收后才开始下一种。
 
 ## Phase 8：Skin 系统
 
@@ -1173,12 +1080,11 @@ npm run package:release
 │   ├── 导出全部视觉
 │   └── 恢复视觉备份
 ├── 视觉编辑器
-│   ├── 行为
-│   ├── 行为通道
-│   ├── 卡片种类
-│   ├── 卡片属性
-│   ├── 皮肤
-│   ├── 特效
+│   ├── 通道（一种飞法一个池）
+│   ├── 卡面（根零件 + 孩子）
+│   ├── 零件外观与交互
+│   ├── 词表（可选）
+│   ├── 特效（入场/离场，后上）
 │   └── 素材库
 ├── 应用于事件
 │   ├── 单个事件
@@ -1203,7 +1109,7 @@ npm run package:release
   ↓
 事件使用该方案，声音保持独立
   ↓
-任何错误都能定位到事件 → Profile → Channel → Behavior → Card → Skin → Effect → Asset
+任何错误都能定位到事件 → Profile → Channel → 出现方式 → 种类 → 内容 → 属性 → Skin → Effect → Asset
 ```
 
 最终原则：

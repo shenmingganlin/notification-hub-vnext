@@ -3,7 +3,7 @@ import test from 'node:test';
 import path from 'node:path';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import NotificationHubVNextPlugin from '../../plugin/index.js';
+import NotificationHubVNextPlugin, { RUNTIME_NOTIFICATION_CARD_PREFIX } from '../../plugin/index.js';
 
 function context() {
   return { dataDir: '', config: {}, pluginDir: process.cwd() };
@@ -92,19 +92,21 @@ test('plugin opens, updates and closes a real visual workbench card without noti
   const updatedDraft = { ...draft, card: { ...draft.card, types: { minimal: { ...draft.card.types.minimal, appearance: { ...draft.card.types.minimal.appearance, backgroundColor: '#654321', borderRadius: 8, opacity: 0.48 } } } } };
   const opened = await plugin.openVisualWorkbenchCard({ phase: 'enter', draft });
   assert.match(opened.card.id, /^nh-visual-workbench-/);
-  assert.equal(calls[1][0], 'scene.create');
-  assert.deepEqual(calls[1][1].visual.appearance, { size: 'medium', aspectRatio: 'default', backgroundColor: '#123456', backgroundFit: 'fill', backgroundPadding: 0, borderRadius: 28, opacity: 0.72 });
+  const create = calls.find(([type]) => type === 'scene.create');
+  assert.equal(create[0], 'scene.create');
+  assert.deepEqual(create[1].visual.appearance, { size: 'medium', aspectRatio: 'default', backgroundColor: '#123456', backgroundFit: 'fill', backgroundPadding: 0, borderRadius: 28, opacity: 0.72 });
   const updated = await plugin.updateVisualWorkbenchCard({ phase: 'hold', draft: updatedDraft });
+  const update = calls.find(([type]) => type === 'scene.update');
   assert.equal(updated.card.id, opened.card.id);
-  assert.equal(calls[2][0], 'health');
-  assert.equal(calls[3][0], 'scene.update');
-  assert.equal(calls[3][1].id, calls[1][1].id);
-  assert.deepEqual(calls[3][1].visual.appearance, { size: 'medium', aspectRatio: 'default', backgroundColor: '#654321', backgroundFit: 'fill', backgroundPadding: 0, borderRadius: 8, opacity: 0.48 });
-  assert.deepEqual(calls[3][1] && { x: calls[3][1].x, y: calls[3][1].y, width: calls[3][1].width, height: calls[3][1].height }, { x: calls[1][1].x, y: calls[1][1].y, width: calls[1][1].width, height: calls[1][1].height });
+  assert.equal(update[0], 'scene.update');
+  assert.equal(update[1].id, create[1].id);
+  assert.deepEqual(update[1].visual.appearance, { size: 'medium', aspectRatio: 'default', backgroundColor: '#654321', backgroundFit: 'fill', backgroundPadding: 0, borderRadius: 8, opacity: 0.48 });
+  assert.deepEqual(update[1] && { x: update[1].x, y: update[1].y, width: update[1].width, height: update[1].height }, { x: create[1].x, y: create[1].y, width: create[1].width, height: create[1].height });
   assert.notEqual(plugin.visualSettingsStore.getSnapshot().settings.profile.card.types.minimal.appearance.backgroundColor, '#654321');
   const closed = await plugin.closeVisualWorkbenchCard();
+  const dismiss = calls.find(([type]) => type === 'scene.dismiss');
   assert.equal(closed.closed, true);
-  assert.equal(calls[4][0], 'scene.dismiss');
+  assert.equal(dismiss[0], 'scene.dismiss');
   assert.equal(plugin.notificationStore.size, 0);
 });
 
@@ -286,7 +288,7 @@ test('realtime preview never sends an invalid layout to Native', async () => {
   plugin.runtimeHost = { state: 'running', client: { async request(type, payload) {
     calls.push([type, payload]);
     if (type === 'health') return { payload: { result: { workArea: { left: 0, top: 0, width: 1920, height: 1080 }, layout: { direction: 'right', anchor: 'bottom-left', spacing: 12 } } } };
-    assert.equal(payload.visual.behavior.layout, 'simple');
+    if (type === 'scene.create' || type === 'scene.update') assert.equal(payload.visual.behavior.layout, 'simple');
     return { payload: { result: { status: 'accepted' } } };
   } } };
 
@@ -492,6 +494,75 @@ test('visual event experiment uses the bound profile without notification histor
   assert.equal(calls.find(([type]) => type === 'scene.create')[1].visual.preset, 'accent');
 });
 
+test('overwriting a bound profile updates event experiment close mode without re-applying', async () => {
+  const plugin = new NotificationHubVNextPlugin(context());
+  plugin.saveVisualProfile({
+    profileId: 'visual.bound',
+    name: 'Bound',
+    profile: {
+      global: { enabled: true, preset: 'minimal' },
+      behaviorId: 'stack',
+      card: { activeType: 'minimal', types: { minimal: { properties: { interaction: { dismissMode: 'closeButton' } } } } }
+    }
+  });
+  plugin.applyVisualProfileToEvents({ profileId: 'visual.bound', eventIds: ['tool.execution.succeeded'] });
+  plugin.saveVisualProfile({
+    profileId: 'visual.bound',
+    name: 'Bound',
+    profile: {
+      global: { enabled: true, preset: 'accent' },
+      behaviorId: 'stack',
+      card: { activeType: 'minimal', types: { minimal: { properties: { interaction: { dismissMode: 'anywhere' } } } } }
+    }
+  });
+  const calls = [];
+  plugin.runtimeHost = { state: 'running', client: { async request(type, payload) { calls.push([type, payload]); if (type === 'health') return { payload: { result: { workArea: { left: 0, top: 0, width: 1920, height: 1080 }, layout: { direction: 'right', anchor: 'bottom-left', spacing: 12 } } } }; return { payload: { result: { status: 'accepted' } } }; } } };
+  const result = await plugin.runVisualEventExperiment({ eventId: 'tool.execution.succeeded', count: 1, intervalMs: 0 });
+  assert.equal(result.visualProfileId, 'visual.bound');
+  const create = calls.find(([type]) => type === 'scene.create')[1];
+  assert.equal(create.visual.preset, 'accent');
+  assert.equal(create.visual.interaction.dismissMode, 'anywhere');
+  assert.equal(Array.isArray(create.parts) && create.parts.some((part) => part.id === 'close' || part.kind === 'close'), false);
+});
+
+test('ticker try-one paints title fill onto the part tree', async () => {
+  const plugin = new NotificationHubVNextPlugin(context());
+  const calls = [];
+  plugin.runtimeHost = { state: 'running', client: { async request(type, payload) { calls.push([type, payload]); if (type === 'health') return { payload: { result: { workArea: { left: 0, top: 0, width: 1920, height: 1080 }, layout: { direction: 'right', anchor: 'bottom-left', spacing: 12 } } } }; return { payload: { result: { status: 'accepted' } } }; } } };
+  await plugin.runVisualDraftSample({
+    draft: {
+      global: { enabled: true },
+      behaviorId: 'ticker',
+      ticker: { speedPxPerSec: 400, band: 'top', bandRatio: 0.28, trackCount: 1, minGapPx: 64 },
+      card: { activeType: 'minimal', types: { minimal: { parts: { title: { fill: '#ff2244' } } } } }
+    }
+  });
+  const create = calls.find(([type]) => type === 'scene.create')[1];
+  const title = create.parts.find((part) => part.id === 'title');
+  assert.equal(title.kind, 'text');
+  assert.equal(title.fill, '#ff2244');
+});
+
+test('ticker event experiment omits hidden body from the part tree', async () => {
+  const plugin = new NotificationHubVNextPlugin(context());
+  plugin.saveVisualProfile({
+    profileId: 'visual.body-off',
+    name: 'Body off',
+    profile: {
+      global: { enabled: true, preset: 'minimal' },
+      behaviorId: 'ticker',
+      card: { activeType: 'minimal', types: { minimal: { parts: { body: { show: false } } } } }
+    }
+  });
+  plugin.applyVisualProfileToEvents({ profileId: 'visual.body-off', eventIds: ['tool.execution.succeeded'] });
+  const calls = [];
+  plugin.runtimeHost = { state: 'running', client: { async request(type, payload) { calls.push([type, payload]); if (type === 'health') return { payload: { result: { workArea: { left: 0, top: 0, width: 1920, height: 1080 }, layout: { direction: 'right', anchor: 'bottom-left', spacing: 12 } } } }; return { payload: { result: { status: 'accepted' } } }; } } };
+  await plugin.runVisualEventExperiment({ eventId: 'tool.execution.succeeded', count: 1, intervalMs: 0 });
+  const create = calls.find(([type]) => type === 'scene.create')[1];
+  assert.equal(Array.isArray(create.parts) && create.parts.some((part) => part.id === 'body'), false);
+  assert.equal(create.parts.some((part) => part.id === 'title'), true);
+});
+
 test('custom visual profiles protect referenced assets from deletion', async () => {
   const dataDir = await mkdtemp(path.join(tmpdir(), 'nh-visual-profile-asset-refs-'));
   try {
@@ -587,6 +658,38 @@ test('bound ticker profile flies on visual.event.ticker', async () => {
   assert.equal(create.behavior.behaviorProfileId, 'ticker');
   assert.equal(create.behavior.behaviorChannelId, 'visual.event.ticker');
   assert.equal(create.visual.ticker.speedPxPerSec, 520);
+});
+
+test('real ticker cards do not evict flying cards with leftover stack shelf math', async () => {
+  const plugin = new NotificationHubVNextPlugin(context());
+  plugin.saveVisualProfile({
+    profileId: 'visual.ticker',
+    name: '弹幕方案',
+    profile: { behaviorId: 'ticker', ticker: { speedPxPerSec: 400, band: 'top' } }
+  });
+  plugin.applyVisualProfileToEvents({ profileId: 'visual.ticker', eventIds: ['chat.assistant_reply.completed'] });
+  const existing = Array.from({ length: 6 }, (_, index) => ({
+    id: `${RUNTIME_NOTIFICATION_CARD_PREFIX}old-${index + 1}`,
+    width: 480,
+    height: 76,
+    behavior: { behaviorProfileId: 'ticker', behaviorChannelId: 'visual.event.ticker' }
+  }));
+  const calls = [];
+  plugin.runtimeHost = {
+    state: 'running',
+    client: {
+      async request(type, payload) {
+        calls.push([type, payload]);
+        if (type === 'health') {
+          return { payload: { result: { workArea: { left: 0, top: 0, width: 1920, height: 1080 }, layout: { direction: 'right', anchor: 'bottom-left', spacing: 12 }, sceneCards: existing } } };
+        }
+        return { payload: { result: { status: 'accepted' } } };
+      }
+    }
+  };
+  await plugin.showNotificationScene(createChatRecord(plugin, 'n-ticker-keep-flying'));
+  assert.equal(calls.filter(([type]) => type === 'scene.dismiss').length, 0);
+  assert.equal(calls.filter(([type]) => type === 'scene.create').length, 1);
 });
 
 test('bound stack profile stacks on visual.event.stack', async () => {
@@ -698,6 +801,86 @@ test('removing an in-use visual profile unbinds events first', () => {
   assert.equal(plugin.listCustomVisualEvents().length, 0);
 });
 
+function stackPreviewDraft(anchor, appearance = {}) {
+  return {
+    global: { enabled: true },
+    behaviorId: 'stack',
+    card: {
+      activeType: 'minimal',
+      types: {
+        minimal: {
+          properties: { space: { anchor, marginLeft: 24, marginRight: 24, marginTop: 24, marginBottom: 24 } },
+          appearance
+        }
+      }
+    }
+  };
+}
+
+function previewRuntime(calls, geometry = { x: 100, y: 200, width: 420, height: 220 }) {
+  let createdId = null;
+  return {
+    state: 'running',
+    client: {
+      async request(type, payload) {
+        calls.push([type, payload]);
+        if (type === 'health') {
+          return { payload: { result: {
+            workArea: { left: 0, top: 0, width: 1920, height: 1080 },
+            layout: { direction: 'right', anchor: 'bottom-left', spacing: 12 },
+            sceneCards: createdId ? [{ id: createdId, ...geometry }] : []
+          } } };
+        }
+        if (type === 'scene.create') {
+          createdId = payload.id;
+          return { payload: { result: { sceneCards: [{ id: payload.id, ...geometry }] } } };
+        }
+        return { payload: { result: { status: 'accepted' } } };
+      }
+    }
+  };
+}
+
+test('realtime preview docks stack cards to the selected corner', async () => {
+  const plugin = new NotificationHubVNextPlugin(context());
+  const calls = [];
+  plugin.runtimeHost = previewRuntime(calls);
+  await plugin.openVisualPreviewCard({ draft: stackPreviewDraft('top-left') });
+  const topLeft = calls.find(([type]) => type === 'scene.create')[1];
+  await plugin.closeVisualPreviewCard();
+  calls.length = 0;
+  await plugin.openVisualPreviewCard({ draft: stackPreviewDraft('bottom-right') });
+  const bottomRight = calls.find(([type]) => type === 'scene.create')[1];
+  assert.ok(topLeft.x < bottomRight.x);
+  assert.ok(topLeft.y < bottomRight.y);
+});
+
+test('changing stack dock recreates preview at the new corner', async () => {
+  const plugin = new NotificationHubVNextPlugin(context());
+  const calls = [];
+  plugin.runtimeHost = previewRuntime(calls);
+  await plugin.openVisualPreviewCard({ draft: stackPreviewDraft('bottom-right') });
+  const first = calls.find(([type]) => type === 'scene.create')[1];
+  const updated = await plugin.updateVisualPreviewCard({ draft: stackPreviewDraft('top-left') });
+  assert.equal(updated.recreated, true);
+  const second = calls.filter(([type]) => type === 'scene.create')[1][1];
+  assert.ok(second.x < first.x);
+  assert.ok(second.y < first.y);
+});
+
+test('paint overflow update keeps the hit-box origin', async () => {
+  const plugin = new NotificationHubVNextPlugin(context());
+  const calls = [];
+  plugin.runtimeHost = previewRuntime(calls);
+  await plugin.openVisualPreviewCard({ draft: stackPreviewDraft('bottom-right') });
+  const result = await plugin.updateVisualPreviewCard({ draft: stackPreviewDraft('bottom-right', { paintOverflow: 12 }) });
+  assert.equal(result.recreated, false);
+  const update = calls.find(([type]) => type === 'scene.update')[1];
+  assert.equal(update.x, 100);
+  assert.equal(update.y, 200);
+  assert.equal(update.visual.appearance.paintOverflow, 12);
+});
+
 test('visual diagnostics carry level for problems versus ok operations', async () => {
   const plugin = new NotificationHubVNextPlugin(context());
   plugin.runtimeHost = fakeRuntime().host;
@@ -713,4 +896,52 @@ test('visual diagnostics carry level for problems versus ok operations', async (
   const error = plugin.getVisualSettingsStatus().visualDiagnostics.find((entry) => entry.code === 'VISUAL_EVENT_BINDING_PROFILE_MISSING');
   assert.equal(error.level, 'error');
   assert.equal(error.details.eventId, 'chat.assistant_reply.completed');
+});
+
+function assertStackSetModeBeforeCreate(calls, { anchor, direction, spacing, marginLeft = 18, marginRight = 18, marginTop = 18, marginBottom = 18 }) {
+  const modeIndex = calls.findIndex(([type]) => type === 'scene.set-mode');
+  const createIndex = calls.findIndex(([type]) => type === 'scene.create');
+  assert.ok(modeIndex >= 0 && createIndex > modeIndex);
+  const payload = calls[modeIndex][1];
+  assert.equal(payload.layout, 'stack');
+  assert.equal(payload.anchor, anchor);
+  assert.equal(payload.direction, direction);
+  assert.equal(payload.spacing, spacing);
+  assert.equal(payload.marginLeft, marginLeft);
+  assert.equal(payload.marginRight, marginRight);
+  assert.equal(payload.marginTop, marginTop);
+  assert.equal(payload.marginBottom, marginBottom);
+  assert.equal('workAreaWidth' in payload, false);
+  assert.equal('workAreaHeight' in payload, false);
+  assert.equal('dpiScale' in payload, false);
+}
+
+test('stack try-one and preview send set-mode before create; ticker try-one does not', async () => {
+  const plugin = new NotificationHubVNextPlugin(context());
+  const tryCalls = [];
+  plugin.runtimeHost = { state: 'running', client: { async request(type, payload) { tryCalls.push([type, payload]); if (type === 'health') return { payload: { result: { workArea: { left: 0, top: 0, width: 1920, height: 1080 }, layout: { direction: 'right', anchor: 'bottom-left', spacing: 12 } } } }; return { payload: { result: { status: 'accepted' } } }; } } };
+  await plugin.runVisualDraftSample({
+    draft: {
+      global: { enabled: true },
+      behaviorId: 'stack',
+      card: { activeType: 'minimal', types: { minimal: { properties: { space: { anchor: 'top-left', gap: 16 } } } } }
+    }
+  });
+  assertStackSetModeBeforeCreate(tryCalls, { anchor: 'top-left', direction: 'up', spacing: 16, marginLeft: 18, marginRight: 0, marginTop: 18, marginBottom: 0 });
+
+  tryCalls.length = 0;
+  await plugin.runVisualDraftSample({
+    draft: {
+      global: { enabled: true },
+      behaviorId: 'ticker',
+      ticker: { speedPxPerSec: 400, band: 'top', bandRatio: 0.28, trackCount: 3, minGapPx: 64 }
+    }
+  });
+  assert.equal(tryCalls.some(([type]) => type === 'scene.set-mode'), false);
+  assert.ok(tryCalls.some(([type]) => type === 'scene.create'));
+
+  const previewCalls = [];
+  plugin.runtimeHost = previewRuntime(previewCalls);
+  await plugin.openVisualPreviewCard({ draft: stackPreviewDraft('bottom-right') });
+  assertStackSetModeBeforeCreate(previewCalls, { anchor: 'bottom-right', direction: 'down', spacing: 8, marginLeft: 0, marginRight: 24, marginTop: 0, marginBottom: 24 });
 });

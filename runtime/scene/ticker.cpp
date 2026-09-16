@@ -38,13 +38,19 @@ TickerTrackPlan plan_ticker_tracks(
 
 double ticker_track_clearance(
     bool has_card_ahead,
-    double nearest_ahead_right_edge,
-    int lane_right_px,
-    int min_gap_px) {
+    double nearest_ahead_edge,
+    int spawn_edge_px,
+    int min_gap_px,
+    bool fly_right) {
     // 没有前车的轨道记 +∞，一定优先（契约 §4.1）。
     if (!has_card_ahead) return kInfinity;
-    return static_cast<double>(lane_right_px)
-        - nearest_ahead_right_edge
+    if (fly_right) {
+        return nearest_ahead_edge
+            - static_cast<double>(spawn_edge_px)
+            - static_cast<double>(min_gap_px);
+    }
+    return static_cast<double>(spawn_edge_px)
+        - nearest_ahead_edge
         - static_cast<double>(min_gap_px);
 }
 
@@ -69,12 +75,15 @@ double ticker_entry_delay_ms(double best_clearance_px, double speed_px_per_secon
 double ticker_position_x(
     double spawn_left_x,
     double speed_px_per_second,
-    double elapsed_ms) {
-    return spawn_left_x - speed_px_per_second * (elapsed_ms / 1000.0);
+    double elapsed_ms,
+    bool fly_right) {
+    const auto travel = speed_px_per_second * (elapsed_ms / 1000.0);
+    return fly_right ? spawn_left_x + travel : spawn_left_x - travel;
 }
 
-bool ticker_is_offscreen(double card_right_x, int lane_left_px, int exit_margin_px) {
-    return card_right_x < static_cast<double>(lane_left_px - exit_margin_px);
+bool ticker_is_offscreen(double card_edge_x, int lane_edge_px, int exit_margin_px, bool fly_right) {
+    if (fly_right) return card_edge_x > static_cast<double>(lane_edge_px + exit_margin_px);
+    return card_edge_x < static_cast<double>(lane_edge_px - exit_margin_px);
 }
 
 int ticker_band_top_y(

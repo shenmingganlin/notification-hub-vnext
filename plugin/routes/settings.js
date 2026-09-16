@@ -256,13 +256,15 @@ ${PAGE_NAVIGATION_STYLE}
   var viewMeta = ${JSON.stringify(SETTINGS_VIEWS)};
   function requestHtml(path) {
     try {
-      if (window.hana && window.hana.api && typeof window.hana.api.fetch === "function") return Promise.resolve(window.hana.api.fetch(path));
+      var bust = String(path || "") + (String(path || "").indexOf("?") >= 0 ? "&" : "?") + "_ts=" + Date.now();
+      var requestOptions = { cache: "no-store", headers: { "Cache-Control": "no-store", Pragma: "no-cache" } };
+      if (window.hana && window.hana.api && typeof window.hana.api.fetch === "function") return Promise.resolve(window.hana.api.fetch(bust, requestOptions));
       var current = new URL(window.location.href);
       var match = /^(.*\\/api\\/plugins\\/[^/]+)(?:\\/[^/]*)?$/.exec(current.pathname || "");
       if (!match) return Promise.reject(new Error("设置页面缺少插件 API 路径"));
-      var url = new URL(match[1] + "/" + path, current.origin);
+      var url = new URL(match[1] + "/" + bust, current.origin);
       ["pluginSurfaceSession", "token"].forEach(function (key) { var value = current.searchParams.get(key); if (value) url.searchParams.set(key, value); });
-      return Promise.resolve(fetch(url.toString()));
+      return Promise.resolve(fetch(url.toString(), requestOptions));
     } catch (error) {
       return Promise.reject(error);
     }
@@ -303,6 +305,11 @@ ${PAGE_NAVIGATION_STYLE}
   window.NotificationHubSettingsShell = { loadView: loadView, mount: mountFragment };
   document.addEventListener("notification-hub-settings-status", function (event) { var detail = event && event.detail || {}; if (detail.text) setStatus(detail.text, detail.kind || "success"); });
   document.querySelectorAll("[data-settings-shell-view]").forEach(function (item) { item.addEventListener("click", function () { loadView(item.getAttribute("data-settings-shell-view")); }); });
+  document.addEventListener("wheel", function (event) {
+    var target = event.target;
+    if (!target || !target.closest) return;
+    if (target.closest("input, select, textarea")) event.preventDefault();
+  }, { capture: true, passive: false });
   window.parent.postMessage({ type: "ready" }, "*");
 }());
 </script>
@@ -353,6 +360,7 @@ export default function registerSettingsRoute(app, ctx) {
     try {
       const currentUrl = c?.req?.url ?? c?.req?.raw?.url ?? '';
       const view = readView(currentUrl);
+      if (typeof c.header === 'function') c.header('Cache-Control', 'no-store');
       return c.html(renderSettingsContent(view, currentUrl, view === 'sound' ? getSoundSettingsServices() : getPlugin()));
     } catch (error) {
       return c.json({ ok: false, error: errorPayload(error) }, error?.code === 'SETTINGS_VIEW_INVALID' ? 400 : 503);

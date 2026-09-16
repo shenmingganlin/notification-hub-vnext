@@ -6,7 +6,7 @@ import test from 'node:test';
 
 import { PipeClient } from '../../plugin/runtime/pipe-client.js';
 import { RuntimeProcessManager } from '../../plugin/runtime/process-manager.js';
-import { createSceneStatePersistence } from '../../plugin/runtime/scene-state-config.js';
+import { createSceneStatePersistence } from '../../plugin/runtime/scene-state-persistence.js';
 import { loadSceneState } from '../../plugin/runtime/scene-state-store.js';
 
 const runtimePath = process.argv[2];

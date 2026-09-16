@@ -1,5 +1,54 @@
 # 当前状态快照（2026-08-15，Windows）
 
+## 2026-09-16 词表 + 通道规约（0.1.8 入口）
+
+计划：`docs/superpowers/plans/2026-09-16-lexicon-and-channel-charter.md`。
+
+已拍板：通道规约 vs 卡片动态/寿命；配置包不含规约；弹幕方向=卡；点穿=平动规约；同轨净空不动；函数路径=以后新池；淡入=以后特效；PID 不做，只留 `settle:snap`。
+
+Git：仓库已在，`HEAD`=`29480dc`（0.1.6）。0.1.7 工作区未提交。下一步 Phase 0：快照提交后开 `reform/0.1.8-lexicon`。
+
+两套通道不能混：事件巷（`behavior-channel.js`）vs 飞法通道（堆叠/弹幕池）。
+
+## 2026-09-15 0.1.7 开线
+
+零件收口。版本升到 0.1.7，行为优化从弹幕方向开始。弹幕 `direction` 整池二选一：默认 `left`（右→左），`right` 为左→右。文案/影子/试一条/Native 进出屏一起改。0.1.6 冻结包 `dist/notification-hub-vnext-0.1.6.zip` 仍不动。试看包改打 `dist/notification-hub-vnext-0.1.7-try.zip`。
+
+## 2026-09-15 零件填充=字体色
+
+弹幕 Native 之前用默认白笔写字，忽略 `parts.title.fill` / `parts.body.fill`。舞台 CSS 是对的，试一条和实时预览不变。现已跟堆叠一样：有 hex 填充就当字体色。标题/正文控件文案改为「填充（字体颜色）」。关闭钮仍是底色。冻结包未动。
+
+- 试看包 `dist/notification-hub-vnext-0.1.6-part-tree.zip` SHA256 `B01821B2D71628CD717D2AF582636CA07BCC234A5921CBB6FBE2DF49C0006BB0`（753940 字节 / 194 条）
+
+## 2026-09-15 零件开关
+
+标题 / 正文能关。关掉的不进树、不画、不占位；弹幕关正文后只留标题，标题铺满字区。两个字零件不能同时关。关闭钮仍只跟关闭方式。进度条 / 下载报数封存。Native 协议 / 声音 / 历史 / 冻结包未动。
+
+- 字段：`parts.title.show` / `parts.body.show`；只有 `false` 才关
+- 工作室：编标题或正文时多一颗「显示」
+- 测试：`card-part-tree` + `card-visual-settings` + `settings-visual-route` + `plugin-visual-api` 共 113 项全绿
+- 试看包 `dist/notification-hub-vnext-0.1.6-part-tree.zip` SHA256 `073585FE03402EDB8C5C4DEC83E0A24F1ABBA21E55B141D048EDD6E55E1ADCB1`（755359 字节 / 194 条）
+- 冻结 SHA256 仍是 `2BD878DEF7D8CCFCD47FA0482E8444BC0D1B967AC0FBBA201B3F226A7BB54D88`
+
+## 2026-09-14 堆叠停靠 + 关闭方式
+
+0.1.6 解冻后剩下的 Native 卡面 bug：试一条堆叠总贴右上；关闭方式三选一。
+
+- Native create 重排只看 `has_active_layout`，不再因 `behaviorChannelId` 就扣到 TopRight
+- JS 堆叠 `scene.create` 前先 `scene.set-mode`（`space.anchor` + `gap`）；弹幕不发
+- 工作室关闭方式改芯片：关闭按钮 / 任意点击二选一；超时自动收可叠加，默认关
+- Native `autoDismiss` + timeoutMs 上限 120000；插件不再用 `cardLifetimeSeconds` 120s 杀 Native 视觉卡
+- 弹幕仍出屏回收，不走超时
+- 试看包 `dist/notification-hub-vnext-0.1.6-part-tree.zip` SHA256 `432DACC752FAE614AFA55369D4BF3F0D4C4C58CCB28F3015E7AC8ECB55747E7B`（752520 字节 / 195 条）
+- 冻结验收包 SHA256 仍是 `2BD878DEF7D8CCFCD47FA0482E8444BC0D1B967AC0FBBA201B3F226A7BB54D88`
+- 边距仍未进 Native（flush）；不动声音 / 历史 / 突脸 / 内存优化
+
+## 2026-09-13 计划心智：卡面与通道
+
+现行设计 `docs/superpowers/plans/2026-09-13-card-face-and-channel.md`。卡面 = 根零件 + 孩子；通道 = 一种飞法一个池。
+
+零件树：根已是一等零件 `{id:root, kind:block}`，后面才是标题、正文、关闭。描边、填充、底图已接到真卡。Native 圆角卡板优先用根的 fill/stroke/底图；没有根再回退 appearance。子零件循环跳过 root，避免直角叠圆角板。工作室排版未改：没选中仍在编根，根色和底图仍写 appearance，下发时映射到根零件。裁切仍是窗口切割溢出，wallpaper clip = halo 几何（`bounds ± overflow`）；cover-to-card；同比例 + scale=1 无溢出血。`backgroundPadding` 存着但未进 dest。悬停加亮已接：默认关。弹幕点穿开着时悬停变灰。绘制溢出已接：默认 0；加上后窗口比可点框大一圈，多出来的皮不抢鼠标。选中零件已接：点标题/正文/关闭只出那一件的填充和描边，写进真卡。弹幕没有关闭。不加放大。词表已接：根上加名字，零件可跟名字走，改名字的色引用一起变；Native 只吃解析后的色值。一键清除视觉卡已在标题旁，不是下一刀。声音、历史未动。内存占用过大先记下，不进这刀。底图/裁切已并进根的皮，不是子零件 `kind:image`。试看包 `dist/notification-hub-vnext-0.1.6-part-tree.zip` SHA256 `A747CD92BEDF0C172B7BA6A0E73E92BF0494746E0B8722477FF398E458BE2DFF`（完整插件包，749653 字节 / 195 条，不是冻结验收包）。拖动后分层图跟 HWND 一起走，关闭手势不会被拖动手势卡住。堆叠左侧装饰条和弹幕底边装饰条已删。舞台堆叠只演一张卡。关闭零件只在关闭方式=关闭按钮时出现。字裁在卡面里。
+
 ## 2026-09-13 0.1.6 冻结
 
 真机确认弹幕工作室「帅呆」后封口。版本停在 0.1.6，不升号。工作室排版、协议、Native 声音、通知历史不再改。
@@ -8,7 +57,7 @@
 - SHA256：`2BD878DEF7D8CCFCD47FA0482E8444BC0D1B967AC0FBBA201B3F226A7BB54D88`
 - 已验收：默认安静、事件自选飞或叠、弹幕怎么流竖读、随机可点、异轨间距、试一条走草稿
 - 真机还需摸：标题旁「清除屏幕上的视觉卡」（清屏幕卡，不动通知历史）
-- 下一刀产品：皮肤（背景素材 / 裁切）。突脸、悬停暂停、溢出策略不做
+- 冻结期内不改产品。解冻后下一刀按 09-13：Native 读最小零件树。背景素材/裁切并进零件皮，不单列皮肤阶段。突脸 = 新池，后做
 
 ## 2026-09-12 通知视觉页 · 试一条贴标题、走草稿
 
@@ -33,7 +82,7 @@
 
 ## 2026-09-12 卡片两轴分离（根修复）+ 设置页两轴重构
 
-背景：`CARD_TYPES` 在不同文件里有两个矛盾定义——`card-composition-contract.js` 把卡片种类定义为内容结构（未接线），而运行时 `card-visual-settings.js` 把「外观＋出现方式」揉成 `minimal/danmaku/popup`。同时系统里另有一条真实行为轴（表现绑定的 `behaviorProfileId`）。
+背景：`CARD_TYPES` 曾有两个矛盾定义——未接线的内容结构契约（`card-composition-contract.js`，后已删除）与运行时 `card-visual-settings.js` 把「外观＋出现方式」揉成 `minimal/danmaku/popup`。同时系统里另有一条真实行为轴（表现绑定的 `behaviorProfileId`）。现行以 ADR-005 为准。
 
 决策：`docs/adr/ADR-002-card-type-behavior-axis.md`；实现计划：`docs/superpowers/plans/2026-09-12-card-behavior-axis-separation.md`。
 
@@ -2146,7 +2195,7 @@ Runtime 生命周期、Shelf 多卡片、Notification Center、响应式侧边�
 - 正式按 `docs/superpowers/plans/2026-08-18-visual-system-master-plan.md` 开始实现，当前阶段为 Phase 0：契约冻结和文档。
 - 新增 Behavior Contract：`plugin/domain/visual-behavior-contract.js`，明确行为 ID、生命周期槽位、行为属性边界和已有行为白名单；禁止 Renderer、JavaScript 等可执行字段。
 - 新增 Channel Runtime Contract：`plugin/domain/visual-channel-contract.js`，明确 channel owner、visibility、behavior/card/properties/skin/effect 引用，以及 `maxVisible`、`maxActive`、`maxParticles`、`maxAnimationInstances` 和 overflow 资源边界。
-- 新增 Card Composition Contract：`plugin/domain/card-composition-contract.js`，明确 Card Type 内容插槽、文本布局、交互插槽，以及 Properties/Skin/Effects 引用；禁止任意 CSS、Renderer 和执行代码。
+- 新增 Card Composition Contract：`plugin/domain/card-composition-contract.js`（后已删除，以 ADR-005 为准），明确 Card Type 内容插槽、文本布局、交互插槽，以及 Properties/Skin/Effects 引用；禁止任意 CSS、Renderer 和执行代码。
 - 新增 `tests/node/visual-contracts.test.mjs`，6/6 通过；兼容回归（行为通道、Card Runtime policy、行为管理器、卡片视觉设置）15/15 通过；语法检查和 `git diff --check` 通过。
 - 本轮尚未修改旧 `behavior-channel.js` 与 `card-runtime-policy.js` 的现有 API，先以独立契约模块冻结新边界，避免破坏 alpha.16 兼容链路。
 - Phase 0 剩余两项已完成：新增 `visual-package-manifest.js`，拒绝路径穿越、可执行扩展名、脚本目录和 shell command；新增 `visual-diagnostic-contract.js`，冻结视觉阶段、稳定错误码、来源、影响、修复建议和 traceId，并拒绝未脱敏路径等字段。
@@ -2154,7 +2203,7 @@ Runtime 生命周期、Shelf 多卡片、Notification Center、响应式侧边�
 - Phase 1 第一刀已启动并完成：新增 `plugin/runtime/card-runtime.js`，提供 created → active → exiting → reclaimed 生命周期；新增 `plugin/runtime/channel-runtime.js`，提供同通道卡片集合、队列、容量、布局重算接口和 active/visible/queued/suppressed 指标。
 - 新 Runtime 第一刀暂不接入 Native Runtime，也不替换旧 `notification-behavior-manager.js`；布局适配器故障只写入通道诊断，不影响其他通道。
 - Phase 1 focused 回归（含 Phase 0 与旧视觉兼容回归）第一刀为 31/31 通过；语法检查和 `git diff --check` 通过。
-- Phase 1 第二刀已完成：新增 `runtime-registry.js` 统一管理独立 channel，新增 `runtime-clock.js` 通过显式 `tick(now)` 处理 active 卡片过期，新增 `scene-state-projection.js` 将 Runtime 快照投影为严格可校验的 SceneState；过期只作用于 active 卡片，queued 卡片保持队列语义。
+- Phase 1 第二刀已完成：新增 `runtime-registry.js` 统一管理独立 channel，新增 `runtime-clock.js` 通过显式 `tick(now)` 处理 active 卡片过期，新增 `scene-state-projection.js`（后已删除，SceneState 校验/恢复留在 `scene-state.js` / recovery）将 Runtime 快照投影为严格可校验的 SceneState；过期只作用于 active 卡片，queued 卡片保持队列语义。
 - 第二刀 focused 回归覆盖 45 项，全部通过；包含旧 SceneState 验证，未修改 Native Runtime、SceneState schema 或生产通知入口。
 - 下一步是接入真实 Stack 布局前的 Runtime 适配边界：补齐生命周期事件/诊断投影和可替换布局策略，然后进入 Phase 2 Stack 行为。
 - Stack 前置边界已完成：新增 `plugin/runtime/stack-layout.js`，按实际卡片宽高、anchor、margin、spacing 计算堆叠位置；无法容纳时返回 `VISUAL_BEHAVIOR_LAYOUT_FAILED`，不自动缩小或静默丢弃。

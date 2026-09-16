@@ -22,7 +22,7 @@ test('createCardProperties accepts partial overrides', () => {
   });
   assert.equal(props.space.size, 'large');
   assert.equal(props.space.gap, 16);
-  assert.equal(props.space.anchor, 'top-right'); // default
+  assert.equal(props.space.anchor, 'bottom-right'); // default
   assert.equal(props.shape.borderRadius, 24);
   assert.equal(props.shape.opacity, 0.9);
   assert.equal(createCardProperties({ shape: { opacity: 0 } }).shape.opacity, 0);
@@ -37,7 +37,13 @@ test('createCardProperties rejects invalid values', () => {
   assert.throws(() => createCardProperties({ typography: { titleLines: 5 } }), (e) => e.code === 'CARD_VISUAL_FIELD_INVALID');
   assert.throws(() => createCardProperties({ lifecycle: { durationMs: 100 } }), (e) => e.code === 'CARD_VISUAL_FIELD_INVALID');
   assert.throws(() => createCardProperties({ interaction: { dismissMode: 'swipe' } }), (e) => e.code === 'CARD_VISUAL_PROPERTY_INVALID');
+  assert.throws(() => createCardProperties({ interaction: { autoDismiss: 'maybe' } }), (e) => e.code === 'CARD_VISUAL_PROPERTY_INVALID');
+  assert.throws(() => createCardProperties({ interaction: { timeoutMs: 120001 } }), (e) => e.code === 'CARD_VISUAL_FIELD_INVALID');
+  assert.throws(() => createCardProperties({ lifecycle: { holdDurationMs: 120001 } }), (e) => e.code === 'CARD_VISUAL_FIELD_INVALID');
   assert.throws(() => createCardProperties({ resource: { maxVisible: 200 } }), (e) => e.code === 'CARD_VISUAL_FIELD_INVALID');
+  assert.equal(createCardProperties({ interaction: { autoDismiss: 'on', timeoutMs: 120000 } }).interaction.autoDismiss, 'on');
+  assert.equal(createCardProperties({ lifecycle: { holdDurationMs: 120000 } }).lifecycle.holdDurationMs, 120000);
+  assert.equal(createCardProperties().interaction.autoDismiss, 'off');
   assert.throws(() => createCardProperties({ unknown: {} }), (e) => e.code === 'CARD_VISUAL_FIELD_UNKNOWN');
 });
 
@@ -71,7 +77,8 @@ test('createCardSkin accepts partial overrides', () => {
 test('createCardSkin rejects invalid values', () => {
   assert.throws(() => createCardSkin({ semanticColors: { title: 'white' } }), (e) => e.code === 'CARD_VISUAL_COLOR_INVALID');
   assert.throws(() => createCardSkin({ background: { color: 'red' } }), (e) => e.code === 'CARD_VISUAL_COLOR_INVALID');
-  assert.throws(() => createCardSkin({ decoration: { borderRadius: 60 } }), (e) => e.code === 'CARD_VISUAL_FIELD_INVALID');
+  assert.equal(createCardSkin({ decoration: { borderRadius: 60 } }).decoration.borderRadius, 60);
+  assert.throws(() => createCardSkin({ decoration: { borderRadius: 481 } }), (e) => e.code === 'CARD_VISUAL_FIELD_INVALID');
   assert.throws(() => createCardSkin({ decoration: { opacity: 1.1 } }), (e) => e.code === 'CARD_VISUAL_FIELD_INVALID');
   assert.throws(() => createCardSkin({ decoration: { density: 'ultra' } }), (e) => e.code === 'CARD_VISUAL_SKIN_INVALID');
   assert.throws(() => createCardSkin({ unknown: 'x' }), (e) => e.code === 'CARD_VISUAL_FIELD_UNKNOWN');

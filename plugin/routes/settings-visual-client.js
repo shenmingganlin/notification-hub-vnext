@@ -13,6 +13,36 @@ function setControl(id, value) {
   if (!el || value === undefined || value === null) return;
   el.value = String(value);
 }
+function setPressed(id, on) {
+  var el = $(id);
+  if (!el || !el.setAttribute) return;
+  el.setAttribute("aria-pressed", on ? "true" : "false");
+  if (el.classList) el.classList.toggle("is-on", !!on);
+}
+function tickerClickThroughOn() {
+  var btn = $("ticker-click-through");
+  return !(btn && btn.getAttribute && btn.getAttribute("aria-pressed") === "false");
+}
+function syncTickerHoverLock() {
+  var hover = $("ticker-hover-highlight");
+  var why = $("ticker-hover-why");
+  if (!hover) return;
+  var locked = tickerClickThroughOn();
+  if (hover.classList) hover.classList.toggle("is-locked", locked);
+  hover.setAttribute("aria-disabled", locked ? "true" : "false");
+  if (locked) {
+    hover.setAttribute("title", "不挡点击开着时，弹幕吃不到鼠标，没法加亮。");
+    hover.setAttribute("aria-describedby", "ticker-hover-why");
+    setPressed("ticker-hover-highlight", false);
+  } else {
+    hover.removeAttribute("title");
+    hover.removeAttribute("aria-describedby");
+  }
+  if (why) {
+    if (locked) why.removeAttribute("hidden");
+    else why.setAttribute("hidden", "");
+  }
+}
 function modeConfig(value) {
   var profile = state.profile || {};
   var card = profile.card || {};
@@ -22,68 +52,883 @@ function pressed(id) {
   var el = $(id);
   return !!(el && el.getAttribute && el.getAttribute("aria-pressed") === "true");
 }
-function renderStudioPreview() {
-  var stage = $("visual-preview-stage");
-  if (!stage) return;
-  var draft = collect();
-  var behavior = draft.behaviorId || "stack";
-  var type = (draft.card && draft.card.types && draft.card.types[draft.card.activeType]) || {};
-  var appearance = type.appearance || {};
-  var space = (type.properties && type.properties.space) || {};
-  var anchor = space.anchor || "bottom-right";
-  var radius = Number(appearance.borderRadius);
-  if (!Number.isFinite(radius)) radius = 16;
-  var bg = appearance.backgroundColor || "#0e1916";
-  var opacity = Number(appearance.opacity);
-  if (!Number.isFinite(opacity)) opacity = 0.96;
-  stage.setAttribute("data-anchor", anchor);
-  stage.innerHTML = "";
-  if (behavior !== "ticker") {
-    stage.insertAdjacentHTML("beforeend", '<div class="stage-label">屏幕角落</div>');
-    var titles = ["工具执行完成", "频道新消息"];
-    for (var i = 0; i < titles.length; i += 1) {
-      stage.insertAdjacentHTML("beforeend", '<article class="stack-card" data-preview-card="minimal" tabindex="0" style="z-index:' + (10 - i) + ';border-radius:' + radius + 'px;background:' + bg + ';opacity:' + opacity + '"><span class="x">×</span><strong>' + titles[i] + '</strong><small>叠在这里，等你看完。</small></article>');
+var PART_PAINT_DEFAULTS = { title: { fill: "#f2fff9", stroke: "#62d0a8" }, body: { fill: "#c5d8d0", stroke: "#62d0a8" }, close: { fill: "#1d2b27", stroke: "#62d0a8" }, icon: { fill: "#1d2b27", stroke: "#62d0a8" }, assistantName: { fill: "#62d0a8", stroke: "#62d0a8" } };
+function isTextPart(id) { return id === "title" || id === "body" || id === "assistantName"; }
+function isFitWidthPart(id) { return id === "title" || id === "assistantName"; }
+function isShowablePart(id) { return id === "title" || id === "body" || id === "icon" || id === "assistantName"; }
+function isSelectablePart(id) { return id === "root" || id === "title" || id === "body" || id === "close" || id === "icon" || id === "assistantName"; }
+function selectedPart() {
+  var on = document.querySelector("#part-chip-row [data-part].is-on");
+  return (on && on.getAttribute("data-part")) || "root";
+}
+function rememberedSelectedPart() {
+  var id = window.__notificationHubSelectedPart;
+  if (!isSelectablePart(id)) {
+    try { id = sessionStorage.getItem("nh-visual-selected-part"); } catch (error) { id = ""; }
+  }
+  if (isSelectablePart(id)) return id;
+  return "";
+}
+function rememberSelectedPart(id) {
+  if (!isSelectablePart(id)) return;
+  window.__notificationHubSelectedPart = id;
+  try { sessionStorage.setItem("nh-visual-selected-part", id); } catch (error) {}
+}
+function setPartHidden(id, paint) {
+  paint = paint || {};
+  setControl("part-" + id + "-fill", paint.fill || "");
+  setControl("part-" + id + "-background", paint.background || "");
+  setControl("part-" + id + "-opacity", typeof paint.opacity === "number" ? paint.opacity : "");
+  setControl("part-" + id + "-stroke", paint.stroke || "");
+  setControl("part-" + id + "-stroke-width", paint.strokeWidth == null ? 0 : paint.strokeWidth);
+  setControl("part-" + id + "-stroke-paint", paint.strokePaint === "gradient" ? "gradient" : "");
+  if (id === "close") {
+    setControl("part-close-icon", paint.closeIcon || "");
+    setControl("part-close-icon-color", paint.closeIconColor || "");
+  }
+  setControl("part-" + id + "-x", Number.isInteger(paint.x) ? paint.x : "");
+  setControl("part-" + id + "-y", Number.isInteger(paint.y) ? paint.y : "");
+  setControl("part-" + id + "-w", Number.isInteger(paint.w) && paint.w > 0 ? paint.w : "");
+  setControl("part-" + id + "-h", Number.isInteger(paint.h) && paint.h > 0 ? paint.h : "");
+  setControl("part-" + id + "-radius", Number.isInteger(paint.radius) ? paint.radius : "");
+  if (id === "title" || id === "body") {
+    setControl("part-" + id + "-show", paint.show === false ? "false" : "");
+  }
+  if (id === "icon" || id === "assistantName") {
+    setControl("part-" + id + "-show", paint.show === true ? "true" : "false");
+  }
+  if (id === "icon") {
+    setControl("part-icon-source", paint.source === "custom" ? "custom" : "assistant");
+    setControl("part-icon-asset-id", paint.assetId || "");
+    setControl("part-icon-scale", Number.isFinite(Number(paint.backgroundScale)) ? paint.backgroundScale : 1);
+    setControl("part-icon-x", Number.isFinite(Number(paint.backgroundX)) ? paint.backgroundX : 0.5);
+    setControl("part-icon-y", Number.isFinite(Number(paint.backgroundY)) ? paint.backgroundY : 0.5);
+  }
+  if (id !== "icon") {
+    setControl("part-" + id + "-bg-asset", paint.backgroundAssetId || "");
+    setControl("part-" + id + "-bg-scale", Number.isFinite(Number(paint.backgroundScale)) ? paint.backgroundScale : 1);
+    setControl("part-" + id + "-bg-x", Number.isFinite(Number(paint.backgroundX)) ? paint.backgroundX : 0.5);
+    setControl("part-" + id + "-bg-y", Number.isFinite(Number(paint.backgroundY)) ? paint.backgroundY : 0.5);
+  }
+  if (isFitWidthPart(id)) {
+    setControl("part-" + id + "-fit-width", paint.fitWidth === true ? "true" : "");
+    setControl("part-" + id + "-fit-compensate", paint.fitCompensate === true ? "true" : "");
+  }
+  if (isTextPart(id)) {
+    setControl("part-" + id + "-font-size", Number.isInteger(paint.fontSize) ? paint.fontSize : "");
+    setControl("part-" + id + "-font-family", paint.fontAssetId ? ("font:" + paint.fontAssetId) : (paint.fontFamily || ""));
+    setControl("part-" + id + "-text-paint", paint.textPaint === "rainbow" ? "rainbow" : "");
+    setControl("part-" + id + "-font-bold", paint.fontBold === true ? "true" : (paint.fontBold === false ? "false" : ""));
+    setControl("part-" + id + "-font-italic", paint.fontItalic === true ? "true" : "");
+    setControl("part-" + id + "-font-underline", paint.fontUnderline === true ? "true" : "");
+    setControl("part-" + id + "-font-strike", paint.fontStrike === true ? "true" : "");
+    setControl("part-" + id + "-text-stroke", paint.textStroke === true ? "true" : "");
+    setControl("part-" + id + "-text-stroke-color", paint.textStrokeColor || "");
+    setControl("part-" + id + "-text-stroke-width", Number.isInteger(paint.textStrokeWidth) ? paint.textStrokeWidth : "");
+    setControl("part-" + id + "-text-stroke-paint", paint.textStrokePaint === "rainbow" ? "rainbow" : "");
+  }
+}
+function readGlossary() {
+  var el = $("glossary-json");
+  if (!el || !el.value) return {};
+  try {
+    var parsed = JSON.parse(el.value);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
+    return parsed;
+  } catch (error) { return {}; }
+}
+function writeGlossary(map) {
+  var next = {};
+  Object.keys(map || {}).forEach(function (name) {
+    var n = String(name || "").trim();
+    var hex = map[name];
+    if (!n || n.charAt(0) === "#" || n.length > 12) return;
+    if (typeof hex === "string" && /^#[0-9a-fA-F]{6}$/.test(hex)) next[n] = hex;
+  });
+  var keys = Object.keys(next);
+  if (keys.length > 8) keys.slice(8).forEach(function (name) { delete next[name]; });
+  setControl("glossary-json", JSON.stringify(next));
+  var empty = $("glossary-empty");
+  if (empty) empty.hidden = Object.keys(next).length > 0;
+  var add = $("glossary-add");
+  if (add) {
+    var full = Object.keys(next).length >= 8;
+    add.setAttribute("aria-disabled", full ? "true" : "false");
+    add.classList.toggle("is-locked", full);
+  }
+  return next;
+}
+function resolvePaintColor(value) {
+  if (!value) return "";
+  if (value.charAt(0) === "#") return value;
+  return readGlossary()[value] || "";
+}
+function attrEscape(value) {
+  return String(value || "").replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
+}
+function renderNameChips() {
+  var names = Object.keys(readGlossary());
+  var id = selectedPart();
+  ["fill", "stroke"].forEach(function (kind) {
+    var row = $("part-" + kind + "-names");
+    if (!row) return;
+    row.hidden = names.length === 0;
+    var stored = id && id !== "root" ? ($("part-" + id + "-" + kind) && $("part-" + id + "-" + kind).value) : "";
+    var ownOn = !stored || stored.charAt(0) === "#";
+    row.innerHTML = '<button type="button" class="chip' + (ownOn ? " is-on" : "") + '" data-paint-name="" data-paint-kind="' + kind + '">自己的色</button>'
+      + names.map(function (name) {
+        return '<button type="button" class="chip' + (stored === name ? " is-on" : "") + '" data-paint-name="' + attrEscape(name) + '" data-paint-kind="' + kind + '">' + attrEscape(name) + '</button>';
+      }).join("");
+  });
+}
+function renderGlossaryRows() {
+  var rows = $("glossary-rows");
+  if (!rows) return;
+  var map = writeGlossary(readGlossary());
+  var names = Object.keys(map);
+  rows.innerHTML = names.map(function (name) {
+    return '<div class="glossary-row" data-name="' + attrEscape(name) + '">'
+      + '<input class="glossary-name" type="text" maxlength="12" value="' + attrEscape(name) + '" aria-label="名字">'
+      + '<input class="glossary-color" type="color" value="' + map[name] + '" aria-label="' + attrEscape(name) + '的颜色">'
+      + '<button type="button" class="chip glossary-del" data-glossary-del="' + attrEscape(name) + '">删</button>'
+      + '</div>';
+  }).join("");
+  var empty = $("glossary-empty");
+  if (empty) empty.hidden = names.length > 0;
+  renderNameChips();
+}
+function remapPartPaintNames(renamed, map) {
+  ["title", "body", "close"].forEach(function (id) {
+    ["fill", "stroke"].forEach(function (kind) {
+      var el = $("part-" + id + "-" + kind);
+      if (!el || !el.value) return;
+      if (renamed[el.value]) el.value = renamed[el.value];
+      else if (el.value.charAt(0) !== "#" && !(el.value in map)) el.value = "";
+    });
+  });
+}
+function syncGlossaryFromRows() {
+  var rows = document.querySelectorAll(".glossary-row");
+  var map = {};
+  var renamed = {};
+  rows.forEach(function (row) {
+    var nameEl = row.querySelector(".glossary-name");
+    var colorEl = row.querySelector(".glossary-color");
+    var prev = row.getAttribute("data-name") || "";
+    var name = nameEl && nameEl.value ? nameEl.value.trim() : "";
+    var color = colorEl && colorEl.value ? colorEl.value : "";
+    if (!name || name.charAt(0) === "#" || name.length > 12) return;
+    if (!/^#[0-9a-fA-F]{6}$/.test(color)) return;
+    if (!(name in map)) map[name] = color;
+    if (prev && name && prev !== name) renamed[prev] = name;
+    row.setAttribute("data-name", name);
+    var del = row.querySelector("[data-glossary-del]");
+    if (del) del.setAttribute("data-glossary-del", name);
+  });
+  remapPartPaintNames(renamed, map);
+  writeGlossary(map);
+  renderNameChips();
+}
+function nextGlossaryName(map) {
+  var i = 1;
+  while (map["色" + i]) i += 1;
+  return "色" + i;
+}
+function addGlossaryName() {
+  var map = readGlossary();
+  if (Object.keys(map).length >= 8) return;
+  map[nextGlossaryName(map)] = "#62d0a8";
+  writeGlossary(map);
+  renderGlossaryRows();
+}
+function deleteGlossaryName(name) {
+  var map = readGlossary();
+  delete map[name];
+  remapPartPaintNames({}, map);
+  writeGlossary(map);
+  renderGlossaryRows();
+  if (selectedPart() !== "root") selectPart(selectedPart());
+}
+function selectedPaintName(kind) {
+  var on = document.querySelector("#part-" + kind + "-names [data-paint-name].is-on");
+  return on ? (on.getAttribute("data-paint-name") || "") : "";
+}
+function bindPaintName(kind, name) {
+  var id = selectedPart();
+  if (!id || id === "root") return;
+  if (name) {
+    setControl("part-" + id + "-" + kind, name);
+    var hex = readGlossary()[name];
+    if (hex) setControl("part-paint-" + kind, hex);
+  } else {
+    var picker = $("part-paint-" + kind);
+    setControl("part-" + id + "-" + kind, picker && picker.value ? picker.value : "");
+  }
+  renderNameChips();
+}
+function writeSelectedPartPaint() {
+  var id = selectedPart();
+  if (!id || id === "root") return;
+  var fill = isTextPart(id) ? $("part-paint-fill") : $("part-paint-fill-box");
+  var stroke = $("part-paint-stroke");
+  var width = $("part-paint-stroke-width");
+  var glossary = readGlossary();
+  var fillName = isTextPart(id) ? selectedPaintName("fill") : "";
+  var strokeName = selectedPaintName("stroke");
+  if (fillName) {
+    if (fill && fill.value) glossary[fillName] = fill.value;
+    setControl("part-" + id + "-fill", fillName);
+  } else {
+    setControl("part-" + id + "-fill", fill && fill.value ? fill.value : "");
+  }
+  if (strokeName) {
+    if (stroke && stroke.value) glossary[strokeName] = stroke.value;
+    setControl("part-" + id + "-stroke", strokeName);
+  } else {
+    setControl("part-" + id + "-stroke", stroke && stroke.value ? stroke.value : "");
+  }
+  setControl("part-" + id + "-stroke-width", width && width.value ? width.value : 0);
+  if (isTextPart(id)) {
+    var bgOn = typeof pressed === "function" && pressed("part-paint-background-on");
+    var bgEl = $("part-paint-background");
+    setControl("part-" + id + "-background", bgOn && bgEl && bgEl.value ? bgEl.value : "");
+  }
+  var opacityEl = $("part-paint-opacity");
+  if (opacityEl && opacityEl.value !== "") {
+    var opacity = Number(opacityEl.value);
+    if (Number.isFinite(opacity)) setControl("part-" + id + "-opacity", Math.max(0, Math.min(1, opacity)));
+  }
+  if (id !== "icon") {
+    var bgAssetEl = $("part-paint-bg-asset");
+    if (bgAssetEl) setControl("part-" + id + "-bg-asset", bgAssetEl.value || "");
+  }
+  if (isTextPart(id) && typeof pressed === "function") {
+    setControl("part-" + id + "-text-stroke", pressed("part-paint-text-stroke") ? "true" : "");
+    var textStrokeColorEl = $("part-paint-text-stroke-color");
+    if (pressed("part-paint-text-stroke") && textStrokeColorEl && textStrokeColorEl.value) {
+      setControl("part-" + id + "-text-stroke-color", textStrokeColorEl.value);
     }
+    var textStrokeWidthEl = $("part-paint-text-stroke-width");
+    if (pressed("part-paint-text-stroke") && textStrokeWidthEl && textStrokeWidthEl.value !== "") {
+      setControl("part-" + id + "-text-stroke-width", textStrokeWidthEl.value);
+    }
+    setControl("part-" + id + "-text-stroke-paint", pressed("part-paint-text-stroke") && pressed("part-paint-text-stroke-rainbow") ? "rainbow" : "");
+  }
+  if (typeof pressed === "function") {
+    setControl("part-" + id + "-stroke-paint", pressed("part-paint-stroke-paint") ? "gradient" : "");
+  }
+  if (id === "close") {
+    var closeColorEl = $("part-paint-close-icon-color");
+    if (closeColorEl && /^#[0-9a-fA-F]{6}$/.test(closeColorEl.value)) setControl("part-close-icon-color", closeColorEl.value);
+  }
+  writeGlossary(glossary);
+  document.querySelectorAll(".glossary-row").forEach(function (row) {
+    var name = row.getAttribute("data-name");
+    var colorEl = row.querySelector(".glossary-color");
+    if (colorEl && glossary[name]) colorEl.value = glossary[name];
+  });
+}
+function writeSelectedPartAxis(axis) {
+  var id = selectedPart();
+  if (!id || id === "root") return;
+  var bounds = { x: [0, 1920], y: [0, 1080], w: [1, 1920], h: [1, 1080], radius: [0, 240] };
+  var range = bounds[axis];
+  var el = $("part-paint-" + axis);
+  if (!range || !el) return;
+  if (el.value === "") {
+    setControl("part-" + id + "-" + axis, "");
     return;
   }
-  var ticker = draft.ticker || {};
-  var tracksInput = Number(ticker.trackCount);
-  var storedRatio = Math.round((Number(ticker.bandRatio) || 0.28) * 100);
-  var auto = Math.max(1, Math.floor((Math.max(stage.clientHeight, 220) * (storedRatio / 100) + 8) / 40));
-  var tracks = (!tracksInput || tracksInput < 1) ? auto : Math.round(tracksInput);
-  var ratio = (!tracksInput || tracksInput < 1) ? storedRatio : Math.max(15, Math.min(100, Math.round(tracks * 84 / 1080 * 100)));
-  var band = ticker.band || "top";
-  var randomOn = ticker.speedRandom === true;
-  var speed = Number(ticker.speedPxPerSec) || 400;
-  var previewWidth = Math.max(stage.clientWidth, 320);
-  var dur = Math.max(1.2, (previewWidth + 260) / speed).toFixed(2) + "s";
-  var bandEl = document.createElement("div");
-  bandEl.className = "ticker-band-preview";
-  bandEl.style.height = ratio + "%";
-  if (band === "top") bandEl.style.top = "0"; else bandEl.style.bottom = "0";
-  var samples = ["工具完成", "新消息", "系统警告"];
-  for (var t = 0; t < tracks; t += 1) {
-    var lane = document.createElement("div");
-    lane.className = "ticker-lane";
-    var card = document.createElement("div");
-    card.className = "ticker-card";
-    var flow = randomOn ? Math.max(1.2, (previewWidth + 260) / (220 + t * 170)).toFixed(2) + "s" : dur;
-    card.style.setProperty("--flow", flow);
-    card.style.animationDelay = (t * -1.1) + "s";
-    card.style.borderRadius = Math.min(radius, 12) + "px";
-    card.style.background = bg;
-    card.style.opacity = String(opacity);
-    card.innerHTML = "<strong>" + samples[t % samples.length] + "</strong><small>从右往左</small>";
-    lane.appendChild(card);
-    bandEl.appendChild(lane);
-  }
-  stage.appendChild(bandEl);
-  var label = document.createElement("div");
-  label.className = "stage-label";
-  label.textContent = "弹幕带 · " + (band === "top" ? "顶部" : "底部") + " · " + tracks + " 轨";
-  stage.appendChild(label);
+  var n = Math.round(Number(el.value));
+  if (!Number.isFinite(n)) return;
+  setControl("part-" + id + "-" + axis, Math.max(range[0], Math.min(range[1], n)));
 }
-function updateStageCard() { renderStudioPreview(); }
+function closePartEnabled() {
+  var behavior = ($("pipeline-behavior") && $("pipeline-behavior").value) || "stack";
+  if (behavior === "ticker") return false;
+  var closeChip = $("prop-dismiss-close");
+  if (closeChip && closeChip.getAttribute) return closeChip.getAttribute("aria-pressed") === "true";
+  var mode = $("prop-dismiss-mode") && $("prop-dismiss-mode").value;
+  return !mode || mode === "closeButton" || mode === "buttonOnly";
+}
+function setDismissChips(mode, autoOn) {
+  var clickMode = mode === "anywhere" ? "anywhere" : "closeButton";
+  setControl("prop-dismiss-mode", clickMode);
+  setPressed("prop-dismiss-close", clickMode === "closeButton");
+  setPressed("prop-dismiss-anywhere", clickMode === "anywhere");
+  if (autoOn !== undefined) setPressed("prop-dismiss-auto", !!autoOn);
+  syncClosePartVisibility();
+}
+function syncClosePartVisibility() {
+  var studio = document.querySelector(".studio");
+  if (studio) studio.setAttribute("data-close", closePartEnabled() ? "on" : "off");
+  if (!closePartEnabled() && selectedPart() === "close") selectPart("root");
+}
+function partShown(id) {
+  if (id === "icon" || id === "assistantName") {
+    var extra = $("part-" + id + "-show");
+    return !!(extra && extra.value === "true");
+  }
+  if (id !== "title" && id !== "body") return true;
+  var titleEl = $("part-title-show");
+  var bodyEl = $("part-body-show");
+  var titleOn = !(titleEl && titleEl.value === "false");
+  var bodyOn = !(bodyEl && bodyEl.value === "false");
+  if (!titleOn && !bodyOn) titleOn = true;
+  return id === "title" ? titleOn : bodyOn;
+}
+function syncPartChipOffState() {
+  document.querySelectorAll("#part-chip-row [data-part]").forEach(function (chip) {
+    var partId = chip.getAttribute("data-part");
+    if (isShowablePart(partId)) chip.classList.toggle("is-off", !partShown(partId));
+  });
+}
+function fontFamilyCss(id) {
+  if (id && String(id).indexOf("font:") === 0) return '"nh-font-' + String(id).slice(5) + '"';
+  if (id === "heiti") return "SimHei,sans-serif";
+  if (id === "songti") return "SimSun,serif";
+  if (id === "segoe") return "'Segoe UI',sans-serif";
+  return "'Microsoft YaHei','Segoe UI',sans-serif";
+}
+var fontFaceCache = {};
+function ensureStudioFont(assetId) {
+  if (!assetId || Object.prototype.hasOwnProperty.call(fontFaceCache, assetId)) return;
+  fontFaceCache[assetId] = true;
+  json("font-assets/" + encodeURIComponent(assetId) + "/file").then(function (data) {
+    if (!data || !data.dataUrl) return;
+    var style = document.createElement("style");
+    style.textContent = '@font-face{font-family:"nh-font-' + assetId + '";src:url("' + data.dataUrl + '");}';
+    document.head.appendChild(style);
+  }).catch(function () {});
+}
+function appendFontOption(asset) {
+  var sel = $("part-paint-font-family");
+  if (!sel || !asset || !asset.assetId) return;
+  var value = "font:" + asset.assetId;
+  if ([].some.call(sel.options, function (opt) { return opt.value === value; })) return;
+  var opt = document.createElement("option");
+  opt.value = value;
+  opt.textContent = asset.name || asset.assetId;
+  sel.appendChild(opt);
+}
+function importFontAsset() {
+  json("font-assets/import", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" }).then(function (result) {
+    if (!result || result.cancelled || !result.asset) return;
+    appendFontOption(result.asset);
+    var id = selectedPart();
+    if (isTextPart(id)) {
+      setControl("part-paint-font-family", "font:" + result.asset.assetId);
+      setControl("part-" + id + "-font-family", "font:" + result.asset.assetId);
+    }
+    markVisualDirty();
+    syncPreview();
+  }).catch(function (error) {
+    feedback("visual-settings-feedback", (error.code ? error.code + " · " : "") + error.message, "error");
+  });
+}
+function hashText(value) {
+  var h = 2166136261;
+  var s = String(value || "");
+  for (var i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return h >>> 0;
+}
+function hueCss(seed, index) {
+  var hue = ((seed / 4294967296) + index * 0.61803398875) % 1;
+  if (hue < 0) hue += 1;
+  var sector = hue * 6;
+  var bucket = Math.floor(sector);
+  var f = sector - bucket;
+  var q = 1 - f;
+  var r = 1, g = 1, b = 1;
+  switch (bucket % 6) {
+    case 0: r = 1; g = f; b = 0; break;
+    case 1: r = q; g = 1; b = 0; break;
+    case 2: r = 0; g = 1; b = f; break;
+    case 3: r = 0; g = q; b = 1; break;
+    case 4: r = f; g = 0; b = 1; break;
+    default: r = 1; g = 0; b = q; break;
+  }
+  return "rgb(" + Math.round(r * 255) + "," + Math.round(g * 255) + "," + Math.round(b * 255) + ")";
+}
+function syncTextPaintUi(id) {
+  var text = isTextPart(id);
+  var row = $("part-text-fields");
+  if (row) {
+    if (text) row.removeAttribute("hidden");
+    else row.setAttribute("hidden", "");
+  }
+  var rainbow = text && ($("part-" + id + "-text-paint") && $("part-" + id + "-text-paint").value === "rainbow");
+  setPressed("part-paint-rainbow", rainbow);
+  var fill = $("part-paint-fill");
+  if (fill) fill.disabled = !!rainbow;
+  if (!text) return;
+  var boldEl = $("part-" + id + "-font-bold");
+  var italicEl = $("part-" + id + "-font-italic");
+  var underlineEl = $("part-" + id + "-font-underline");
+  var strikeEl = $("part-" + id + "-font-strike");
+  setPressed("part-paint-font-bold", id === "title" ? !(boldEl && boldEl.value === "false") : !!(boldEl && boldEl.value === "true"));
+  setPressed("part-paint-font-italic", !!(italicEl && italicEl.value === "true"));
+  setPressed("part-paint-font-underline", !!(underlineEl && underlineEl.value === "true"));
+  setPressed("part-paint-font-strike", !!(strikeEl && strikeEl.value === "true"));
+  if (typeof syncTextStrokeUi === "function") syncTextStrokeUi(id);
+}
+function syncTextStrokeUi(id) {
+  var text = isTextPart(id);
+  var hid = $("part-" + id + "-text-stroke");
+  var on = !!(text && hid && hid.value === "true");
+  var rainbowHid = $("part-" + id + "-text-stroke-paint");
+  var rainbow = !!(on && rainbowHid && rainbowHid.value === "rainbow");
+  setPressed("part-paint-text-stroke", on);
+  setPressed("part-paint-text-stroke-rainbow", rainbow);
+  setElHidden($("part-paint-text-stroke-rainbow"), !on);
+  setElHidden($("part-text-stroke-color-field"), !(on && !rainbow));
+  setElHidden($("part-text-stroke-width-field"), !on);
+  if (!on) return;
+  var colorHid = $("part-" + id + "-text-stroke-color");
+  var hex = colorHid && /^#[0-9a-fA-F]{6}$/.test(colorHid.value) ? colorHid.value : "#0a0d0d";
+  setControl("part-paint-text-stroke-color", hex);
+  var widthHid = $("part-" + id + "-text-stroke-width");
+  var width = widthHid && widthHid.value !== "" ? Math.round(Number(widthHid.value)) : 2;
+  if (!Number.isFinite(width) || width < 1) width = 2;
+  if (width > 16) width = 16;
+  setControl("part-paint-text-stroke-width", width);
+}
+function toggleSelectedTextStroke() {
+  var id = selectedPart();
+  if (!isTextPart(id)) return;
+  var hidden = $("part-" + id + "-text-stroke");
+  if (!hidden) return;
+  var on = hidden.value === "true";
+  hidden.value = on ? "" : "true";
+  if (!on) {
+    var colorHidden = $("part-" + id + "-text-stroke-color");
+    var colorEl = $("part-paint-text-stroke-color");
+    var hex = colorHidden && /^#[0-9a-fA-F]{6}$/.test(colorHidden.value)
+      ? colorHidden.value
+      : (colorEl && /^#[0-9a-fA-F]{6}$/.test(colorEl.value) ? colorEl.value : "#0a0d0d");
+    if (colorHidden) colorHidden.value = hex;
+    if (colorEl) colorEl.value = hex;
+    var widthHidden = $("part-" + id + "-text-stroke-width");
+    var widthEl = $("part-paint-text-stroke-width");
+    if (widthHidden && (!widthHidden.value || widthHidden.value === "")) widthHidden.value = "2";
+    if (widthEl && (!widthEl.value || widthEl.value === "")) widthEl.value = "2";
+  } else {
+    setControl("part-" + id + "-text-stroke-paint", "");
+  }
+  syncTextStrokeUi(id);
+}
+function toggleSelectedTextStrokePaint() {
+  var id = selectedPart();
+  if (!isTextPart(id)) return;
+  var strokeHid = $("part-" + id + "-text-stroke");
+  if (!strokeHid || strokeHid.value !== "true") return;
+  var hidden = $("part-" + id + "-text-stroke-paint");
+  if (!hidden) return;
+  hidden.value = hidden.value === "rainbow" ? "" : "rainbow";
+  syncTextStrokeUi(id);
+}
+function syncStrokePaintUi(id) {
+  if (id === "root") {
+    setPressed("prop-border-paint", pressed("prop-border-paint"));
+    return;
+  }
+  var hid = $("part-" + id + "-stroke-paint");
+  setPressed("part-paint-stroke-paint", !!(hid && hid.value === "gradient"));
+}
+function toggleSelectedStrokePaint() {
+  var id = selectedPart();
+  if (!id || id === "root") return;
+  var hidden = $("part-" + id + "-stroke-paint");
+  if (!hidden) return;
+  hidden.value = hidden.value === "gradient" ? "" : "gradient";
+  syncStrokePaintUi(id);
+}
+function toggleRootBorderPaint() {
+  var chip = $("prop-border-paint");
+  if (!chip) return;
+  setPressed("prop-border-paint", !pressed("prop-border-paint"));
+}
+function syncCloseIconUi() {
+  var group = $("part-close-icon-group");
+  var on = selectedPart() === "close";
+  setElHidden(group, !on);
+  if (!on) return;
+  var hid = $("part-close-icon");
+  var current = hid && hid.value ? hid.value : "x";
+  document.querySelectorAll("[data-close-icon]").forEach(function (chip) {
+    var match = chip.getAttribute("data-close-icon") === current;
+    chip.classList.toggle("is-on", match);
+    chip.setAttribute("aria-pressed", match ? "true" : "false");
+  });
+  var colorHid = $("part-close-icon-color");
+  var hex = colorHid && /^#[0-9a-fA-F]{6}$/.test(colorHid.value) ? colorHid.value : "#d1e0e0";
+  setControl("part-paint-close-icon-color", hex);
+}
+function setCloseIcon(kind) {
+  var allowed = { none: true, x: true, circle: true, minus: true, star: true, plus: true, disc: true };
+  if (!allowed[kind]) return;
+  setControl("part-close-icon", kind === "x" ? "" : kind);
+  syncCloseIconUi();
+}
+function syncFitWidthUi(id) {
+  var canFit = isFitWidthPart(id);
+  var field = $("part-fit-width-field");
+  if (field) {
+    if (canFit) field.removeAttribute("hidden");
+    else field.setAttribute("hidden", "");
+  }
+  var on = canFit && $("part-" + id + "-fit-width") && $("part-" + id + "-fit-width").value === "true";
+  setPressed("part-paint-fit-width", on);
+  var compensateOn = canFit && $("part-" + id + "-fit-compensate") && $("part-" + id + "-fit-compensate").value === "true";
+  setPressed("part-paint-fit-compensate", compensateOn);
+  var compensateChip = $("part-paint-fit-compensate");
+  if (compensateChip) {
+    compensateChip.classList.toggle("is-locked", !on);
+    if (on) compensateChip.removeAttribute("aria-disabled");
+    else compensateChip.setAttribute("aria-disabled", "true");
+  }
+  var widthEl = $("part-paint-w");
+  if (widthEl) widthEl.disabled = !!on;
+}
+function toggleSelectedFitWidth() {
+  var id = selectedPart();
+  if (!isFitWidthPart(id)) return;
+  var hidden = $("part-" + id + "-fit-width");
+  if (!hidden) return;
+  hidden.value = hidden.value === "true" ? "" : "true";
+  syncFitWidthUi(id);
+}
+function toggleSelectedFitCompensate() {
+  var id = selectedPart();
+  if (!isFitWidthPart(id)) return;
+  var fit = $("part-" + id + "-fit-width");
+  if (!fit || fit.value !== "true") return;
+  var hidden = $("part-" + id + "-fit-compensate");
+  if (!hidden) return;
+  hidden.value = hidden.value === "true" ? "" : "true";
+  syncFitWidthUi(id);
+}
+function toggleSelectedTextPaint() {
+  var id = selectedPart();
+  if (!isTextPart(id)) return;
+  var hidden = $("part-" + id + "-text-paint");
+  if (!hidden) return;
+  hidden.value = hidden.value === "rainbow" ? "" : "rainbow";
+  syncTextPaintUi(id);
+}
+function toggleSelectedTextStyle(kind) {
+  var id = selectedPart();
+  if (!isTextPart(id)) return;
+  if (kind !== "bold" && kind !== "italic" && kind !== "underline" && kind !== "strike") return;
+  var hidden = $("part-" + id + "-font-" + kind);
+  if (!hidden) return;
+  var on = kind === "bold"
+    ? (id === "title" ? hidden.value !== "false" : hidden.value === "true")
+    : hidden.value === "true";
+  hidden.value = on ? "false" : "true";
+  if (kind !== "bold" && hidden.value === "false") hidden.value = "";
+  syncTextPaintUi(id);
+}
+function writeSelectedPartFont() {
+  var id = selectedPart();
+  if (!isTextPart(id)) return;
+  var sizeEl = $("part-paint-font-size");
+  var familyEl = $("part-paint-font-family");
+  if (sizeEl && sizeEl.value !== "") {
+    var n = Math.round(Number(sizeEl.value));
+    if (Number.isFinite(n)) setControl("part-" + id + "-font-size", Math.max(8, Math.min(72, n)));
+  }
+  if (familyEl && familyEl.value) setControl("part-" + id + "-font-family", familyEl.value);
+}
+function syncPartShowChip(id) {
+  var row = $("part-show-row");
+  var chip = $("part-show");
+  var showable = isShowablePart(id);
+  if (row) {
+    if (showable) row.removeAttribute("hidden");
+    else row.setAttribute("hidden", "");
+  }
+  if (!chip || !showable) return;
+  var on = partShown(id);
+  var other = id === "title" ? "body" : (id === "body" ? "title" : "");
+  var lastOn = (id === "title" || id === "body") && on && other && !partShown(other);
+  chip.setAttribute("aria-pressed", on ? "true" : "false");
+  chip.classList.toggle("is-on", on);
+  chip.classList.toggle("is-locked", lastOn);
+  if (lastOn) chip.setAttribute("aria-disabled", "true");
+  else chip.removeAttribute("aria-disabled");
+}
+function toggleSelectedPartShow() {
+  var id = selectedPart();
+  if (!isShowablePart(id)) return;
+  var hidden = $("part-" + id + "-show");
+  if (!hidden) return;
+  var on = partShown(id);
+  if (id === "title" || id === "body") {
+    var other = id === "title" ? "body" : "title";
+    if (on && !partShown(other)) return;
+    hidden.value = on ? "false" : "";
+  } else {
+    hidden.value = on ? "false" : "true";
+  }
+  syncPartChipOffState();
+  syncPartShowChip(id);
+}
+function defaultPartRect(id) {
+  var width = Math.trunc(Number($("prop-width") && $("prop-width").value));
+  var height = Math.trunc(Number($("prop-height") && $("prop-height").value));
+  if (!Number.isFinite(width)) width = 420;
+  if (!Number.isFinite(height)) height = 220;
+  var behavior = ($("pipeline-behavior") && $("pipeline-behavior").value) || "stack";
+  var ticker = behavior === "ticker";
+  var popup = behavior === "popup";
+  var showClose = closePartEnabled();
+  var titleShowEl = $("part-title-show");
+  var bodyShowEl = $("part-body-show");
+  var iconShowEl = $("part-icon-show");
+  var nameShowEl = $("part-assistantName-show");
+  var showBody = !(bodyShowEl && bodyShowEl.value === "false");
+  var showTitle = !(titleShowEl && titleShowEl.value === "false") || !showBody;
+  var showIcon = !!(iconShowEl && iconShowEl.value === "true");
+  var showAssistantName = !!(nameShowEl && nameShowEl.value === "true");
+  var rects = {};
+  if (ticker) {
+    var textLeft = showIcon ? 38 : 14;
+    var textWidth = Math.max(1, width - textLeft - 14);
+    var fillY = height < 48 ? 4 : 8;
+    var fillH = Math.max(1, height - fillY * 2);
+    if (showIcon) rects.icon = { x: 8, y: Math.max(0, Math.trunc((height - 24) / 2)), w: 24, h: 24, radius: 12 };
+    if (showAssistantName) rects.assistantName = { x: textLeft, y: 2, w: textWidth, h: 14 };
+    if (height < 70 || !showTitle || !showBody) {
+      var fillId = showTitle ? "title" : "body";
+      var y = showAssistantName ? fillY + 12 : fillY;
+      var h = showAssistantName ? Math.max(1, fillH - 12) : fillH;
+      rects[fillId] = { x: textLeft, y: y, w: textWidth, h: h };
+    } else {
+      rects.title = { x: textLeft, y: showAssistantName ? 16 : 6, w: textWidth, h: 28 };
+      rects.body = { x: textLeft, y: showAssistantName ? 44 : 34, w: textWidth, h: Math.max(1, height - (showAssistantName ? 44 : 34) - 6) };
+    }
+  } else {
+    var insetLeft = showIcon ? 66 : (popup ? 36 : 30);
+    var textTop = showAssistantName ? 36 : 24;
+    var bodyTop = showAssistantName ? 74 : 62;
+    var splitBodyHeight = Math.max(1, height - 22 - bodyTop);
+    var fillHeight = Math.max(1, height - 22 - textTop);
+    var size = 28;
+    var pad = 12;
+    var closeX = width - pad - size;
+    var closeY = pad;
+    var titleWidth = showClose ? Math.max(1, closeX - 8 - insetLeft) : Math.max(1, width - 24 - insetLeft);
+    var bodyWidth = Math.max(1, width - 24 - insetLeft);
+    if (showIcon) rects.icon = { x: 16, y: 22, w: 40, h: 40, radius: 20 };
+    if (showAssistantName) rects.assistantName = { x: showIcon ? 66 : 30, y: 16, w: titleWidth, h: 18 };
+    if (!showTitle || !showBody) {
+      var onlyId = showTitle ? "title" : "body";
+      rects[onlyId] = { x: insetLeft, y: textTop, w: onlyId === "title" ? titleWidth : bodyWidth, h: fillHeight };
+    } else {
+      rects.title = { x: insetLeft, y: textTop, w: titleWidth, h: 34 };
+      rects.body = { x: insetLeft, y: bodyTop, w: bodyWidth, h: splitBodyHeight };
+    }
+    if (showClose) rects.close = { x: closeX, y: closeY, w: size, h: size, radius: Math.trunc(size / 2) };
+  }
+  return rects[id] || { x: 0, y: 0, w: 1, h: 1 };
+}
+function hiddenAxis(el, fallback) {
+  return el && el.value !== "" ? el.value : fallback;
+}
+function flushSelectedPartEditor() {
+  var selected = $("part-selected");
+  var id = selected && selected.value;
+  if (!isSelectablePart(id) && typeof selectedPart === "function") id = selectedPart();
+  if (id === "root" || !isSelectablePart(id)) return;
+  var fill = isTextPart(id) ? $("part-paint-fill") : $("part-paint-fill-box");
+  var stroke = $("part-paint-stroke");
+  var width = $("part-paint-stroke-width");
+  var hidFill = $("part-" + id + "-fill");
+  var hidStroke = $("part-" + id + "-stroke");
+  var hidWidth = $("part-" + id + "-stroke-width");
+  if (hidFill) {
+    var currentFill = hidFill.value || "";
+    if (!currentFill || currentFill.charAt(0) === "#") hidFill.value = fill && fill.value ? fill.value : "";
+  }
+  if (hidStroke) {
+    var currentStroke = hidStroke.value || "";
+    if (!currentStroke || currentStroke.charAt(0) === "#") hidStroke.value = stroke && stroke.value ? stroke.value : "";
+  }
+  if (hidWidth) hidWidth.value = width && width.value !== undefined && width.value !== "" ? String(width.value) : "0";
+  if (isTextPart(id)) {
+    var sizeEl = $("part-paint-font-size");
+    var familyEl = $("part-paint-font-family");
+    var hidSize = $("part-" + id + "-font-size");
+    var hidFamily = $("part-" + id + "-font-family");
+    var hidPaint = $("part-" + id + "-text-paint");
+    if (hidSize && sizeEl && sizeEl.value !== "") hidSize.value = sizeEl.value;
+    if (hidFamily && familyEl && familyEl.value) hidFamily.value = familyEl.value;
+    if (hidPaint && typeof pressed === "function") hidPaint.value = pressed("part-paint-rainbow") ? "rainbow" : "";
+    if (typeof pressed === "function") {
+      setControl("part-" + id + "-font-bold", pressed("part-paint-font-bold") ? "true" : "false");
+      setControl("part-" + id + "-font-italic", pressed("part-paint-font-italic") ? "true" : "");
+      setControl("part-" + id + "-font-underline", pressed("part-paint-font-underline") ? "true" : "");
+      setControl("part-" + id + "-font-strike", pressed("part-paint-font-strike") ? "true" : "");
+      setControl("part-" + id + "-text-stroke", pressed("part-paint-text-stroke") ? "true" : "");
+      var textStrokeColorEl = $("part-paint-text-stroke-color");
+      if (pressed("part-paint-text-stroke") && textStrokeColorEl && textStrokeColorEl.value) {
+        setControl("part-" + id + "-text-stroke-color", textStrokeColorEl.value);
+      }
+      var textStrokeWidthEl = $("part-paint-text-stroke-width");
+      if (pressed("part-paint-text-stroke") && textStrokeWidthEl && textStrokeWidthEl.value !== "") {
+        setControl("part-" + id + "-text-stroke-width", textStrokeWidthEl.value);
+      }
+      setControl("part-" + id + "-text-stroke-paint", pressed("part-paint-text-stroke") && pressed("part-paint-text-stroke-rainbow") ? "rainbow" : "");
+    }
+  }
+  if (typeof pressed === "function") {
+    setControl("part-" + id + "-stroke-paint", pressed("part-paint-stroke-paint") ? "gradient" : "");
+  }
+  if (id === "close") {
+    var closeColorEl = $("part-paint-close-icon-color");
+    if (closeColorEl && /^#[0-9a-fA-F]{6}$/.test(closeColorEl.value)) setControl("part-close-icon-color", closeColorEl.value);
+  }
+  ["x", "y", "w", "h", "radius"].forEach(function (axis) {
+    var hidden = $("part-" + id + "-" + axis);
+    var visible = $("part-paint-" + axis);
+    if (!hidden || !visible || hidden.value === "") return;
+    hidden.value = visible.value;
+  });
+  if (id === "icon") {
+    var sourceEl = $("part-icon-source");
+    var assetEl = $("part-icon-asset");
+    if (sourceEl && !sourceEl.value) sourceEl.value = "assistant";
+    if (assetEl) setControl("part-icon-asset-id", assetEl.value || "");
+  }
+  var hidBg = $("part-" + id + "-background");
+  if (hidBg && isTextPart(id)) {
+    var bgEl = $("part-paint-background");
+    if (typeof pressed === "function") hidBg.value = pressed("part-paint-background-on") && bgEl && bgEl.value ? bgEl.value : "";
+    else if (bgEl && bgEl.value) hidBg.value = bgEl.value;
+  }
+  var hidOp = $("part-" + id + "-opacity");
+  var opEl = $("part-paint-opacity");
+  if (hidOp && opEl && opEl.value !== "") hidOp.value = opEl.value;
+  if (id !== "icon") {
+    var hidAsset = $("part-" + id + "-bg-asset");
+    var assetPaint = $("part-paint-bg-asset");
+    if (hidAsset && assetPaint) hidAsset.value = assetPaint.value || "";
+  }
+  if (isFitWidthPart(id) && typeof pressed === "function") {
+    setControl("part-" + id + "-fit-width", pressed("part-paint-fit-width") ? "true" : "");
+    setControl("part-" + id + "-fit-compensate", pressed("part-paint-fit-compensate") ? "true" : "");
+  }
+}
+function setElHidden(el, hidden) {
+  if (!el) return;
+  if (hidden) el.setAttribute("hidden", "");
+  else el.removeAttribute("hidden");
+}
+function syncPartBackgroundUi(id) {
+  var text = isTextPart(id);
+  var hid = $("part-" + id + "-background");
+  var on = !!(text && hid && hid.value);
+  setPressed("part-paint-background-on", on);
+  setElHidden($("part-background-on-row"), !text);
+  setElHidden($("part-background-color-field"), !(text && on));
+  setElHidden($("part-fill-as-bg-field"), text);
+  setElHidden($("part-text-group"), !text);
+  setElHidden($("part-bg-asset-field"), id === "icon" || id === "root");
+  var note = $("part-bg-note");
+  if (note) note.textContent = text ? "垫在字下面，让字能看清。没有就不画。" : "这块零件的底。关闭和图标默认用自己的底色。";
+}
+function toggleSelectedPartBackground() {
+  var id = selectedPart();
+  if (!isTextPart(id)) return;
+  var hid = $("part-" + id + "-background");
+  if (!hid) return;
+  if (hid.value) hid.value = "";
+  else {
+    var bg = $("part-paint-background");
+    hid.value = (bg && bg.value) || "#1d2b27";
+  }
+  syncPartBackgroundUi(id);
+}
+function selectPart(id, skipFlush) {
+  if (!skipFlush && typeof flushSelectedPartEditor === "function") flushSelectedPartEditor();
+  var behavior = ($("pipeline-behavior") && $("pipeline-behavior").value) || "stack";
+  if (id === "close" && (behavior === "ticker" || !closePartEnabled())) id = "root";
+  if (!id) id = "root";
+  rememberSelectedPart(id);
+  setControl("part-selected", id);
+  document.querySelectorAll("#part-chip-row [data-part]").forEach(function (chip) {
+    var on = chip.getAttribute("data-part") === id;
+    chip.classList.toggle("is-on", on);
+    chip.classList.toggle("is-selected", on);
+    chip.setAttribute("aria-pressed", on ? "true" : "false");
+  });
+  var root = $("root-fields");
+  var part = $("part-fields");
+  if (root) {
+    if (id === "root") root.removeAttribute("hidden");
+    else root.setAttribute("hidden", "");
+  }
+  if (part) {
+    if (id === "root") part.setAttribute("hidden", "");
+    else part.removeAttribute("hidden");
+  }
+  var iconFieldsRoot = $("part-icon-fields");
+  if (iconFieldsRoot) {
+    if (id === "icon") iconFieldsRoot.removeAttribute("hidden");
+    else iconFieldsRoot.setAttribute("hidden", "");
+  }
+  var copy = $("part-fields-copy");
+  if (copy) copy.textContent = id === "title" ? "正在编标题" : id === "body" ? "正在编正文" : id === "icon" ? "正在编图标" : id === "assistantName" ? "正在编助手名" : "正在编关闭";
+  var fillLabel = document.querySelector('label[for="part-paint-fill"]');
+  if (fillLabel) fillLabel.textContent = "文字";
+  if (typeof syncPartShowChip === "function") syncPartShowChip(id);
+  if (typeof syncPartChipOffState === "function") syncPartChipOffState();
+  if (typeof syncTextPaintUi === "function") syncTextPaintUi(id);
+  if (typeof syncTextStrokeUi === "function") syncTextStrokeUi(id);
+  if (typeof syncStrokePaintUi === "function") syncStrokePaintUi(id);
+  if (typeof syncCloseIconUi === "function") syncCloseIconUi();
+  if (typeof syncPartBackgroundUi === "function") syncPartBackgroundUi(id);
+  if (typeof syncFitWidthUi === "function") syncFitWidthUi(id);
+  if (id !== "root") {
+    var storedFill = $("part-" + id + "-fill");
+    var storedStroke = $("part-" + id + "-stroke");
+    var storedWidth = $("part-" + id + "-stroke-width");
+    var defaults = PART_PAINT_DEFAULTS[id] || PART_PAINT_DEFAULTS.title;
+    var resolvedFill = resolvePaintColor(storedFill && storedFill.value) || defaults.fill;
+    if (isTextPart(id)) setControl("part-paint-fill", resolvedFill);
+    else setControl("part-paint-fill-box", resolvedFill);
+    setControl("part-paint-stroke", resolvePaintColor(storedStroke && storedStroke.value) || defaults.stroke);
+    setControl("part-paint-stroke-width", (storedWidth && storedWidth.value) || 0);
+    var storedBg = $("part-" + id + "-background");
+    setControl("part-paint-background", resolvePaintColor(storedBg && storedBg.value) || "#1d2b27");
+    var storedOp = $("part-" + id + "-opacity");
+    setControl("part-paint-opacity", (storedOp && storedOp.value !== "") ? storedOp.value : 1);
+    if (id !== "icon") setControl("part-paint-bg-asset", ($("part-" + id + "-bg-asset") && $("part-" + id + "-bg-asset").value) || "");
+    var rect = defaultPartRect(id);
+    setControl("part-paint-x", hiddenAxis($("part-" + id + "-x"), rect.x));
+    setControl("part-paint-y", hiddenAxis($("part-" + id + "-y"), rect.y));
+    setControl("part-paint-w", hiddenAxis($("part-" + id + "-w"), rect.w));
+    setControl("part-paint-h", hiddenAxis($("part-" + id + "-h"), rect.h));
+    setControl("part-paint-radius", hiddenAxis($("part-" + id + "-radius"), rect.radius != null ? rect.radius : 0));
+    if (isTextPart(id)) {
+      setControl("part-paint-font-size", hiddenAxis($("part-" + id + "-font-size"), id === "assistantName" ? 12 : (id === "body" ? 13 : 20)));
+      setControl("part-paint-font-family", hiddenAxis($("part-" + id + "-font-family"), "yahei"));
+    }
+    var iconFields = $("part-icon-fields");
+    if (iconFields) {
+      if (id === "icon") iconFields.removeAttribute("hidden");
+      else iconFields.setAttribute("hidden", "");
+    }
+    if (id === "icon") syncIconSourceUi();
+    if (typeof syncStudioSampleUi === "function") syncStudioSampleUi();
+  }
+  if (id === "root") renderGlossaryRows();
+  else renderNameChips();
+}
 function syncStudioReadouts(target) {
   if (!target) return;
   if (target.id === "ticker-track-count") {
@@ -119,6 +964,9 @@ function syncStudioReadouts(target) {
   }
   if (target.id === "prop-anchor") {
     document.querySelectorAll(".dock-cell").forEach(function (c) { c.classList.toggle("is-on", c.getAttribute("data-anchor") === target.value); });
+    refreshDockMargins();
+    refreshGrowPad();
+    refreshWrapPad();
   }
   if (target.id === "ticker-band") {
     var bandEl = $("ticker-band-control");
@@ -130,64 +978,7 @@ function syncStudioReadouts(target) {
     setControl("prop-hold-duration", ms);
   }
 }
-function bindStageDrag() {
-  var stage = $("visual-preview-stage");
-  if (!stage || !window.PointerEvent) return;
-  var drag = null;
-  function clamp(value, min, max) { return Math.min(Math.max(value, min), Math.max(min, max)); }
-  function finish() {
-    if (!drag) return;
-    var card = drag.card;
-    var rect = stage.getBoundingClientRect();
-    var cardRect = card.getBoundingClientRect();
-    var left = Math.round(cardRect.left - rect.left);
-    var top = Math.round(cardRect.top - rect.top);
-    var right = Math.max(0, Math.round(rect.width - cardRect.width - left));
-    var bottom = Math.max(0, Math.round(rect.height - cardRect.height - top));
-    var horizontal = left <= right ? "left" : "right";
-    var vertical = top <= bottom ? "top" : "bottom";
-    setControl("prop-anchor", vertical + "-" + horizontal);
-    setControl("prop-margin-left", left);
-    setControl("prop-margin-right", right);
-    setControl("prop-margin-top", top);
-    setControl("prop-margin-bottom", bottom);
-    card.classList.remove("is-dragging");
-    drag = null;
-    markVisualDirty();
-    syncPreview();
-  }
-  stage.addEventListener("pointerdown", function (event) {
-    var card = event.target && event.target.closest ? event.target.closest("[data-preview-card]") : null;
-    if (!card || card.getAttribute("data-preview-card") !== $("pipeline-type").value) return;
-    var rect = stage.getBoundingClientRect();
-    var cardRect = card.getBoundingClientRect();
-    drag = { card: card, x: event.clientX, y: event.clientY, left: cardRect.left - rect.left, top: cardRect.top - rect.top };
-    card.style.left = drag.left + "px";
-    card.style.top = drag.top + "px";
-    card.style.right = "auto";
-    card.style.bottom = "auto";
-    card.style.removeProperty("transform");
-    if (card.setPointerCapture) card.setPointerCapture(event.pointerId);
-    card.classList.add("is-dragging");
-    event.preventDefault();
-  });
-  stage.addEventListener("pointermove", function (event) {
-    if (!drag) return;
-    var rect = stage.getBoundingClientRect();
-    var cardRect = drag.card.getBoundingClientRect();
-    var left = clamp(drag.left + event.clientX - drag.x, 0, rect.width - cardRect.width);
-    var top = clamp(drag.top + event.clientY - drag.y, 0, rect.height - cardRect.height);
-    drag.card.style.left = left + "px";
-    drag.card.style.top = top + "px";
-  });
-  stage.addEventListener("pointerup", finish);
-  stage.addEventListener("pointercancel", finish);
-  window.__notificationHubStageDragDispose = function () {
-    stage.replaceWith(stage.cloneNode(true));
-    window.__notificationHubStageDragDispose = null;
-  };
-}
-function applyModeEditor(value) {
+function applyModeEditor(value, restorePart) {
   var config = modeConfig(value);
   var meta = { minimal: { behavior: "stack", anchor: "bottom-right", size: "medium", aspectRatio: "default", gap: 8, margin: 18, color: "#0e1916", radius: 16, opacity: .96, duration: 30000, hold: 30000, width: 420, height: 220 } }[value] || {};
   var behavior = config.behavior || {};
@@ -201,6 +992,9 @@ function applyModeEditor(value) {
   var background = skin.background || {};
   var decoration = skin.decoration || {};
   setControl("prop-anchor", space.anchor || behavior.anchor || meta.anchor);
+  setControl("prop-grow", space.grow || ((space.anchor || behavior.anchor || meta.anchor || "bottom-right").slice(0, 3) === "top" ? "down" : "up"));
+  setControl("prop-wrap", space.wrap === "off" || space.wrap === "snake" ? space.wrap : "parallel");
+  if (space.wrap === "snake" || space.wrap === "parallel") lastWrapPath = space.wrap;
   setControl("prop-size", space.size || appearance.size || meta.size);
   setControl("prop-gap", space.gap === undefined ? meta.gap : space.gap);
   var legacyMargin = space.margin === undefined ? (behavior.margin === undefined ? meta.margin : behavior.margin) : space.margin;
@@ -213,9 +1007,32 @@ function applyModeEditor(value) {
   setControl("skin-bg-color", background.color || appearance.backgroundColor || meta.color);
   setControl("prop-border-radius", shape.borderRadius === undefined ? (decoration.borderRadius === undefined ? meta.radius : decoration.borderRadius) : shape.borderRadius);
   setControl("prop-opacity", shape.opacity === undefined ? (decoration.opacity === undefined ? meta.opacity : decoration.opacity) : shape.opacity);
+  setControl("prop-border-width", shape.borderWidth === undefined ? (appearance.borderWidth === undefined ? (decoration.borderWidth === undefined ? 0 : decoration.borderWidth) : appearance.borderWidth) : shape.borderWidth);
+  setControl("prop-border-color", shape.borderColor || appearance.borderColor || decoration.borderColor || "#62d0a8");
+  setPressed("prop-border-paint", appearance.borderPaint === "gradient");
+  setControl("prop-paint-overflow", appearance.paintOverflow === undefined ? 0 : appearance.paintOverflow);
+  refreshDockMargins();
+  refreshGrowPad();
+  refreshWrapPad();
+  var savedParts = config.parts || {};
+  setPartHidden("title", savedParts.title);
+  setPartHidden("body", savedParts.body);
+  setPartHidden("close", savedParts.close);
+  setControl("glossary-json", JSON.stringify(config.glossary || {}));
+  renderGlossaryRows();
+  var part = restorePart ? (rememberedSelectedPart() || ($("part-selected") && $("part-selected").value) || "root") : "root";
+  selectPart(part, true);
   setControl("prop-duration", lifecycle.durationMs === undefined ? meta.duration : lifecycle.durationMs);
-  setControl("prop-hold-duration", lifecycle.holdDurationMs === undefined ? meta.hold : lifecycle.holdDurationMs);
-  setControl("prop-dismiss-mode", interaction.dismissMode || "closeButton");
+  var holdMs = lifecycle.holdDurationMs === undefined ? (interaction.timeoutMs === undefined ? meta.hold : interaction.timeoutMs) : lifecycle.holdDurationMs;
+  setControl("prop-hold-duration", holdMs);
+  setControl("hold-seconds", Math.max(1, Math.round(Number(holdMs) / 1000) || 30));
+  var storedDismiss = interaction.dismissMode || "closeButton";
+  var autoOn = interaction.autoDismiss === "on" || interaction.autoDismiss === true || storedDismiss === "timeout";
+  setDismissChips(storedDismiss, autoOn);
+  var hoverOn = interaction.hoverHighlight === "on" || interaction.hoverHighlight === true;
+  setPressed("prop-hover-highlight", hoverOn);
+  setPressed("ticker-hover-highlight", hoverOn);
+  syncTickerHoverLock();
   var width = $("prop-width");
   var height = $("prop-height");
   if (width) width.disabled = false;
@@ -225,7 +1042,6 @@ function applyModeEditor(value) {
     editor.setAttribute("data-editor-mode", value);
     editor.setAttribute("data-mode", ($("pipeline-behavior") && $("pipeline-behavior").value) || "stack");
   }
-  updateStageCard(value);
 }
 function setFoldVisibility(id, visible) {
   var el = $(id);
@@ -237,6 +1053,17 @@ function setFoldVisibility(id, visible) {
     el.setAttribute("hidden", "");
     el.open = false;
   }
+}
+function applyTickerDirection(dir) {
+  dir = dir === "right" ? "right" : "left";
+  setControl("ticker-direction", dir);
+  document.querySelectorAll("[data-ticker-direction]").forEach(function (chip) {
+    var on = chip.getAttribute("data-ticker-direction") === dir;
+    chip.classList.toggle("is-on", on);
+    chip.setAttribute("aria-pressed", on ? "true" : "false");
+  });
+  var summary = $("ticker-direction-copy");
+  if (summary) summary.textContent = dir === "right" ? "从左往右，看过即走" : "从右往左，看过即走";
 }
 function selectBehavior(value) {
   var sel = $("pipeline-behavior");
@@ -255,13 +1082,553 @@ function selectBehavior(value) {
   setFoldVisibility("stack-section", value !== "ticker");
   var studio = document.querySelector(".studio");
   if (studio) studio.setAttribute("data-mode", value);
-  var copy = $("preview-copy");
-  if (copy) copy.textContent = value === "ticker" ? "只演弹幕：从右往左流过这条带。" : "只演堆叠：从选定的角叠上来。";
-  renderStudioPreview();
+  syncClosePartVisibility();
+  syncTickerHoverLock();
   markVisualDirty();
   syncPreview();
 }
+var bgAdjust = { open: false, invert: false, drag: null, scale: 1, x: 0.5, y: 0.5, imgW: 0, imgH: 0, fit: 1, drawW: 0, drawH: 0, target: "root" };
+function wallpaperCss(paint) {
+  paint = paint || {};
+  var scale = Number(paint.backgroundScale);
+  if (!Number.isFinite(scale) || scale <= 0) scale = 1;
+  var x = Number(paint.backgroundX);
+  var y = Number(paint.backgroundY);
+  if (!Number.isFinite(x)) x = 0.5;
+  if (!Number.isFinite(y)) y = 0.5;
+  return "object-fit:cover;object-position:" + (x * 100) + "% " + (y * 100) + "%;transform:scale(" + scale + ");transform-origin:" + (x * 100) + "% " + (y * 100) + "%;border-radius:inherit";
+}
+function refreshDockMargins() {
+  var anchor = ($("prop-anchor") && $("prop-anchor").value) || "bottom-right";
+  var leftOn = /-left$/.test(anchor);
+  var rightOn = /-right$/.test(anchor);
+  var topOn = /^top-/.test(anchor);
+  var bottomOn = /^bottom-/.test(anchor);
+  function setSide(id, on) {
+    var el = $(id);
+    if (!el) return;
+    el.disabled = !on;
+  }
+  setSide("prop-margin-left", leftOn);
+  setSide("prop-margin-right", rightOn);
+  setSide("prop-margin-top", topOn);
+  setSide("prop-margin-bottom", bottomOn);
+}
+var lastWrapPath = "parallel";
+function wrapFromControls() {
+  var wrap = ($("prop-wrap") && $("prop-wrap").value) || "parallel";
+  if (wrap === "off" || wrap === "snake" || wrap === "parallel") return wrap;
+  return "parallel";
+}
+function refreshWrapPad() {
+  var grow = ($("prop-grow") && $("prop-grow").value) || "up";
+  var wrap = wrapFromControls();
+  var open = wrap !== "off";
+  var path = wrap === "snake" ? "snake" : "parallel";
+  if (wrap === "snake" || wrap === "parallel") lastWrapPath = wrap;
+  var label = $("prop-wrap-open-label");
+  if (label) label.textContent = (grow === "left" || grow === "right") ? "开新行" : "开新列";
+  var note = $("prop-wrap-note");
+  if (note) note.textContent = wrap === "off" ? "满了掀最旧" : wrap === "snake" ? "折返，二维满了掀最旧。停靠是最先来的那张。" : "满了沿另一边开列";
+  document.querySelectorAll("[data-wrap-open]").forEach(function (chip) {
+    var on = (chip.getAttribute("data-wrap-open") === "off") ? !open : open;
+    chip.classList.toggle("is-on", on);
+    chip.setAttribute("aria-pressed", on ? "true" : "false");
+  });
+  document.querySelectorAll("[data-wrap-path]").forEach(function (chip) {
+    var id = chip.getAttribute("data-wrap-path");
+    var on = open && id === path;
+    chip.classList.toggle("is-on", on);
+    chip.classList.toggle("is-off", !open);
+    chip.setAttribute("aria-pressed", on ? "true" : "false");
+    chip.setAttribute("aria-disabled", open ? "false" : "true");
+  });
+}
+function refreshGrowPad() {
+  var anchor = ($("prop-anchor") && $("prop-anchor").value) || "bottom-right";
+  var allowed = { up: anchor.slice(0, 3) !== "top", down: anchor.slice(0, 6) !== "bottom", left: anchor.slice(-4) !== "left", right: anchor.slice(-5) !== "right" };
+  var current = ($("prop-grow") && $("prop-grow").value) || "";
+  if (!allowed[current]) {
+    current = anchor.slice(0, 3) === "top" ? "down" : "up";
+    setControl("prop-grow", current);
+  }
+  document.querySelectorAll(".grow-cell").forEach(function (cell) {
+    var dir = cell.getAttribute("data-grow");
+    var can = !!allowed[dir];
+    var on = can && dir === current;
+    cell.classList.toggle("is-off", !can);
+    cell.classList.toggle("is-on", on);
+    cell.setAttribute("aria-disabled", can ? "false" : "true");
+    cell.setAttribute("aria-pressed", on ? "true" : "false");
+  });
+}
+function ctrlNumber(id, fallback, min, max) {
+  var el = $(id);
+  var parsed = Number(el && el.value !== undefined && el.value !== "" ? el.value : fallback);
+  if (!Number.isFinite(parsed)) parsed = Number(fallback);
+  if (min != null && parsed < min) parsed = min;
+  if (max != null && parsed > max) parsed = max;
+  return parsed;
+}
+function writeBgTransform(scale, x, y) {
+  if (bgAdjust.target === "icon") {
+    setControl("part-icon-scale", scale);
+    setControl("part-icon-x", x);
+    setControl("part-icon-y", y);
+    return;
+  }
+  if (bgAdjust.target && bgAdjust.target !== "root") {
+    setControl("part-" + bgAdjust.target + "-bg-scale", scale);
+    setControl("part-" + bgAdjust.target + "-bg-x", x);
+    setControl("part-" + bgAdjust.target + "-bg-y", y);
+    return;
+  }
+  setControl("skin-bg-scale", scale);
+  setControl("skin-bg-x", x);
+  setControl("skin-bg-y", y);
+}
+function syncBgAdjustNumbers() {
+  setControl("bg-adjust-scale", Math.round(bgAdjust.scale * 100));
+  setControl("bg-adjust-x", Math.round(bgAdjust.x * 100));
+  setControl("bg-adjust-y", Math.round(bgAdjust.y * 100));
+}
+function closeBgAdjust(save) {
+  var overlay = $("bg-adjust");
+  if (!overlay) return;
+  overlay.setAttribute("hidden", "");
+  bgAdjust.open = false;
+  bgAdjust.drag = null;
+  if (save) {
+    writeBgTransform(bgAdjust.scale, bgAdjust.x, bgAdjust.y);
+    markVisualDirty();
+    if (typeof saveVisualSettings === "function") saveVisualSettings();
+    if (typeof syncPreview === "function") syncPreview();
+  }
+}
+function layoutBgAdjust() {
+  var stage = $("bg-adjust-stage");
+  var clip = $("bg-adjust-clip");
+  var img = $("bg-adjust-image");
+  var draw = $("bg-adjust-draw");
+  var hit = $("bg-adjust-hit");
+  var extracted = $("bg-adjust-extracted");
+  if (!stage || !draw || !hit) return;
+  var partOn = bgAdjust.target !== "root";
+  var iconOn = bgAdjust.target === "icon";
+  var width = Math.round(partOn ? ctrlNumber("part-paint-w", ctrlNumber("part-icon-w", 40, 1, 1920), 1, 1920) : ctrlNumber("prop-width", 420, 1, 1920));
+  var height = Math.round(partOn ? ctrlNumber("part-paint-h", ctrlNumber("part-icon-h", 40, 1, 1080), 1, 1080) : ctrlNumber("prop-height", 220, 1, 1080));
+  var radius = Math.round(partOn ? ctrlNumber("part-paint-radius", ctrlNumber("part-icon-radius", 20, 0, 240), 0, 240) : ctrlNumber("prop-border-radius", 16, 0, 480));
+  var overflow = partOn ? 0 : Math.round(ctrlNumber("prop-paint-overflow", 0, 0, 240));
+  if (extracted) extracted.textContent = "宽 " + width + " · 高 " + height + " · 圆角 " + radius + " · 绘制溢出 " + overflow + (iconOn ? " · 提取自图标" : (partOn ? " · 提取自零件" : " · 提取自设置页面"));
+  var drawW = width + overflow * 2;
+  var drawH = height + overflow * 2;
+  var stageW = stage.clientWidth || 720;
+  var stageH = stage.clientHeight || 360;
+  var fit = Math.min(1, (stageW - 48) / Math.max(1, drawW), (stageH - 48) / Math.max(1, drawH));
+  if (!Number.isFinite(fit) || fit <= 0) fit = 1;
+  var shownDrawW = drawW * fit;
+  var shownDrawH = drawH * fit;
+  var drawLeft = (stageW - shownDrawW) / 2;
+  var drawTop = (stageH - shownDrawH) / 2;
+  draw.style.left = drawLeft + "px";
+  draw.style.top = drawTop + "px";
+  draw.style.width = shownDrawW + "px";
+  draw.style.height = shownDrawH + "px";
+  draw.style.borderRadius = ((radius + overflow * 0.35) * fit) + "px";
+  hit.style.left = (drawLeft + overflow * fit) + "px";
+  hit.style.top = (drawTop + overflow * fit) + "px";
+  hit.style.width = (width * fit) + "px";
+  hit.style.height = (height * fit) + "px";
+  hit.style.borderRadius = (radius * fit) + "px";
+  if (clip) {
+    clip.style.left = drawLeft + "px";
+    clip.style.top = drawTop + "px";
+    clip.style.width = shownDrawW + "px";
+    clip.style.height = shownDrawH + "px";
+    clip.style.borderRadius = ((radius + overflow * 0.35) * fit) + "px";
+  }
+  bgAdjust.fit = fit;
+  bgAdjust.drawW = shownDrawW;
+  bgAdjust.drawH = shownDrawH;
+  bgAdjust.hitW = width * fit;
+  bgAdjust.hitH = height * fit;
+  if (!img || !bgAdjust.imgW || !bgAdjust.imgH) {
+    if (img) img.style.display = "none";
+    return;
+  }
+  img.style.display = "block";
+  var hitW = width * fit;
+  var hitH = height * fit;
+  var cover = Math.max(hitW / bgAdjust.imgW, hitH / bgAdjust.imgH);
+  var used = cover * bgAdjust.scale;
+  var outW = bgAdjust.imgW * used;
+  var outH = bgAdjust.imgH * used;
+  img.style.width = outW + "px";
+  img.style.height = outH + "px";
+  img.style.left = (overflow * fit + (hitW - outW) * bgAdjust.x) + "px";
+  img.style.top = (overflow * fit + (hitH - outH) * bgAdjust.y) + "px";
+}
+function openBgAdjust(target) {
+  var overlay = $("bg-adjust");
+  if (!overlay) return;
+  overlay.removeAttribute("hidden");
+  bgAdjust.open = true;
+  bgAdjust.target = target === "icon" ? "icon" : (target && target !== "root" ? target : "root");
+  if (bgAdjust.target === "icon") {
+    bgAdjust.scale = ctrlNumber("part-icon-scale", 1, 0.2, 8);
+    bgAdjust.x = ctrlNumber("part-icon-x", 0.5, 0, 1);
+    bgAdjust.y = ctrlNumber("part-icon-y", 0.5, 0, 1);
+  } else if (bgAdjust.target !== "root") {
+    bgAdjust.scale = ctrlNumber("part-" + bgAdjust.target + "-bg-scale", 1, 0.2, 8);
+    bgAdjust.x = ctrlNumber("part-" + bgAdjust.target + "-bg-x", 0.5, 0, 1);
+    bgAdjust.y = ctrlNumber("part-" + bgAdjust.target + "-bg-y", 0.5, 0, 1);
+  } else {
+    bgAdjust.scale = ctrlNumber("skin-bg-scale", 1, 0.2, 8);
+    bgAdjust.x = ctrlNumber("skin-bg-x", 0.5, 0, 1);
+    bgAdjust.y = ctrlNumber("skin-bg-y", 0.5, 0, 1);
+  }
+  try { bgAdjust.invert = localStorage.getItem("nh-bg-wheel-invert") === "1"; } catch (error) { bgAdjust.invert = false; }
+  var invert = $("bg-adjust-invert");
+  if (invert) {
+    invert.setAttribute("aria-pressed", bgAdjust.invert ? "true" : "false");
+    if (invert.classList) invert.classList.toggle("is-on", bgAdjust.invert);
+  }
+  if (bgAdjust.target === "icon") {
+    var sourceEl = $("part-icon-source");
+    var source = sourceEl && sourceEl.value === "custom" ? "custom" : "assistant";
+    if (source === "custom") {
+      var assetId = ($("part-icon-asset-id") && $("part-icon-asset-id").value) || ($("part-icon-asset") && $("part-icon-asset").value) || "";
+      loadBgAdjustImage(assetId);
+    } else {
+      loadBgAdjustAgent((sampleAgentIdentity() || {}).id);
+    }
+  } else if (bgAdjust.target !== "root") {
+    var partAssetId = ($("part-paint-bg-asset") && $("part-paint-bg-asset").value) || ($("part-" + bgAdjust.target + "-bg-asset") && $("part-" + bgAdjust.target + "-bg-asset").value) || "";
+    loadBgAdjustImage(partAssetId);
+  } else {
+    var assetId = ($("skin-bg-asset") && $("skin-bg-asset").value) || "";
+    loadBgAdjustImage(assetId);
+  }
+  syncBgAdjustNumbers();
+  layoutBgAdjust();
+}
+function applyBgAdjustImage(img, src) {
+  img.onload = function () {
+    bgAdjust.imgW = img.naturalWidth || 0;
+    bgAdjust.imgH = img.naturalHeight || 0;
+    layoutBgAdjust();
+  };
+  img.onerror = function () {
+    bgAdjust.imgW = 0;
+    bgAdjust.imgH = 0;
+    img.style.display = "none";
+    feedback("visual-settings-feedback", "底图读不出来。", "error");
+    layoutBgAdjust();
+  };
+  img.src = src;
+  if (img.complete && img.naturalWidth) {
+    bgAdjust.imgW = img.naturalWidth;
+    bgAdjust.imgH = img.naturalHeight;
+    layoutBgAdjust();
+  }
+}
+function loadBgAdjustAgent(agentId) {
+  var img = $("bg-adjust-image");
+  var clip = $("bg-adjust-clip");
+  if (clip) clip.style.background = ($("part-icon-fill") && $("part-icon-fill").value) || "#1d2b27";
+  bgAdjust.imgW = 0;
+  bgAdjust.imgH = 0;
+  if (!img) return;
+  if (!agentId) {
+    img.removeAttribute("src");
+    img.style.display = "none";
+    return;
+  }
+  json("agent-avatars/" + encodeURIComponent(agentId) + "/file").then(function (data) {
+    if (!bgAdjust.open || bgAdjust.target !== "icon") return;
+    if (!data || !data.dataUrl) throw new Error("助手头像没有图数据");
+    applyBgAdjustImage(img, data.dataUrl);
+  }).catch(function (error) {
+    img.removeAttribute("src");
+    img.style.display = "none";
+    feedback("visual-settings-feedback", (error.code ? error.code + " · " : "") + (error.message || "助手头像读不出来。"), "error");
+    layoutBgAdjust();
+  });
+}
+function loadBgAdjustImage(assetId) {
+  var img = $("bg-adjust-image");
+  var clip = $("bg-adjust-clip");
+  if (clip) clip.style.background = ($("skin-bg-color") && $("skin-bg-color").value) || "#0e1916";
+  bgAdjust.imgW = 0;
+  bgAdjust.imgH = 0;
+  if (!img) return;
+  if (!assetId) {
+    img.removeAttribute("src");
+    img.style.display = "none";
+    return;
+  }
+  json("visual-assets/" + encodeURIComponent(assetId) + "/file").then(function (data) {
+    if (!bgAdjust.open) return;
+    if (!data || !data.dataUrl) throw new Error("底图没有图数据");
+    applyBgAdjustImage(img, data.dataUrl);
+  }).catch(function (error) {
+    img.removeAttribute("src");
+    img.style.display = "none";
+    feedback("visual-settings-feedback", (error.code ? error.code + " · " : "") + (error.message || "底图读不出来。"), "error");
+    layoutBgAdjust();
+  });
+}
+function syncStudioSampleUi() {
+  var field = $("studio-sample-field");
+  if (!field) return;
+  var part = typeof selectedPart === "function" ? selectedPart() : "";
+  var sourceEl = $("part-icon-source");
+  var source = sourceEl && sourceEl.value === "custom" ? "custom" : "assistant";
+  var show = part === "assistantName" || (part === "icon" && source === "assistant");
+  if (show) field.removeAttribute("hidden");
+  else field.setAttribute("hidden", "");
+}
+function syncIconSourceUi() {
+  var sourceEl = $("part-icon-source");
+  var source = sourceEl && sourceEl.value === "custom" ? "custom" : "assistant";
+  setPressed("part-icon-source-assistant", source === "assistant");
+  setPressed("part-icon-source-custom", source === "custom");
+  var custom = $("part-icon-custom-field");
+  if (custom) {
+    if (source === "custom") custom.removeAttribute("hidden");
+    else custom.setAttribute("hidden", "");
+  }
+  var assetSel = $("part-icon-asset");
+  var assetId = $("part-icon-asset-id");
+  if (assetSel && assetId) assetSel.value = assetId.value || "";
+  syncStudioSampleUi();
+}
+function setIconSource(source) {
+  setControl("part-icon-source", source === "custom" ? "custom" : "assistant");
+  if (source !== "custom") setControl("part-icon-asset-id", "");
+  syncIconSourceUi();
+}
+function importIconAsset() {
+  json("visual-assets/import", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ kind: "decoration" }) }).then(function (result) {
+    if (!result || result.cancelled || !result.asset) return;
+    var sel = $("part-icon-asset");
+    if (sel) {
+      var opt = document.createElement("option");
+      opt.value = result.asset.assetId;
+      opt.textContent = (result.asset.name || result.asset.assetId) + " · " + String(result.asset.format || "").toUpperCase();
+      sel.appendChild(opt);
+      sel.value = result.asset.assetId;
+    }
+    setControl("part-icon-asset-id", result.asset.assetId);
+    setControl("part-icon-source", "custom");
+    syncIconSourceUi();
+    markVisualDirty();
+    syncPreview();
+  }).catch(function (error) {
+    feedback("visual-settings-feedback", (error.code ? error.code + " · " : "") + error.message, "error");
+  });
+}
+var agentAvatarCache = {};
+function ensureStudioAgentAvatar(agentId) {
+  if (!agentId || Object.prototype.hasOwnProperty.call(agentAvatarCache, agentId)) return agentAvatarCache[agentId] || "";
+  agentAvatarCache[agentId] = "";
+  json("agent-avatars/" + encodeURIComponent(agentId) + "/file").then(function (data) {
+    if (!data || !data.dataUrl) return;
+    agentAvatarCache[agentId] = data.dataUrl;
+  }).catch(function () {});
+  return "";
+}
+function sampleAgentIdentity() {
+  var sel = $("studio-sample-agent");
+  var id = sel && sel.value ? sel.value : "";
+  var name = "";
+  if (sel && sel.selectedIndex >= 0 && sel.options[sel.selectedIndex]) name = sel.options[sel.selectedIndex].textContent || id;
+  if (!id && sel && sel.options && sel.options.length > 1) {
+    id = sel.options[1].value;
+    name = sel.options[1].textContent || id;
+  }
+  return { id: id, name: name || id };
+}
+function importBgAsset() {
+  json("visual-assets/import", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ kind: "background" }) }).then(function (result) {
+    if (!result || result.cancelled || !result.asset) return;
+    var sel = $("skin-bg-asset");
+    if (!sel) return;
+    var opt = document.createElement("option");
+    opt.value = result.asset.assetId;
+    opt.textContent = (result.asset.name || result.asset.assetId) + " · " + String(result.asset.format || "").toUpperCase();
+    sel.appendChild(opt);
+    sel.value = result.asset.assetId;
+    writeBgTransform(1, 0.5, 0.5);
+    markVisualDirty();
+    syncPreview();
+  }).catch(function (error) {
+    feedback("visual-settings-feedback", (error.code ? error.code + " · " : "") + error.message, "error");
+  });
+}
+function bindBgAdjust() {
+  var stage = $("bg-adjust-stage");
+  if (!stage || stage.__bgBound) return;
+  stage.__bgBound = true;
+  stage.addEventListener("pointerdown", function (event) {
+    if (!bgAdjust.open) return;
+    event.preventDefault();
+    bgAdjust.drag = { x: event.clientX, y: event.clientY, originX: bgAdjust.x, originY: bgAdjust.y };
+    if (stage.classList) stage.classList.add("is-dragging");
+    if (stage.setPointerCapture) stage.setPointerCapture(event.pointerId);
+  });
+  stage.addEventListener("pointermove", function (event) {
+    if (!bgAdjust.drag) return;
+    var hitW = bgAdjust.hitW || bgAdjust.drawW;
+    var hitH = bgAdjust.hitH || bgAdjust.drawH;
+    var extraW = hitW - (bgAdjust.imgW * Math.max(hitW / Math.max(bgAdjust.imgW, 1), hitH / Math.max(bgAdjust.imgH, 1)) * bgAdjust.scale);
+    var extraH = hitH - (bgAdjust.imgH * Math.max(hitW / Math.max(bgAdjust.imgW, 1), hitH / Math.max(bgAdjust.imgH, 1)) * bgAdjust.scale);
+    if (bgAdjust.imgW && extraW !== 0) bgAdjust.x = Math.max(0, Math.min(1, bgAdjust.drag.originX + (event.clientX - bgAdjust.drag.x) / extraW));
+    if (bgAdjust.imgH && extraH !== 0) bgAdjust.y = Math.max(0, Math.min(1, bgAdjust.drag.originY + (event.clientY - bgAdjust.drag.y) / extraH));
+    syncBgAdjustNumbers();
+    layoutBgAdjust();
+  });
+  function endDrag(event) {
+    if (!bgAdjust.drag) return;
+    bgAdjust.drag = null;
+    if (stage.classList) stage.classList.remove("is-dragging");
+    if (event && stage.releasePointerCapture && event.pointerId != null) {
+      try { stage.releasePointerCapture(event.pointerId); } catch (error) {}
+    }
+  }
+  stage.addEventListener("pointerup", endDrag);
+  stage.addEventListener("pointercancel", endDrag);
+  stage.addEventListener("wheel", function (event) {
+    if (!bgAdjust.open) return;
+    event.preventDefault();
+    var delta = event.deltaY;
+    if (bgAdjust.invert) delta = -delta;
+    bgAdjust.scale = Math.max(0.2, Math.min(8, bgAdjust.scale * (delta > 0 ? 0.92 : 1.08)));
+    syncBgAdjustNumbers();
+    layoutBgAdjust();
+  }, { passive: false });
+  ["bg-adjust-scale", "bg-adjust-x", "bg-adjust-y"].forEach(function (id) {
+    var el = $(id);
+    if (!el) return;
+    el.addEventListener("input", function () {
+      if (!bgAdjust.open) return;
+      if (id === "bg-adjust-scale") bgAdjust.scale = Math.max(0.2, Math.min(8, ctrlNumber(id, 100, 20, 800) / 100));
+      if (id === "bg-adjust-x") bgAdjust.x = Math.max(0, Math.min(1, ctrlNumber(id, 50, 0, 100) / 100));
+      if (id === "bg-adjust-y") bgAdjust.y = Math.max(0, Math.min(1, ctrlNumber(id, 50, 0, 100) / 100));
+      layoutBgAdjust();
+    });
+  });
+}
 function studioClickHandler(event) {
+  var bgOpen = event.target && event.target.closest ? event.target.closest("#bg-adjust-open") : null;
+  if (bgOpen) {
+    event.preventDefault();
+    openBgAdjust("root");
+    return;
+  }
+  var iconAdjust = event.target && event.target.closest ? event.target.closest("#icon-adjust-open") : null;
+  if (iconAdjust) {
+    event.preventDefault();
+    openBgAdjust("icon");
+    return;
+  }
+  var partBgAdjust = event.target && event.target.closest ? event.target.closest("#part-bg-adjust-open") : null;
+  if (partBgAdjust) {
+    event.preventDefault();
+    var partId = selectedPart();
+    if (partId && partId !== "root" && partId !== "icon") openBgAdjust(partId);
+    return;
+  }
+  var bgClose = event.target && event.target.closest ? event.target.closest("#bg-adjust-close") : null;
+  if (bgClose) {
+    event.preventDefault();
+    closeBgAdjust(false);
+    return;
+  }
+  var bgSave = event.target && event.target.closest ? event.target.closest("#bg-adjust-save") : null;
+  if (bgSave) {
+    event.preventDefault();
+    closeBgAdjust(true);
+    return;
+  }
+  var bgInvert = event.target && event.target.closest ? event.target.closest("#bg-adjust-invert") : null;
+  if (bgInvert) {
+    event.preventDefault();
+    bgAdjust.invert = !bgAdjust.invert;
+    bgInvert.setAttribute("aria-pressed", bgAdjust.invert ? "true" : "false");
+    if (bgInvert.classList) bgInvert.classList.toggle("is-on", bgAdjust.invert);
+    try { localStorage.setItem("nh-bg-wheel-invert", bgAdjust.invert ? "1" : "0"); } catch (error) {}
+    return;
+  }
+  var iconSourceChip = event.target && event.target.closest ? event.target.closest("#part-icon-source-assistant, #part-icon-source-custom") : null;
+  if (iconSourceChip) {
+    event.preventDefault();
+    setIconSource(iconSourceChip.id === "part-icon-source-custom" ? "custom" : "assistant");
+    markVisualDirty();
+    syncPreview();
+    return;
+  }
+  var iconImport = event.target && event.target.closest ? event.target.closest("#icon-asset-import") : null;
+  if (iconImport) {
+    event.preventDefault();
+    importIconAsset();
+    return;
+  }
+  var iconLibrary = event.target && event.target.closest ? event.target.closest("#icon-asset-library") : null;
+  if (iconLibrary) {
+    event.preventDefault();
+    if (window.NotificationHubPageRouter) window.NotificationHubPageRouter.load("visual-assets-page");
+    return;
+  }
+  var bgImport = event.target && event.target.closest ? event.target.closest("#bg-asset-import") : null;
+  if (bgImport) {
+    event.preventDefault();
+    importBgAsset();
+    return;
+  }
+  var bgLibrary = event.target && event.target.closest ? event.target.closest("#bg-asset-library") : null;
+  if (bgLibrary) {
+    event.preventDefault();
+    if (window.NotificationHubPageRouter) window.NotificationHubPageRouter.load("visual-assets-page");
+    return;
+  }
+  var fontImport = event.target && event.target.closest ? event.target.closest("#font-asset-import") : null;
+  if (fontImport) {
+    event.preventDefault();
+    importFontAsset();
+    return;
+  }
+  var fontLibrary = event.target && event.target.closest ? event.target.closest("#font-asset-library") : null;
+  if (fontLibrary) {
+    event.preventDefault();
+    if (window.NotificationHubPageRouter) window.NotificationHubPageRouter.load("font-assets-page");
+    return;
+  }
+  var addName = event.target && event.target.closest ? event.target.closest("#glossary-add") : null;
+  if (addName) {
+    event.preventDefault();
+    if (addName.classList.contains("is-locked") || addName.getAttribute("aria-disabled") === "true") return;
+    addGlossaryName();
+    markVisualDirty();
+    syncPreview();
+    return;
+  }
+  var delName = event.target && event.target.closest ? event.target.closest("[data-glossary-del]") : null;
+  if (delName) {
+    event.preventDefault();
+    deleteGlossaryName(delName.getAttribute("data-glossary-del") || "");
+    markVisualDirty();
+    syncPreview();
+    return;
+  }
+  var paintName = event.target && event.target.closest ? event.target.closest("[data-paint-name]") : null;
+  if (paintName) {
+    event.preventDefault();
+    bindPaintName(paintName.getAttribute("data-paint-kind") || "fill", paintName.getAttribute("data-paint-name") || "");
+    markVisualDirty();
+    syncPreview();
+    return;
+  }
   var chip = event.target && event.target.closest ? event.target.closest('[data-axis="behavior"]') : null;
   if (chip) {
     if (chip.classList.contains("is-locked") || chip.getAttribute("aria-disabled") === "true") {
@@ -273,12 +1640,151 @@ function studioClickHandler(event) {
     selectBehavior(chip.getAttribute("data-value"));
     return;
   }
+  var fitWidthChip = event.target && event.target.closest ? event.target.closest("#part-paint-fit-width") : null;
+  if (fitWidthChip) {
+    event.preventDefault();
+    toggleSelectedFitWidth();
+    markVisualDirty();
+    syncPreview();
+    return;
+  }
+  var fitCompensateChip = event.target && event.target.closest ? event.target.closest("#part-paint-fit-compensate") : null;
+  if (fitCompensateChip) {
+    event.preventDefault();
+    toggleSelectedFitCompensate();
+    markVisualDirty();
+    syncPreview();
+    return;
+  }
+  var bgOnChip = event.target && event.target.closest ? event.target.closest("#part-paint-background-on") : null;
+  if (bgOnChip) {
+    event.preventDefault();
+    toggleSelectedPartBackground();
+    markVisualDirty();
+    syncPreview();
+    return;
+  }
+  var rainbowChip = event.target && event.target.closest ? event.target.closest("#part-paint-rainbow") : null;
+  if (rainbowChip) {
+    event.preventDefault();
+    toggleSelectedTextPaint();
+    markVisualDirty();
+    syncPreview();
+    return;
+  }
+  var textStrokeChip = event.target && event.target.closest ? event.target.closest("#part-paint-text-stroke") : null;
+  if (textStrokeChip) {
+    event.preventDefault();
+    toggleSelectedTextStroke();
+    markVisualDirty();
+    syncPreview();
+    return;
+  }
+  var textStrokeRainbowChip = event.target && event.target.closest ? event.target.closest("#part-paint-text-stroke-rainbow") : null;
+  if (textStrokeRainbowChip) {
+    event.preventDefault();
+    toggleSelectedTextStrokePaint();
+    markVisualDirty();
+    syncPreview();
+    return;
+  }
+  var partStrokePaintChip = event.target && event.target.closest ? event.target.closest("#part-paint-stroke-paint") : null;
+  if (partStrokePaintChip) {
+    event.preventDefault();
+    toggleSelectedStrokePaint();
+    markVisualDirty();
+    syncPreview();
+    return;
+  }
+  var rootBorderPaintChip = event.target && event.target.closest ? event.target.closest("#prop-border-paint") : null;
+  if (rootBorderPaintChip) {
+    event.preventDefault();
+    toggleRootBorderPaint();
+    markVisualDirty();
+    syncPreview();
+    return;
+  }
+  var closeIconChip = event.target && event.target.closest ? event.target.closest("[data-close-icon]") : null;
+  if (closeIconChip) {
+    event.preventDefault();
+    setCloseIcon(closeIconChip.getAttribute("data-close-icon") || "x");
+    markVisualDirty();
+    syncPreview();
+    return;
+  }
+  var styleChip = event.target && event.target.closest ? event.target.closest("#part-paint-font-bold, #part-paint-font-italic, #part-paint-font-underline, #part-paint-font-strike") : null;
+  if (styleChip) {
+    event.preventDefault();
+    var styleId = styleChip.id || "";
+    var kind = styleId === "part-paint-font-bold" ? "bold" : styleId === "part-paint-font-italic" ? "italic" : styleId === "part-paint-font-underline" ? "underline" : styleId === "part-paint-font-strike" ? "strike" : "";
+    if (kind) toggleSelectedTextStyle(kind);
+    markVisualDirty();
+    syncPreview();
+    return;
+  }
+  var showChip = event.target && event.target.closest ? event.target.closest("#part-show") : null;
+  if (showChip) {
+    event.preventDefault();
+    if (showChip.getAttribute("aria-disabled") === "true" || showChip.classList.contains("is-locked")) return;
+    toggleSelectedPartShow();
+    markVisualDirty();
+    syncPreview();
+    return;
+  }
+  var partChip = event.target && event.target.closest ? event.target.closest("#part-chip-row [data-part]") : null;
+  if (partChip) {
+    event.preventDefault();
+    selectPart(partChip.getAttribute("data-part"));
+    return;
+  }
   var dock = event.target && event.target.closest ? event.target.closest(".dock-cell") : null;
   if (dock) {
     var anchor = dock.getAttribute("data-anchor");
     setControl("prop-anchor", anchor);
     document.querySelectorAll(".dock-cell").forEach(function (c) { c.classList.toggle("is-on", c === dock); });
-    renderStudioPreview();
+    refreshDockMargins();
+    refreshGrowPad();
+    refreshWrapPad();
+    markVisualDirty();
+    syncPreview();
+    return;
+  }
+  var growCell = event.target && event.target.closest ? event.target.closest(".grow-cell") : null;
+  if (growCell && growCell.getAttribute("aria-disabled") !== "true" && !growCell.disabled) {
+    var grow = growCell.getAttribute("data-grow");
+    setControl("prop-grow", grow);
+    document.querySelectorAll(".grow-cell").forEach(function (c) {
+      var on = c === growCell && c.getAttribute("aria-disabled") !== "true";
+      c.classList.toggle("is-on", on);
+      c.setAttribute("aria-pressed", on ? "true" : "false");
+    });
+    refreshWrapPad();
+    markVisualDirty();
+    syncPreview();
+    return;
+  }
+  var wrapOpen = event.target && event.target.closest ? event.target.closest("[data-wrap-open]") : null;
+  if (wrapOpen) {
+    var wantOpen = wrapOpen.getAttribute("data-wrap-open") !== "off";
+    setControl("prop-wrap", wantOpen ? lastWrapPath : "off");
+    refreshWrapPad();
+    markVisualDirty();
+    syncPreview();
+    return;
+  }
+  var wrapPath = event.target && event.target.closest ? event.target.closest("[data-wrap-path]") : null;
+  if (wrapPath && wrapPath.getAttribute("aria-disabled") !== "true") {
+    var nextWrap = wrapPath.getAttribute("data-wrap-path");
+    if (nextWrap === "snake" || nextWrap === "parallel") lastWrapPath = nextWrap;
+    setControl("prop-wrap", nextWrap);
+    refreshWrapPad();
+    markVisualDirty();
+    syncPreview();
+    return;
+  }
+  var directionChip = event.target && event.target.closest ? event.target.closest("[data-ticker-direction]") : null;
+  if (directionChip) {
+    applyTickerDirection(directionChip.getAttribute("data-ticker-direction"));
     markVisualDirty();
     syncPreview();
     return;
@@ -289,7 +1795,6 @@ function studioClickHandler(event) {
     setControl("ticker-band", band);
     var bandEl = $("ticker-band-control");
     if (bandEl) bandEl.setAttribute("data-side", band);
-    renderStudioPreview();
     markVisualDirty();
     syncPreview();
     return;
@@ -307,7 +1812,6 @@ function studioClickHandler(event) {
       speedVal.textContent = (speed && speed.value) || "400";
       speedVal.classList.toggle("is-muted", next);
     }
-    renderStudioPreview();
     markVisualDirty();
     syncPreview();
     return;
@@ -317,7 +1821,33 @@ function studioClickHandler(event) {
     var passNext = passBtn.getAttribute("aria-pressed") !== "true";
     passBtn.setAttribute("aria-pressed", passNext ? "true" : "false");
     passBtn.classList.toggle("is-on", passNext);
-    renderStudioPreview();
+    syncTickerHoverLock();
+    markVisualDirty();
+    syncPreview();
+    return;
+  }
+  var dismissChip = event.target && event.target.closest ? event.target.closest("#prop-dismiss-close, #prop-dismiss-anywhere, #prop-dismiss-auto") : null;
+  if (dismissChip) {
+    if (dismissChip.id === "prop-dismiss-auto") {
+      var autoNext = dismissChip.getAttribute("aria-pressed") !== "true";
+      setPressed("prop-dismiss-auto", autoNext);
+    } else {
+      setDismissChips(dismissChip.getAttribute("data-dismiss") || "closeButton");
+    }
+    markVisualDirty();
+    syncPreview();
+    return;
+  }
+  var hoverBtn = event.target && event.target.closest ? event.target.closest("#prop-hover-highlight, #ticker-hover-highlight") : null;
+  if (hoverBtn) {
+    if (hoverBtn.classList && hoverBtn.classList.contains("is-locked") || hoverBtn.getAttribute("aria-disabled") === "true") {
+      var toast = $("visual-preview-toast");
+      if (toast) { toast.textContent = "不挡点击开着时，弹幕吃不到鼠标，没法加亮。"; toast.className = "toast"; }
+      return;
+    }
+    var hoverNext = hoverBtn.getAttribute("aria-pressed") !== "true";
+    setPressed("prop-hover-highlight", hoverNext);
+    setPressed("ticker-hover-highlight", hoverNext);
     markVisualDirty();
     syncPreview();
   }
@@ -328,7 +1858,8 @@ document.addEventListener("click", studioClickHandler);
 function request(path, options) {
   options = options || {};
   var requestOptions = Object.assign({}, options);
-  requestOptions.headers = Object.assign({ "Accept": "application/json" }, options.headers || {});
+  requestOptions.cache = options.cache || "no-store";
+  requestOptions.headers = Object.assign({ "Accept": "application/json", "Cache-Control": "no-store", Pragma: "no-cache" }, options.headers || {});
   if (options.body !== undefined && !requestOptions.headers["Content-Type"] && !requestOptions.headers["content-type"]) requestOptions.headers["Content-Type"] = "application/json";
   var api = window.hana && window.hana.api && typeof window.hana.api.fetch === "function" ? window.hana.api : null;
   try {
@@ -374,7 +1905,11 @@ function feedback(id, text, kind) {
   el.textContent = text || "";
   el.className = "feedback" + (kind ? " " + kind : "");
 }
+function studioNativeBody() {
+  return { draft: collect(), sampleAgent: sampleAgentIdentity() };
+}
 function collect() {
+  if (typeof flushSelectedPartEditor === "function") flushSelectedPartEditor();
   var p = state.profile || {};
   var categories = p.categories || {};
   var activeType = $("pipeline-type").value || "minimal";
@@ -396,37 +1931,84 @@ function collect() {
   var draft = {
     appearance: {
       size: value("prop-size", "medium"),
-      width: integer("prop-width", 420, 240, 720),
-      height: integer("prop-height", 220, 64, 360),
+      width: integer("prop-width", 420, 1, 1920),
+      height: integer("prop-height", 220, 1, 1080),
       backgroundColor: value("skin-bg-color", "#0e1916"),
       backgroundAssetId: value("skin-bg-asset", "") || null,
       backgroundFit: value("skin-bg-fit", "fill"),
       backgroundPadding: number("skin-bg-padding", 0),
-      borderRadius: integer("prop-border-radius", 16, 0, 48),
-      opacity: number("prop-opacity", 0.96)
-    },
+      borderRadius: integer("prop-border-radius", 16, 0, 480),
+      opacity: Math.max(0, Math.min(1, number("prop-opacity", 0.96))),
+      borderWidth: integer("prop-border-width", 0, 0, 32),
+      borderColor: value("prop-border-color", "#62d0a8"),
+      paintOverflow: integer("prop-paint-overflow", 0, 0, 240)
+    }
+  };
+  var borderPaintOn = typeof pressed === "function" && pressed("prop-border-paint");
+  if (!borderPaintOn) {
+    var borderPaintChip = $("prop-border-paint");
+    borderPaintOn = !!(borderPaintChip && borderPaintChip.getAttribute && borderPaintChip.getAttribute("aria-pressed") === "true");
+  }
+  if (borderPaintOn) draft.appearance.borderPaint = "gradient";
+  if (draft.appearance.backgroundAssetId) {
+    var bgScale = number("skin-bg-scale", 1);
+    var bgX = number("skin-bg-x", 0.5);
+    var bgY = number("skin-bg-y", 0.5);
+    if (bgScale !== 1 || bgX !== 0.5 || bgY !== 0.5) {
+      draft.appearance.backgroundScale = Math.max(0.2, Math.min(8, bgScale));
+      draft.appearance.backgroundX = Math.max(0, Math.min(1, bgX));
+      draft.appearance.backgroundY = Math.max(0, Math.min(1, bgY));
+    }
+  }
+  draft = Object.assign(draft, {
     properties: {
       space: {
         size: value("prop-size", "medium"),
         anchor: value("prop-anchor", "bottom-right"),
-        gap: integer("prop-gap", 8, 0, 48),
-        marginLeft: integer("prop-margin-left", 18, 0, 96),
-        marginRight: integer("prop-margin-right", 18, 0, 96),
-        marginTop: integer("prop-margin-top", 18, 0, 96),
-        marginBottom: integer("prop-margin-bottom", 18, 0, 96),
+        grow: (function () {
+          var anchor = value("prop-anchor", "bottom-right");
+          var grow = value("prop-grow", "");
+          var allowed = { up: anchor.slice(0, 3) !== "top", down: anchor.slice(0, 6) !== "bottom", left: anchor.slice(-4) !== "left", right: anchor.slice(-5) !== "right" };
+          if (allowed[grow]) return grow;
+          return anchor.slice(0, 3) === "top" ? "down" : "up";
+        })(),
+        wrap: (function () {
+          var wrap = value("prop-wrap", "parallel");
+          if (wrap === "off" || wrap === "snake" || wrap === "parallel") return wrap;
+          return "parallel";
+        })(),
+        gap: integer("prop-gap", 8, 0),
+        marginLeft: integer("prop-margin-left", 18, 0),
+        marginRight: integer("prop-margin-right", 18, 0),
+        marginTop: integer("prop-margin-top", 18, 0),
+        marginBottom: integer("prop-margin-bottom", 18, 0),
         layout: value("prop-layout", "simple")
       },
-      shape: { borderRadius: integer("prop-border-radius", 16, 0, 48), opacity: number("prop-opacity", 0.96), blur: 0, shadow: "none", borderWidth: 0, borderColor: "#0e1916" },
+      shape: { borderRadius: integer("prop-border-radius", 16, 0, 480), opacity: Math.max(0, Math.min(1, number("prop-opacity", 0.96))), blur: 0, shadow: "none", borderWidth: integer("prop-border-width", 0, 0, 32), borderColor: value("prop-border-color", "#62d0a8") },
       typography: { titleLines: 1, bodyLines: 4, fontScale: 1, lineHeight: 1.55, textOverflow: "ellipsis" },
       lifecycle: { durationMs: number("prop-duration", 30000), enterDurationMs: 260, holdDurationMs: number("prop-hold-duration", 30000), exitDurationMs: 200 },
-      interaction: { dismissMode: value("prop-dismiss-mode", "closeButton"), closeButtonPosition: "top-right", timeoutMs: number("prop-hold-duration", 30000), hoverPause: "off", expandable: "off", clickable: "off" },
+      interaction: { dismissMode: (function () {
+        var mode = value("prop-dismiss-mode", "closeButton");
+        return mode === "anywhere" ? "anywhere" : "closeButton";
+      })(), closeButtonPosition: "top-right", timeoutMs: number("prop-hold-duration", 30000), autoDismiss: (function () {
+        var autoBtn = $("prop-dismiss-auto");
+        return autoBtn && autoBtn.getAttribute && autoBtn.getAttribute("aria-pressed") === "true" ? "on" : "off";
+      })(), hoverPause: "off", hoverHighlight: (function () {
+        var behavior = ($("pipeline-behavior") && $("pipeline-behavior").value) || (state.profile && state.profile.behaviorId) || "stack";
+        var passOn = !($("ticker-click-through") && $("ticker-click-through").getAttribute && $("ticker-click-through").getAttribute("aria-pressed") === "false");
+        if (behavior === "ticker" && passOn) return "off";
+        var stack = $("prop-hover-highlight");
+        var tick = $("ticker-hover-highlight");
+        var on = (stack && stack.getAttribute && stack.getAttribute("aria-pressed") === "true") || (tick && tick.getAttribute && tick.getAttribute("aria-pressed") === "true");
+        return on ? "on" : "off";
+      })(), expandable: "off", clickable: "off" },
       resource: { maxVisible: 0, maxActive: 0, maxParticles: 0, overflow: "allow" }
     },
     skin: {
       skinId: "skin.default",
       semanticColors: { title: "#F2FFF9", body: "#C5D8D0", assistantName: "#62D0A8", metadata: "#8EA69C", status: "#F1C77A" },
       background: { color: value("skin-bg-color", "#0e1916"), assetId: value("skin-bg-asset", "") || null, fit: value("skin-bg-fit", "fill"), padding: number("skin-bg-padding", 0) },
-      decoration: { borderRadius: integer("prop-border-radius", 16, 0, 48), opacity: number("prop-opacity", 0.96), shadow: "none", borderWidth: 0, borderColor: "#0e1916", blur: 0, density: "standard" }
+      decoration: { borderRadius: integer("prop-border-radius", 16, 0, 480), opacity: Math.max(0, Math.min(1, number("prop-opacity", 0.96))), shadow: "none", borderWidth: integer("prop-border-width", 0, 0, 32), borderColor: value("prop-border-color", "#62d0a8"), blur: 0, density: "standard" }
     },
     effects: {
       effectConfigId: "effect.visual",
@@ -439,7 +2021,154 @@ function collect() {
         exitParticles: { enabled: true, effectId: "star", durationMs: 0, maxParticles: 18, assetId: null }
       }
     }
-  };
+  });
+  var parts = {};
+  ["title", "body", "close", "icon", "assistantName"].forEach(function (id) {
+    var fillEl = $("part-" + id + "-fill");
+    var strokeEl = $("part-" + id + "-stroke");
+    var widthEl = $("part-" + id + "-stroke-width");
+    var paint = {};
+    if (fillEl && fillEl.value) paint.fill = fillEl.value;
+    var bgEl = $("part-" + id + "-background");
+    if (bgEl && bgEl.value) paint.background = bgEl.value;
+    var opEl = $("part-" + id + "-opacity");
+    if (opEl && opEl.value !== "") {
+      var opacity = Number(opEl.value);
+      if (Number.isFinite(opacity) && opacity !== 1) paint.opacity = Math.max(0, Math.min(1, opacity));
+    }
+    if (id !== "icon") {
+      var partAssetEl = $("part-" + id + "-bg-asset");
+      if (partAssetEl && partAssetEl.value) {
+        paint.backgroundAssetId = partAssetEl.value;
+        var partScale = number("part-" + id + "-bg-scale", 1);
+        var partX = number("part-" + id + "-bg-x", 0.5);
+        var partY = number("part-" + id + "-bg-y", 0.5);
+        if (partScale !== 1 || partX !== 0.5 || partY !== 0.5) {
+          paint.backgroundScale = Math.max(0.2, Math.min(8, partScale));
+          paint.backgroundX = Math.max(0, Math.min(1, partX));
+          paint.backgroundY = Math.max(0, Math.min(1, partY));
+        }
+      }
+    }
+    if (strokeEl && strokeEl.value) paint.stroke = strokeEl.value;
+    var strokePaintEl = $("part-" + id + "-stroke-paint");
+    if (strokePaintEl && strokePaintEl.value === "gradient") paint.strokePaint = "gradient";
+    if (widthEl && widthEl.value !== undefined && widthEl.value !== "") {
+      var width = Math.round(Number(widthEl.value));
+      if (Number.isFinite(width)) {
+        width = Math.max(0, Math.min(32, width));
+        if (width > 0 || Object.keys(paint).length > 0) paint.strokeWidth = width;
+      }
+    }
+    var xEl = $("part-" + id + "-x");
+    var yEl = $("part-" + id + "-y");
+    var wEl = $("part-" + id + "-w");
+    var hEl = $("part-" + id + "-h");
+    if (xEl && xEl.value !== "") {
+      var x = Math.round(Number(xEl.value));
+      if (Number.isFinite(x)) paint.x = Math.max(0, Math.min(1920, x));
+    }
+    if (yEl && yEl.value !== "") {
+      var y = Math.round(Number(yEl.value));
+      if (Number.isFinite(y)) paint.y = Math.max(0, Math.min(1080, y));
+    }
+    if (wEl && wEl.value !== "") {
+      var partW = Math.round(Number(wEl.value));
+      if (Number.isFinite(partW) && partW > 0) paint.w = Math.max(1, Math.min(1920, partW));
+    }
+    if (hEl && hEl.value !== "") {
+      var partH = Math.round(Number(hEl.value));
+      if (Number.isFinite(partH) && partH > 0) paint.h = Math.max(1, Math.min(1080, partH));
+    }
+    var radiusEl = $("part-" + id + "-radius");
+    if (radiusEl && radiusEl.value !== "") {
+      var radius = Math.round(Number(radiusEl.value));
+      if (Number.isFinite(radius)) paint.radius = Math.max(0, Math.min(240, radius));
+    }
+    if (id === "icon") {
+      var iconShowEl = $("part-icon-show");
+      paint.show = !!(iconShowEl && iconShowEl.value === "true");
+      var sourceEl = $("part-icon-source");
+      paint.source = sourceEl && sourceEl.value === "custom" ? "custom" : "assistant";
+      var assetEl = $("part-icon-asset-id");
+      paint.assetId = paint.source === "custom" && assetEl && assetEl.value ? assetEl.value : null;
+      var iconScale = number("part-icon-scale", 1);
+      var iconX = number("part-icon-x", 0.5);
+      var iconY = number("part-icon-y", 0.5);
+      if (iconScale !== 1 || iconX !== 0.5 || iconY !== 0.5) {
+        paint.backgroundScale = Math.max(0.2, Math.min(8, iconScale));
+        paint.backgroundX = Math.max(0, Math.min(1, iconX));
+        paint.backgroundY = Math.max(0, Math.min(1, iconY));
+      }
+    }
+    if (id === "assistantName") {
+      var nameShowEl = $("part-assistantName-show");
+      paint.show = !!(nameShowEl && nameShowEl.value === "true");
+    }
+    if (id === "title" || id === "assistantName") {
+      var fitEl = $("part-" + id + "-fit-width");
+      if (fitEl && fitEl.value === "true") paint.fitWidth = true;
+      var compensateEl = $("part-" + id + "-fit-compensate");
+      if (compensateEl && compensateEl.value === "true") paint.fitCompensate = true;
+    }
+    if (id === "title" || id === "body" || id === "assistantName") {
+      if (id === "title" || id === "body") {
+        var showEl = $("part-" + id + "-show");
+        paint.show = !(showEl && showEl.value === "false");
+      }
+      var sizeEl = $("part-" + id + "-font-size");
+      if (sizeEl && sizeEl.value !== "") {
+        var fontSize = Math.round(Number(sizeEl.value));
+        if (Number.isFinite(fontSize)) paint.fontSize = Math.max(8, Math.min(72, fontSize));
+      }
+      var familyEl = $("part-" + id + "-font-family");
+      if (familyEl && familyEl.value) {
+        if (familyEl.value.indexOf("font:") === 0) paint.fontAssetId = familyEl.value.slice(5);
+        else if (familyEl.value === "yahei" || familyEl.value === "heiti" || familyEl.value === "songti" || familyEl.value === "segoe") {
+          paint.fontFamily = familyEl.value;
+          paint.fontAssetId = null;
+        }
+      }
+      var paintEl = $("part-" + id + "-text-paint");
+      paint.textPaint = paintEl && paintEl.value === "rainbow" ? "rainbow" : "solid";
+      var boldEl = $("part-" + id + "-font-bold");
+      if (boldEl && (boldEl.value === "true" || boldEl.value === "false")) paint.fontBold = boldEl.value === "true";
+      else if (id === "title") paint.fontBold = true;
+      var italicEl = $("part-" + id + "-font-italic");
+      paint.fontItalic = !!(italicEl && italicEl.value === "true");
+      var underlineEl = $("part-" + id + "-font-underline");
+      paint.fontUnderline = !!(underlineEl && underlineEl.value === "true");
+      var strikeEl = $("part-" + id + "-font-strike");
+      paint.fontStrike = !!(strikeEl && strikeEl.value === "true");
+      var textStrokeEl = $("part-" + id + "-text-stroke");
+      if (textStrokeEl && textStrokeEl.value === "true") {
+        paint.textStroke = true;
+        var textStrokeColorEl = $("part-" + id + "-text-stroke-color");
+        if (textStrokeColorEl && /^#[0-9a-fA-F]{6}$/.test(textStrokeColorEl.value)) paint.textStrokeColor = textStrokeColorEl.value;
+        var textStrokeWidthEl = $("part-" + id + "-text-stroke-width");
+        if (textStrokeWidthEl && textStrokeWidthEl.value !== "") {
+          var textStrokeWidth = Math.round(Number(textStrokeWidthEl.value));
+          if (Number.isFinite(textStrokeWidth)) paint.textStrokeWidth = Math.max(1, Math.min(16, textStrokeWidth));
+        }
+        var textStrokePaintEl = $("part-" + id + "-text-stroke-paint");
+        if (textStrokePaintEl && textStrokePaintEl.value === "rainbow") paint.textStrokePaint = "rainbow";
+      }
+    }
+    if (id === "close") {
+      var closeIconEl = $("part-close-icon");
+      if (closeIconEl && closeIconEl.value && closeIconEl.value !== "x") paint.closeIcon = closeIconEl.value;
+      var closeIconColorEl = $("part-close-icon-color");
+      if (closeIconColorEl && /^#[0-9a-fA-F]{6}$/.test(closeIconColorEl.value)) paint.closeIconColor = closeIconColorEl.value;
+    }
+    if (Object.keys(paint).length) parts[id] = paint;
+  });
+  if (Object.keys(parts).length) draft.parts = parts;
+  var glossary = {};
+  try {
+    var raw = value("glossary-json", "{}");
+    if (raw) glossary = JSON.parse(raw) || {};
+  } catch (error) { glossary = {}; }
+  if (glossary && typeof glossary === "object" && !Array.isArray(glossary) && Object.keys(glossary).length) draft.glossary = glossary;
   var types = Object.assign({}, p.card && p.card.types || {});
   types[activeType] = draft;
   var behaviorId = ($("pipeline-behavior") && $("pipeline-behavior").value) || p.behaviorId || "stack";
@@ -458,7 +2187,8 @@ function collect() {
       speedRandom: !!($("ticker-speed-random") && $("ticker-speed-random").getAttribute && $("ticker-speed-random").getAttribute("aria-pressed") === "true"),
       clickThrough: !($("ticker-click-through") && $("ticker-click-through").getAttribute && $("ticker-click-through").getAttribute("aria-pressed") === "false"),
       hoverPause: (p.ticker && p.ticker.hoverPause) === true,
-      overflow: (p.ticker && p.ticker.overflow) || "avoid"
+      overflow: (p.ticker && p.ticker.overflow) || "avoid",
+      direction: value("ticker-direction", "left")
     };
   }
   var defaultMode = value("global-visual-default-mode", (p.global && p.global.defaultMode) || "off");
@@ -516,7 +2246,7 @@ function runPreviewUpdate() {
   previewPending = false;
   var generation = previewGeneration;
   setPreviewState("正在发送/更新");
-  Promise.resolve(json("visual-preview/update", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ draft: collect() }) })).then(function (result) {
+  Promise.resolve(json("visual-preview/update", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(studioNativeBody()) })).then(function (result) {
     if (generation !== previewGeneration) return;
     renderPreviewConfirmation(result);
     setPreviewState(result.recreated ? "已重建" : "已更新 · " + new Date().toLocaleTimeString(), "success");
@@ -545,6 +2275,20 @@ function markVisualDirty() {
   var status = $("visual-page-status");
   if (status) status.textContent = "未保存";
 }
+function hydrateVisualFromServer() {
+  return Promise.resolve(json("visual-settings-status", { method: "POST", cache: "no-store", headers: { "Cache-Control": "no-store", Pragma: "no-cache" } })).then(function (result) {
+    if (!result || !result.profile) return result;
+    state = result;
+    var type = (result.profile.card && result.profile.card.activeType) || ($("pipeline-type") && $("pipeline-type").value) || "minimal";
+    if ($("pipeline-type")) $("pipeline-type").value = type;
+    if ($("pipeline-behavior") && result.profile.behaviorId) $("pipeline-behavior").value = result.profile.behaviorId;
+    if ($("global-visual-enabled") && result.profile.global) $("global-visual-enabled").checked = result.profile.global.enabled !== false;
+    if (typeof applyModeEditor === "function") applyModeEditor(type, true);
+    var pageStatus = $("visual-page-status");
+    if (pageStatus) pageStatus.textContent = "已保存";
+    return result;
+  }).catch(function () { return null; });
+}
 function saveVisualSettings() {
   var save = $("visual-settings-save");
   var output = $("visual-settings-feedback");
@@ -567,37 +2311,85 @@ function saveVisualSettings() {
     throw error;
   }).finally(function () { if (save) save.disabled = false; });
 }
-var syncIds = ["global-visual-enabled", "global-visual-default-mode", "prop-size", "prop-anchor", "prop-margin-left", "prop-margin-right", "prop-margin-top", "prop-margin-bottom", "prop-gap", "prop-layout", "prop-width", "prop-height", "prop-border-radius", "prop-opacity", "prop-duration", "prop-hold-duration", "prop-dismiss-mode", "skin-bg-color", "skin-bg-asset", "skin-bg-fit", "skin-bg-padding", "pipeline-behavior", "pipeline-type", "ticker-speed", "ticker-band", "ticker-band-ratio", "ticker-track-count", "ticker-track-gap", "ticker-min-gap"];
+var syncIds = ["global-visual-enabled", "global-visual-default-mode", "prop-size", "prop-anchor", "prop-grow", "prop-wrap", "prop-margin-left", "prop-margin-right", "prop-margin-top", "prop-margin-bottom", "prop-gap", "prop-layout", "prop-width", "prop-height", "prop-border-radius", "prop-opacity", "prop-border-width", "prop-border-color", "prop-paint-overflow", "part-paint-fill", "part-paint-fill-box", "part-paint-background", "part-paint-opacity", "part-paint-bg-asset", "part-paint-stroke", "part-paint-stroke-width", "part-paint-x", "part-paint-y", "part-paint-w", "part-paint-h", "part-paint-radius", "part-paint-font-size", "part-paint-font-family", "part-paint-text-stroke-color", "part-paint-text-stroke-width", "part-paint-close-icon-color", "part-icon-asset", "studio-sample-agent", "prop-duration", "prop-hold-duration", "prop-dismiss-mode", "skin-bg-color", "skin-bg-asset", "skin-bg-fit", "skin-bg-padding", "skin-bg-scale", "skin-bg-x", "skin-bg-y", "pipeline-behavior", "pipeline-type", "ticker-speed", "ticker-band", "ticker-band-ratio", "ticker-track-count", "ticker-track-gap", "ticker-min-gap", "ticker-direction"];
 var syncIdSet = {};
 syncIds.forEach(function (id) { syncIdSet[id] = true; });
+function clampNumberInput(el, hard) {
+  if (!el || el.type !== "number" || el.disabled) return;
+  var raw = String(el.value || "");
+  if (raw === "") return;
+  if (!hard && (raw === "-" || raw === "." || raw === "-." || /\.$/.test(raw))) return;
+  var n = Number(raw);
+  if (!Number.isFinite(n)) return;
+  var min = el.min !== "" ? Number(el.min) : NaN;
+  var max = el.max !== "" ? Number(el.max) : NaN;
+  if (Number.isFinite(max) && n > max) {
+    el.value = String(max);
+    n = max;
+  }
+  if (hard && Number.isFinite(min) && n < min) el.value = String(min);
+}
 if (window.__notificationHubVisualDispose) window.__notificationHubVisualDispose();
 function visualInputHandler(event) {
   var target = event && event.target;
   if (!target) return;
+  if (target.type === "number") clampNumberInput(target, event.type !== "input");
+  if (target.classList && (target.classList.contains("glossary-name") || target.classList.contains("glossary-color"))) {
+    syncGlossaryFromRows();
+    markVisualDirty();
+    syncPreview();
+    return;
+  }
   if (target.id === "hold-seconds") {
     if (typeof syncStudioReadouts === "function") syncStudioReadouts(target);
     markVisualDirty();
-    if (typeof renderStudioPreview === "function") renderStudioPreview();
     syncPreview();
     return;
   }
   if (!syncIdSet[target.id]) return;
+  if (target.id === "part-paint-fill" || target.id === "part-paint-fill-box" || target.id === "part-paint-background" || target.id === "part-paint-opacity" || target.id === "part-paint-bg-asset" || target.id === "part-paint-stroke" || target.id === "part-paint-stroke-width" || target.id === "part-paint-text-stroke-color" || target.id === "part-paint-text-stroke-width" || target.id === "part-paint-close-icon-color") writeSelectedPartPaint();
+  if (target.id === "part-paint-x" || target.id === "part-paint-y" || target.id === "part-paint-w" || target.id === "part-paint-h" || target.id === "part-paint-radius") writeSelectedPartAxis(target.id.slice("part-paint-".length));
+  if (target.id === "part-icon-asset") setControl("part-icon-asset-id", target.value || "");
+  if (target.id === "part-paint-bg-asset") {
+    var partId = selectedPart();
+    if (partId && partId !== "root" && partId !== "icon") {
+      setControl("part-" + partId + "-bg-asset", target.value || "");
+      setControl("part-" + partId + "-bg-scale", 1);
+      setControl("part-" + partId + "-bg-x", 0.5);
+      setControl("part-" + partId + "-bg-y", 0.5);
+    }
+  }
+  if (target.id === "part-paint-font-size" || target.id === "part-paint-font-family") writeSelectedPartFont();
+  if (target.id === "skin-bg-asset") writeBgTransform(1, 0.5, 0.5);
   if (event.type === "change" && target.id === "pipeline-type" && typeof applyModeEditor === "function") applyModeEditor(target.value);
   if (target.id === "global-visual-enabled" && typeof applyGlobalVisualState === "function") applyGlobalVisualState();
   markVisualDirty();
   if (typeof syncStudioReadouts === "function") syncStudioReadouts(target);
-  if (target.id !== "pipeline-type" && typeof updateStageCard === "function") updateStageCard();
-  if (typeof renderStudioPreview === "function") renderStudioPreview();
+  if ((target.id === "prop-width" || target.id === "prop-height" || target.id === "prop-size") && typeof selectedPart === "function" && selectedPart() !== "root") selectPart(selectedPart());
   syncPreview();
 }
 window.__notificationHubVisualInputHandler = visualInputHandler;
 window.__notificationHubVisualChangeHandler = visualInputHandler;
+function visualNumberBlurHandler(event) {
+  var t = event && event.target;
+  if (t && t.type === "number") clampNumberInput(t, true);
+}
 document.addEventListener("input", visualInputHandler);
 document.addEventListener("change", visualInputHandler);
+document.addEventListener("blur", visualNumberBlurHandler, true);
+function ignoreControlWheel(event) {
+  var target = event.target;
+  if (!target || !target.closest) return;
+  if (target.closest("input, select, textarea")) event.preventDefault();
+}
+document.addEventListener("wheel", ignoreControlWheel, { capture: true, passive: false });
 var previewButton = $("open-visual-preview");
-if (typeof bindStageDrag === "function") bindStageDrag();
+if (typeof bindBgAdjust === "function") bindBgAdjust();
 if (typeof applyGlobalVisualState === "function") applyGlobalVisualState();
-if (typeof renderStudioPreview === "function") renderStudioPreview();
+if (typeof applyModeEditor === "function") applyModeEditor(($("pipeline-type") && $("pipeline-type").value) || "minimal", true);
+if (typeof selectPart === "function") selectPart(rememberedSelectedPart() || ($("part-selected") && $("part-selected").value) || "root", true);
+if (typeof hydrateVisualFromServer === "function") hydrateVisualFromServer();
+if (typeof renderGlossaryRows === "function") renderGlossaryRows();
 if (previewButton) previewButton.addEventListener("click", function () {
   var stateEl = $("visual-preview-state");
   if (previewOpen) {
@@ -619,7 +2411,7 @@ if (previewButton) previewButton.addEventListener("click", function () {
   var generation = previewGeneration;
   previewButton.disabled = true;
   setPreviewState("正在连接");
-  Promise.resolve(json("visual-preview/open", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ draft: collect() }) })).then(function (result) {
+  Promise.resolve(json("visual-preview/open", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(studioNativeBody()) })).then(function (result) {
     if (generation !== previewGeneration) return;
     previewOpen = true;
     renderPreviewConfirmation(result);
@@ -647,7 +2439,7 @@ if (clearCards) clearCards.addEventListener("click", function () {
 var tryOne = $("visual-try-one");
 if (tryOne) tryOne.addEventListener("click", function () {
   tryOne.disabled = true;
-  Promise.resolve(json("visual-try-one", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ draft: collect() }) })).then(function (result) {
+  Promise.resolve(json("visual-try-one", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(studioNativeBody()) })).then(function (result) {
     feedback("visual-settings-feedback", "已试一条" + (result.behaviorId === "ticker" ? "弹幕" : "堆叠"), "success");
     loadVisualDiagnostics().catch(function () {});
   }).catch(function (error) {
@@ -672,6 +2464,8 @@ window.__notificationHubVisualDispose = function () {
   if (window.__notificationHubStageDragDispose) window.__notificationHubStageDragDispose();
   document.removeEventListener("input", visualInputHandler);
   document.removeEventListener("change", visualInputHandler);
+  document.removeEventListener("blur", visualNumberBlurHandler, true);
+  document.removeEventListener("wheel", ignoreControlWheel, true);
   window.removeEventListener("notification-hub-view-before-unload", visualViewBeforeUnload);
   document.removeEventListener("click", visualProfileClickHandler);
   document.removeEventListener("click", studioClickHandler);
@@ -909,7 +2703,13 @@ function applyVisual() {
   return Promise.resolve(json("visual-profiles/apply", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ profileId: profileId, eventIds: [eventId] }) })).then(function (data) {
     applyFeedback.textContent = "已应用到事件：" + eventLabel(eventId);
     applyFeedback.className = "feedback success";
-    loadBoundEvents().catch(function () {});
+    return Promise.resolve(json("visual-profiles")).then(function (listed) {
+      state.profiles = Array.isArray(listed.profiles) ? listed.profiles : [];
+      refreshProfiles();
+      return loadBoundEvents();
+    }).catch(function () {
+      return loadBoundEvents();
+    });
   }).catch(function (err) {
     applyFeedback.textContent = (err.code ? err.code + " · " : "") + (err.message || "应用失败");
     applyFeedback.className = "feedback error";

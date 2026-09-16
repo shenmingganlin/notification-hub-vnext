@@ -47,6 +47,7 @@ LRESULT CALLBACK window_proc(HWND hwnd, UINT message, WPARAM wparam, LPARAM lpar
         if (window != nullptr) {
             const auto client_x = static_cast<float>(GET_X_LPARAM(lparam));
             const auto client_y = static_cast<float>(GET_Y_LPARAM(lparam));
+            window->reset_pointer_gesture();
             if (window->begin_close_button_press(client_x, client_y)
                 || window->begin_drag_client_point(client_x, client_y)) {
                 SetCapture(hwnd);
@@ -54,29 +55,42 @@ LRESULT CALLBACK window_proc(HWND hwnd, UINT message, WPARAM wparam, LPARAM lpar
         }
         return 0;
     case WM_MOUSEMOVE:
-        if (window != nullptr && window->is_dragging()) {
-            POINT point{GET_X_LPARAM(lparam), GET_Y_LPARAM(lparam)};
-            ClientToScreen(hwnd, &point);
-            window->update_drag_screen_point(point.x, point.y);
+        if (window != nullptr) {
+            const auto client_x = static_cast<float>(GET_X_LPARAM(lparam));
+            const auto client_y = static_cast<float>(GET_Y_LPARAM(lparam));
+            if (window->is_dragging()) {
+                POINT point{GET_X_LPARAM(lparam), GET_Y_LPARAM(lparam)};
+                ClientToScreen(hwnd, &point);
+                window->update_drag_screen_point(point.x, point.y);
+            } else {
+                window->note_pointer_client(client_x, client_y);
+            }
         }
+        return 0;
+    case WM_MOUSELEAVE:
+        if (window != nullptr) window->clear_hover();
         return 0;
     case WM_LBUTTONUP:
         if (window != nullptr) {
             const auto client_x = static_cast<float>(GET_X_LPARAM(lparam));
             const auto client_y = static_cast<float>(GET_Y_LPARAM(lparam));
-            if (window->is_dragging()) {
+            const bool dragging = window->is_dragging();
+            const bool close_released = !dragging && window->release_close_button_press(client_x, client_y);
+            if (dragging) {
                 window->end_drag();
-            } else if (window->release_close_button_press(client_x, client_y)) {
+            } else if (close_released) {
                 // A close is committed only after the same card receives the
                 // matching release. The down event never reflows the scene.
+                window->release_pointer_capture();
                 window->request_close("user-close");
             } else {
                 window->cancel_pointer_press();
+                window->release_pointer_capture();
             }
         }
         return 0;
     case WM_CAPTURECHANGED:
-        if (window != nullptr) {
+        if (window != nullptr && !window->suppressing_capture_loss()) {
             window->end_drag();
             window->cancel_pointer_press();
         }
@@ -94,7 +108,10 @@ LRESULT CALLBACK window_proc(HWND hwnd, UINT message, WPARAM wparam, LPARAM lpar
     }
     case WM_SIZE:
         if (window != nullptr) {
-            window->resize_render_target(LOWORD(lparam), HIWORD(lparam));
+            const int overflow = window->paint_overflow();
+            const int hit_w = static_cast<int>(LOWORD(lparam)) - overflow * 2;
+            const int hit_h = static_cast<int>(HIWORD(lparam)) - overflow * 2;
+            if (hit_w > 0 && hit_h > 0) window->resize_render_target(hit_w, hit_h);
         }
         return 0;
     case WM_DPICHANGED:
@@ -109,6 +126,9 @@ LRESULT CALLBACK window_proc(HWND hwnd, UINT message, WPARAM wparam, LPARAM lpar
     case WM_APP + 1:
         // Owner-thread probe used by the isolated Native Runtime lifecycle smoke test.
         DestroyWindow(hwnd);
+        return 0;
+    case WM_APP + 0x4E49:
+        if (window != nullptr && window->is_created()) window->paint();
         return 0;
     case WM_CLOSE:
         if (window != nullptr && window->close_reason().empty()) {
@@ -164,10 +184,11 @@ bool SceneWindow::create() {
     if (config_.tool_window) extended_style |= WS_EX_TOOLWINDOW;
     if (config_.visual.ticker_specified && config_.visual.ticker_click_through) extended_style |= WS_EX_TRANSPARENT;
 
-    RECT bounds{0, 0, config_.width, config_.height};
+    const int overflow = paint_overflow();
+    RECT bounds{0, 0, config_.width + overflow * 2, config_.height + overflow * 2};
     AdjustWindowRectEx(&bounds, style, FALSE, extended_style);
-    const auto initial_x = config_.has_initial_position ? config_.x : CW_USEDEFAULT;
-    const auto initial_y = config_.has_initial_position ? config_.y : CW_USEDEFAULT;
+    const auto initial_x = config_.has_initial_position ? config_.x - overflow : CW_USEDEFAULT;
+    const auto initial_y = config_.has_initial_position ? config_.y - overflow : CW_USEDEFAULT;
     const auto hwnd = CreateWindowExW(
         extended_style,
         class_name_.c_str(),
@@ -185,13 +206,13 @@ bool SceneWindow::create() {
 
     hwnd_ = hwnd;
     dpi_ = GetDpiForWindow(hwnd);
-    if (!renderer_.initialize(hwnd_, config_.width, config_.height)) {
+    if (!renderer_.initialize(hwnd_, config_.width + overflow * 2, config_.height + overflow * 2)) {
         DestroyWindow(hwnd);
         hwnd_ = nullptr;
         visible_ = false;
         return false;
     }
-    if (config_.visual.dismiss_mode == "timeout" && !config_.visual.ticker_specified) {
+    if ((config_.visual.auto_dismiss || config_.visual.dismiss_mode == "timeout") && !config_.visual.ticker_specified) {
         SetTimer(static_cast<HWND>(hwnd_), kDismissTimerId, static_cast<UINT>(config_.visual.dismiss_timeout_ms), nullptr);
     }
     return true;
@@ -312,7 +333,11 @@ bool SceneWindow::apply_dpi_change(unsigned int dpi, const void* suggested_rect)
         width,
         height,
         SWP_NOZORDER | SWP_NOACTIVATE) != FALSE;
-    const auto resized = resize_render_target(width, height);
+    const int overflow = paint_overflow();
+    const int hit_w = width - overflow * 2;
+    const int hit_h = height - overflow * 2;
+    if (hit_w <= 0 || hit_h <= 0) return false;
+    const auto resized = resize_render_target(hit_w, hit_h);
     return moved && resized;
 #else
     static_cast<void>(dpi);
@@ -344,11 +369,29 @@ bool SceneWindow::get_window_position(int& x, int& y) const noexcept {
 #endif
 }
 
+int SceneWindow::paint_overflow() const noexcept {
+    return clamp_paint_overflow(config_.visual.paint_overflow);
+}
+
+bool SceneWindow::point_on_close_control(float x, float y) const noexcept {
+    bool saw_close = false;
+    for (const auto& part : config_.parts) {
+        if (part.kind != "close") continue;
+        saw_close = true;
+        return x >= static_cast<float>(part.x) && x <= static_cast<float>(part.x + part.w)
+            && y >= static_cast<float>(part.y) && y <= static_cast<float>(part.y + part.h);
+    }
+    if (!config_.parts.empty() && !saw_close) return false;
+    if (config_.visual.dismiss_mode != "closeButton" && config_.visual.dismiss_mode != "buttonOnly") return false;
+    return point_inside_close_button(x, y, static_cast<float>(config_.width), static_cast<float>(config_.height));
+}
+
 bool SceneWindow::begin_close_button_press(float x, float y) noexcept {
 #ifdef _WIN32
     if (hwnd_ == nullptr || close_requested_) return false;
+    client_to_hit_box(x, y, paint_overflow());
     const bool anywhere = config_.visual.dismiss_mode == "anywhere";
-    if (!anywhere && !point_inside_close_button(x, y, static_cast<float>(config_.width), static_cast<float>(config_.height))) return false;
+    if (!anywhere && !point_on_close_control(x, y)) return false;
     close_button_pressed_ = true;
     return true;
 #else
@@ -361,9 +404,10 @@ bool SceneWindow::begin_close_button_press(float x, float y) noexcept {
 bool SceneWindow::release_close_button_press(float x, float y) noexcept {
 #ifdef _WIN32
     if (!close_button_pressed_) return false;
+    client_to_hit_box(x, y, paint_overflow());
     const bool released_inside = config_.visual.dismiss_mode == "anywhere"
         ? point_inside_card(x, y, static_cast<float>(config_.width), static_cast<float>(config_.height))
-        : point_inside_close_button(x, y, static_cast<float>(config_.width), static_cast<float>(config_.height));
+        : point_on_close_control(x, y);
     close_button_pressed_ = false;
     return released_inside && !close_requested_;
 #else
@@ -379,9 +423,12 @@ void SceneWindow::cancel_pointer_press() noexcept {
 
 bool SceneWindow::begin_drag_client_point(float x, float y) noexcept {
 #ifdef _WIN32
-    if (hwnd_ == nullptr || close_requested_ || ignores_pointer()
-        || !point_inside_card(x, y, static_cast<float>(config_.width), static_cast<float>(config_.height))
-        || point_inside_close_button(x, y, static_cast<float>(config_.width), static_cast<float>(config_.height))) {
+    if (hwnd_ == nullptr || close_requested_ || ignores_pointer()) return false;
+    float hit_x = x;
+    float hit_y = y;
+    client_to_hit_box(hit_x, hit_y, paint_overflow());
+    if (!point_inside_card(hit_x, hit_y, static_cast<float>(config_.width), static_cast<float>(config_.height))
+        || point_on_close_control(hit_x, hit_y)) {
         return false;
     }
     POINT point{static_cast<LONG>(x), static_cast<LONG>(y)};
@@ -407,14 +454,20 @@ bool SceneWindow::update_drag_screen_point(int x, int y) noexcept {
     if (!drag_active_ || hwnd_ == nullptr) return false;
     const auto next_x = drag_window_start_x_ + (x - drag_start_screen_x_);
     const auto next_y = drag_window_start_y_ + (y - drag_start_screen_y_);
-    return SetWindowPos(
-        static_cast<HWND>(hwnd_),
+    const auto hwnd = static_cast<HWND>(hwnd_);
+    suppress_capture_loss_ = true;
+    const auto moved = SetWindowPos(
+        hwnd,
         nullptr,
         next_x,
         next_y,
         0,
         0,
         SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE) != FALSE;
+    if (moved) renderer_.present_layered();
+    suppress_capture_loss_ = false;
+    if (drag_active_ && GetCapture() != hwnd) SetCapture(hwnd);
+    return moved;
 #else
     static_cast<void>(x);
     static_cast<void>(y);
@@ -426,10 +479,33 @@ void SceneWindow::end_drag() noexcept {
 #ifdef _WIN32
     if (!drag_active_) return;
     drag_active_ = false;
-    if (hwnd_ != nullptr && GetCapture() == static_cast<HWND>(hwnd_)) ReleaseCapture();
+    release_pointer_capture();
 #else
     drag_active_ = false;
 #endif
+}
+
+bool SceneWindow::present_layered() {
+    return renderer_.present_layered();
+}
+
+bool SceneWindow::layered_present_origin(int& x, int& y) const noexcept {
+    return renderer_.layered_present_origin(x, y);
+}
+
+void SceneWindow::reset_pointer_gesture() noexcept {
+    end_drag();
+    cancel_pointer_press();
+}
+
+void SceneWindow::release_pointer_capture() noexcept {
+#ifdef _WIN32
+    if (hwnd_ != nullptr && GetCapture() == static_cast<HWND>(hwnd_)) ReleaseCapture();
+#endif
+}
+
+bool SceneWindow::suppressing_capture_loss() const noexcept {
+    return suppress_capture_loss_;
 }
 
 void SceneWindow::update_content(std::wstring title, std::wstring body) {
@@ -438,6 +514,22 @@ void SceneWindow::update_content(std::wstring title, std::wstring body) {
 #ifdef _WIN32
     if (hwnd_ != nullptr) {
         SetWindowTextW(static_cast<HWND>(hwnd_), config_.title.c_str());
+        InvalidateRect(static_cast<HWND>(hwnd_), nullptr, FALSE);
+    }
+#endif
+}
+
+void SceneWindow::update_assistant_name(std::wstring assistant_name) {
+    config_.assistant_name = std::move(assistant_name);
+#ifdef _WIN32
+    if (hwnd_ != nullptr) InvalidateRect(static_cast<HWND>(hwnd_), nullptr, FALSE);
+#endif
+}
+
+void SceneWindow::update_parts(std::vector<CardPart> parts) {
+    config_.parts = std::move(parts);
+#ifdef _WIN32
+    if (hwnd_ != nullptr) {
         InvalidateRect(static_cast<HWND>(hwnd_), nullptr, FALSE);
     }
 #endif
@@ -452,11 +544,13 @@ bool SceneWindow::sample_pixel(int x, int y, Pixel& pixel) const noexcept {
 }
 
 bool SceneWindow::hit_test_client_point(float x, float y) const noexcept {
+    client_to_hit_box(x, y, paint_overflow());
     return point_inside_card(x, y, static_cast<float>(config_.width), static_cast<float>(config_.height));
 }
 
 bool SceneWindow::click_client_point(float x, float y) noexcept {
-    if (!point_inside_close_button(x, y, static_cast<float>(config_.width), static_cast<float>(config_.height))) {
+    client_to_hit_box(x, y, paint_overflow());
+    if (!point_on_close_control(x, y)) {
         return false;
     }
     request_close("user-close");
@@ -472,7 +566,7 @@ void SceneWindow::update_visual(VisualStyle visual) {
 #ifdef _WIN32
     if (hwnd_ != nullptr) {
         KillTimer(static_cast<HWND>(hwnd_), kDismissTimerId);
-        if (config_.visual.dismiss_mode == "timeout" && !config_.visual.ticker_specified) {
+        if ((config_.visual.auto_dismiss || config_.visual.dismiss_mode == "timeout") && !config_.visual.ticker_specified) {
             SetTimer(static_cast<HWND>(hwnd_), kDismissTimerId, static_cast<UINT>(config_.visual.dismiss_timeout_ms), nullptr);
         }
         const auto hwnd = static_cast<HWND>(hwnd_);
@@ -487,10 +581,47 @@ void SceneWindow::update_visual(VisualStyle visual) {
 #endif
 }
 
+void SceneWindow::note_pointer_client(float x, float y) noexcept {
+#ifdef _WIN32
+    if (hwnd_ == nullptr) return;
+    if (!mouse_leave_tracked_) {
+        TRACKMOUSEEVENT track{};
+        track.cbSize = sizeof(track);
+        track.dwFlags = TME_LEAVE;
+        track.hwndTrack = static_cast<HWND>(hwnd_);
+        if (TrackMouseEvent(&track) != FALSE) mouse_leave_tracked_ = true;
+    }
+    if (ignores_pointer() || !config_.visual.hover_highlight) {
+        if (hovered_) {
+            hovered_ = false;
+            InvalidateRect(static_cast<HWND>(hwnd_), nullptr, FALSE);
+        }
+        return;
+    }
+    client_to_hit_box(x, y, paint_overflow());
+    const bool next = point_inside_card(x, y, static_cast<float>(config_.width), static_cast<float>(config_.height));
+    if (next == hovered_) return;
+    hovered_ = next;
+    InvalidateRect(static_cast<HWND>(hwnd_), nullptr, FALSE);
+#else
+    static_cast<void>(x);
+    static_cast<void>(y);
+#endif
+}
+
+void SceneWindow::clear_hover() noexcept {
+#ifdef _WIN32
+    mouse_leave_tracked_ = false;
+    if (!hovered_) return;
+    hovered_ = false;
+    if (hwnd_ != nullptr) InvalidateRect(static_cast<HWND>(hwnd_), nullptr, FALSE);
+#endif
+}
+
 bool SceneWindow::paint(bool capture_output) {
 #ifdef _WIN32
     if (hwnd_ == nullptr || !renderer_.is_ready()) return false;
-    const bool rendered = renderer_.draw(config_.title, config_.body, config_.visual, capture_output);
+    const bool rendered = renderer_.draw(config_.title, config_.body, config_.visual, capture_output, config_.parts, hovered_ && config_.visual.hover_highlight, config_.assistant_name);
     frame_rendered_ = frame_rendered_ || rendered;
     return rendered;
 #else
@@ -499,7 +630,8 @@ bool SceneWindow::paint(bool capture_output) {
 }
 
 bool SceneWindow::resize_render_target(int width, int height) {
-    const bool resized = renderer_.resize(width, height);
+    const int overflow = paint_overflow();
+    const bool resized = renderer_.resize(width + overflow * 2, height + overflow * 2);
     if (resized) {
         config_.width = width;
         config_.height = height;

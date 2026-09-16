@@ -5,7 +5,8 @@ import {
   normalizeRuntimeDiagnostic,
   projectCurrentRuntimeError,
   projectDiagnosticRecords,
-  sanitizeDiagnosticDetails
+  sanitizeDiagnosticDetails,
+  summarizeRuntimeDebugPayload
 } from '../../plugin/runtime/diagnostics-projection.js';
 
 test('sanitizeDiagnosticDetails recursively removes sensitive evidence and preserves safe values', () => {
@@ -25,6 +26,28 @@ test('sanitizeDiagnosticDetails recursively removes sensitive evidence and prese
     nested: { safe: 'kept' },
     entries: [{ code: 'RUNTIME_RESTART_SCHEDULED' }]
   });
+});
+
+test('summarizeRuntimeDebugPayload drops scene cards so debug logs cannot keep card bodies', () => {
+  const summarized = summarizeRuntimeDebugPayload('scene.changed', {
+    source: 'health-sync',
+    payload: {
+      snapshot: {
+        updatedAt: '2026-09-14T00:00:00.000Z',
+        cards: [{ id: 'c1', title: '工具执行完成', body: 'HUGE-BODY'.repeat(200) }]
+      },
+      change: { reason: 'scene.ticker-exit', target: 'card', targetId: 'c1' }
+    }
+  });
+  const text = JSON.stringify(summarized);
+  assert.equal(summarized.payload.snapshot.cards, undefined);
+  assert.equal(text.includes('HUGE-BODY'), false);
+  assert.equal(summarized.payload.change.reason, 'scene.ticker-exit');
+});
+
+test('summarizeRuntimeDebugPayload redacts stdout and stderr', () => {
+  assert.equal(summarizeRuntimeDebugPayload('stdout', 'raw'), '[redacted]');
+  assert.equal(summarizeRuntimeDebugPayload('stderr', 'raw'), '[redacted]');
 });
 
 test('normalizeRuntimeDiagnostic applies stable defaults without exposing raw fields', () => {

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <string>
 #include <vector>
 
 namespace notification_hub::scene {
@@ -20,6 +21,7 @@ struct TickerChannelOptions {
     bool band_top{true};
     int heartbeat_ms{16};
     int exit_margin_px{24};
+    std::string direction{"left"};
 };
 
 // 轨道几何（契约 §2.3）：轨道高 = 卡高 + 轨内间距。
@@ -43,14 +45,15 @@ TickerTrackPlan plan_ticker_tracks(
 // 判据是「进屏点前方的净空距离」，不是「轨道里的卡片数量」——等速弹幕一进屏
 // 相对间距即冻结，故「卡少」的轨道可能恰好有一张刚进屏的长卡。
 //   has_card_ahead == false → 记为 +∞（一定优先）
-//   否则 clearance = lane_right - nearest_ahead_right_edge - min_gap
-// 注意：新卡出生时左边缘位于 lane_right（完全屏外），故要求的是
-// nearest_ahead_right_edge <= lane_right - min_gap，即 clearance >= 0。
+//   左飞：clearance = lane_right - ahead.right - min_gap
+//   右飞：clearance = ahead.left - lane_left - min_gap
+// spawn_edge_px 左飞传 lane_right，右飞传 lane_left。
 double ticker_track_clearance(
     bool has_card_ahead,
-    double nearest_ahead_right_edge,
-    int lane_right_px,
-    int min_gap_px);
+    double nearest_ahead_edge,
+    int spawn_edge_px,
+    int min_gap_px,
+    bool fly_right = false);
 
 // 选轨（契约 §4）：净空最大者；并列取 index 最小者。空输入返回 -1。
 int choose_ticker_track(const std::vector<double>& clearances);
@@ -60,19 +63,21 @@ int choose_ticker_track(const std::vector<double>& clearances);
 double ticker_entry_delay_ms(double best_clearance_px, double speed_px_per_second);
 
 // 位置是时间的纯函数（契约 §2.1 硬约束）。
-// x(t) = spawn_left_x - speed × (t - spawn_t)。禁止逐帧累加位移：
-// 心跳可能抖动/丢拍，累加会漂移和跳变。
+// 左飞 x(t) = spawn_left_x - speed × t；右飞 x(t) = spawn_left_x + speed × t。
+// 三参数保持左飞语义。禁止逐帧累加位移。
 double ticker_position_x(
     double spawn_left_x,
     double speed_px_per_second,
-    double elapsed_ms);
+    double elapsed_ms,
+    bool fly_right = false);
 
-// 出屏判定（契约 §8）：card.right < lane.left - exit_margin。
-// 24px 缓冲用于避免窗口阴影/圆角被边缘「切一半」留在屏上。
+// 出屏判定（契约 §8）。左飞：card.right < lane.left - exit_margin。
+// 右飞：card.left > lane.right + exit_margin。三参数保持左飞语义。
 bool ticker_is_offscreen(
-    double card_right_x,
-    int lane_left_px,
-    int exit_margin_px);
+    double card_edge_x,
+    int lane_edge_px,
+    int exit_margin_px,
+    bool fly_right = false);
 
 // 弹幕带的顶边 y（契约 §2.3）。band_top 为真时贴工作区顶部，否则贴底部。
 int ticker_band_top_y(

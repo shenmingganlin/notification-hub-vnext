@@ -42,6 +42,8 @@ test('diagnostics page renders structured evidence without raw process streams o
   assert.doesNotMatch(html, /stderr/);
   assert.doesNotMatch(html, /sceneCards/);
   assert.match(html, /原始进程输出/);
+  assert.match(html, /错误摘要/);
+  assert.match(html, /管道心跳/);
   assert.match(html, /data-page-navigation-path="#diagnostics"/);
 });
 

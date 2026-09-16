@@ -42,6 +42,8 @@ test('protocol exports the planned command set', () => {
     'scene.set-mode',
     'config.update',
     'visual-assets.configure',
+    'font-assets.configure',
+    'agent-avatars.configure',
     'diagnostic.subscribe',
     'shutdown',
     'audio.health',

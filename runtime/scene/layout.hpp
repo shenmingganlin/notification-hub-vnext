@@ -24,6 +24,12 @@ enum class LayoutMode {
     Shelf
 };
 
+enum class StackWrap {
+    Parallel,
+    Off,
+    Snake
+};
+
 struct StackCardInput {
     std::string id;
     int width{};
@@ -42,6 +48,11 @@ struct StackLayoutOptions {
     bool work_area_is_fallback{};
     std::string work_area_source;
     LayoutMode mode{LayoutMode::Stack};
+    int margin_left{};
+    int margin_right{};
+    int margin_top{};
+    int margin_bottom{};
+    StackWrap wrap{StackWrap::Parallel};
 };
 
 struct StackCardPlacement {

@@ -1,7 +1,7 @@
 import path from 'node:path';
-import { randomUUID } from 'node:crypto';
-import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
+import { readFile } from 'node:fs/promises';
 
+import { replaceFileAtomically } from '../persistence/atomic-file-replace.js';
 import {
   createNotificationDisplaySettings,
   validateNotificationDisplaySettings
@@ -64,19 +64,14 @@ export function createNotificationDisplaySettingsPersistence({ dataDir, config, 
     },
     async save(settings) {
       const normalized = createNotificationDisplaySettings(settings);
-      const temporaryPath = `${filePath}.tmp-${process.pid}-${Date.now()}-${randomUUID()}`;
       try {
-        await mkdir(path.dirname(filePath), { recursive: true });
-        await writeFile(temporaryPath, `${JSON.stringify(normalized)}\n`, { encoding: 'utf8', flag: 'wx' });
-        await rename(temporaryPath, filePath);
-        return filePath;
+        return await replaceFileAtomically(filePath, `${JSON.stringify(normalized)}\n`);
       } catch (error) {
-        await rm(temporaryPath, { force: true }).catch(() => {});
         if (error.code?.startsWith('NOTIFICATION_DISPLAY_SETTINGS_')) throw error;
         throw persistenceError(
           'NOTIFICATION_DISPLAY_SETTINGS_SAVE_FAILED',
           'Failed to persist notification display settings',
-          { path: filePath, cause: error.message, code: error.code }
+          { path: filePath, cause: error.message, code: error.code, ...(error.details ?? {}) }
         );
       }
     }

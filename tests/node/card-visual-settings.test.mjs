@@ -57,6 +57,22 @@ test('CARD_FITS exports the three fit modes', () => {
   assert.deepEqual(CARD_FITS, ['fill', 'contain', 'cover']);
 });
 
+test('minimal card settings keep default background transform off the type and accept scale and position', () => {
+  const empty = createCardVisualSettings();
+  assert.equal('backgroundScale' in empty.types.minimal.appearance, false);
+  assert.equal('backgroundX' in empty.types.minimal.appearance, false);
+  assert.equal('backgroundY' in empty.types.minimal.appearance, false);
+  const settings = createCardVisualSettings({
+    types: { minimal: { appearance: { backgroundAssetId: 'visual-asset-1', backgroundScale: 1.5, backgroundX: 0.2, backgroundY: 0.8 } } }
+  });
+  assert.equal(settings.types.minimal.appearance.backgroundScale, 1.5);
+  assert.equal(settings.types.minimal.appearance.backgroundX, 0.2);
+  assert.equal(settings.types.minimal.appearance.backgroundY, 0.8);
+  assert.throws(() => createCardVisualSettings({ types: { minimal: { appearance: { backgroundScale: 0.1 } } } }), (error) => error.code === 'CARD_VISUAL_FIELD_INVALID');
+  assert.throws(() => createCardVisualSettings({ types: { minimal: { appearance: { backgroundX: 1.2 } } } }), (error) => error.code === 'CARD_VISUAL_FIELD_INVALID');
+  assert.throws(() => createCardVisualSettings({ types: { minimal: { appearance: { backgroundY: -0.1 } } } }), (error) => error.code === 'CARD_VISUAL_FIELD_INVALID');
+});
+
 test('minimal card settings accept bounded dimensions and space parameters', () => {
   const settings = createCardVisualSettings({ types: { minimal: {
     properties: { space: { anchor: 'top-right', gap: 12, margin: 24 } },
@@ -67,8 +83,76 @@ test('minimal card settings accept bounded dimensions and space parameters', () 
   assert.equal(settings.types.minimal.properties.space.margin, 24);
   assert.equal(settings.types.minimal.appearance.width, 480);
   assert.equal(settings.types.minimal.appearance.height, 120);
-  assert.throws(() => createCardVisualSettings({ types: { minimal: { appearance: { width: 100 } } } }), (error) => error.code === 'CARD_VISUAL_DIMENSION_INVALID');
-  assert.throws(() => createCardVisualSettings({ types: { minimal: { properties: { space: { margin: 97 } } } } }), (error) => error.code === 'CARD_VISUAL_FIELD_INVALID');
+  assert.equal(createCardVisualSettings({ types: { minimal: { appearance: { width: 100, height: 1 } } } }).types.minimal.appearance.width, 100);
+  assert.throws(() => createCardVisualSettings({ types: { minimal: { appearance: { width: 0 } } } }), (error) => error.code === 'CARD_VISUAL_DIMENSION_INVALID');
+  assert.throws(() => createCardVisualSettings({ types: { minimal: { appearance: { width: 1921 } } } }), (error) => error.code === 'CARD_VISUAL_DIMENSION_INVALID');
+  assert.equal(createCardVisualSettings({ types: { minimal: { properties: { space: { margin: 97 } } } } }).types.minimal.properties.space.margin, 97);
+  assert.throws(() => createCardVisualSettings({ types: { minimal: { properties: { space: { margin: -1 } } } } }), (error) => error.code === 'CARD_VISUAL_FIELD_INVALID');
+  assert.equal(createCardVisualSettings({ types: { minimal: { appearance: { paintOverflow: 240 } } } }).types.minimal.appearance.paintOverflow, 240);
+  assert.throws(() => createCardVisualSettings({ types: { minimal: { appearance: { paintOverflow: 241 } } } }), (error) => error.code === 'CARD_VISUAL_FIELD_INVALID');
+});
+
+test('minimal card settings keep empty parts off the type and accept title paint', () => {
+  const empty = createCardVisualSettings();
+  assert.equal('parts' in empty.types.minimal, false);
+  const settings = createCardVisualSettings({
+    types: { minimal: { parts: { title: { fill: '#ffaa00', stroke: '#00ffaa', strokeWidth: 0 }, body: {} } } }
+  });
+  assert.deepEqual(settings.types.minimal.parts, { title: { fill: '#ffaa00', stroke: '#00ffaa', strokeWidth: 0 } });
+  assert.throws(
+    () => createCardVisualSettings({ types: { minimal: { parts: { image: { fill: '#ffaa00' } } } } }),
+    (error) => error.code === 'CARD_VISUAL_FIELD_UNKNOWN'
+  );
+  assert.throws(
+    () => createCardVisualSettings({ types: { minimal: { parts: { title: { fill: 'red' } } } } }),
+    (error) => error.code === 'CARD_VISUAL_COLOR_INVALID'
+  );
+  const geom = createCardVisualSettings({
+    types: { minimal: { parts: { title: { x: 0, y: 10, w: 120, h: 34 } } } }
+  });
+  assert.deepEqual(geom.types.minimal.parts, { title: { x: 0, y: 10, w: 120, h: 34 } });
+  const omitted = createCardVisualSettings({
+    types: { minimal: { parts: { title: {} } } }
+  });
+  assert.equal('parts' in omitted.types.minimal, false);
+  assert.throws(
+    () => createCardVisualSettings({ types: { minimal: { parts: { title: { x: 1921 } } } } }),
+    (error) => error.code === 'CARD_VISUAL_FIELD_INVALID'
+  );
+  assert.throws(
+    () => createCardVisualSettings({ types: { minimal: { parts: { body: { w: 0 } } } } }),
+    (error) => error.code === 'CARD_VISUAL_FIELD_INVALID'
+  );
+});
+
+test('part paint keeps show false even without color', () => {
+  const settings = createCardVisualSettings({
+    types: { minimal: { parts: { body: { show: false } } } }
+  });
+  assert.deepEqual(settings.types.minimal.parts, { body: { show: false } });
+});
+
+test('glossary names resolve on parts and stay off the type when empty', () => {
+  const empty = createCardVisualSettings();
+  assert.equal('glossary' in empty.types.minimal, false);
+  const settings = createCardVisualSettings({
+    types: {
+      minimal: {
+        glossary: { '标题色': '#f2fff9', '描边色': '#62d0a8' },
+        parts: { title: { fill: '标题色', stroke: '描边色', strokeWidth: 1 } }
+      }
+    }
+  });
+  assert.deepEqual(settings.types.minimal.glossary, { '标题色': '#f2fff9', '描边色': '#62d0a8' });
+  assert.deepEqual(settings.types.minimal.parts, { title: { fill: '标题色', stroke: '描边色', strokeWidth: 1 } });
+  assert.throws(
+    () => createCardVisualSettings({ types: { minimal: { parts: { title: { fill: '标题色' } } } } }),
+    (error) => error.code === 'CARD_VISUAL_COLOR_INVALID'
+  );
+  assert.throws(
+    () => createCardVisualSettings({ types: { minimal: { glossary: { '#ffaa00': '#ffaa00' } } } }),
+    (error) => error.code === 'CARD_VISUAL_FIELD_INVALID'
+  );
 });
 
 test('card visual settings reject arbitrary styling and unsupported types', () => {
@@ -80,4 +164,143 @@ test('card visual settings reject arbitrary styling and unsupported types', () =
   assert.throws(() => createCardVisualSettings({ activeType: 'popup' }), (error) => error.code === 'CARD_VISUAL_TYPE_INVALID');
   // 卡片种类里不再接受 behavior 字段。
   assert.throws(() => createCardVisualSettings({ types: { minimal: { behavior: { layout: 'simple' } } } }), (error) => error.code === 'CARD_VISUAL_FIELD_UNKNOWN');
+});
+
+test('icon and assistantName persist show true, show false, and custom assetId null', () => {
+  const off = createCardVisualSettings({
+    types: { minimal: { parts: { icon: { show: false }, assistantName: { show: false } } } }
+  });
+  assert.equal(off.types.minimal.parts.icon.show, false);
+  assert.equal(off.types.minimal.parts.icon.source, 'assistant');
+  assert.equal(off.types.minimal.parts.icon.assetId, null);
+  assert.equal(off.types.minimal.parts.assistantName.show, false);
+  const on = createCardVisualSettings({
+    types: { minimal: { parts: { icon: { show: true, source: 'assistant' }, assistantName: { show: true, radius: 6 } } } }
+  });
+  assert.equal(on.types.minimal.parts.icon.show, true);
+  assert.equal(on.types.minimal.parts.assistantName.show, true);
+  assert.equal(on.types.minimal.parts.assistantName.radius, 6);
+  const customOff = createCardVisualSettings({
+    types: { minimal: { parts: { icon: { show: true, source: 'custom', assetId: null, radius: 20 } } } }
+  });
+  assert.equal(customOff.types.minimal.parts.icon.source, 'custom');
+  assert.equal(customOff.types.minimal.parts.icon.assetId, null);
+  assert.equal(customOff.types.minimal.parts.icon.radius, 20);
+  const assistantClearsAsset = createCardVisualSettings({
+    types: { minimal: { parts: { icon: { show: true, source: 'assistant', assetId: 'visual-asset-1' } } } }
+  });
+  assert.equal(assistantClearsAsset.types.minimal.parts.icon.assetId, null);
+  const transformed = createCardVisualSettings({
+    types: { minimal: { parts: { icon: { show: true, source: 'assistant', backgroundScale: 1.4, backgroundX: 0.2, backgroundY: 0.8 } } } }
+  });
+  assert.equal(transformed.types.minimal.parts.icon.backgroundScale, 1.4);
+  assert.equal(transformed.types.minimal.parts.icon.backgroundX, 0.2);
+  assert.equal(transformed.types.minimal.parts.icon.backgroundY, 0.8);
+});
+
+test('title and assistantName persist fitWidth true and reject it on body', () => {
+  const settings = createCardVisualSettings({
+    types: { minimal: { parts: { title: { fitWidth: true, fitCompensate: true }, assistantName: { show: true, fitWidth: true, fitCompensate: true } } } }
+  });
+  assert.equal(settings.types.minimal.parts.title.fitWidth, true);
+  assert.equal(settings.types.minimal.parts.title.fitCompensate, true);
+  assert.equal(settings.types.minimal.parts.assistantName.fitWidth, true);
+  assert.equal(settings.types.minimal.parts.assistantName.fitCompensate, true);
+  const off = createCardVisualSettings({
+    types: { minimal: { parts: { title: { fitWidth: false, fitCompensate: false } } } }
+  });
+  assert.equal(off.types.minimal.parts, undefined);
+  assert.throws(
+    () => createCardVisualSettings({ types: { minimal: { parts: { body: { fitWidth: true } } } } }),
+    (error) => error.code === 'CARD_VISUAL_FIELD_UNKNOWN'
+  );
+  assert.throws(
+    () => createCardVisualSettings({ types: { minimal: { parts: { body: { fitCompensate: true } } } } }),
+    (error) => error.code === 'CARD_VISUAL_FIELD_UNKNOWN'
+  );
+});
+
+test('minimal card settings accept title background plate and opacity', () => {
+  const settings = createCardVisualSettings({
+    types: { minimal: { parts: { title: { fill: '#f2fff9', background: '#1d2b27', opacity: 0.6 } } } }
+  });
+  assert.deepEqual(settings.types.minimal.parts.title, { fill: '#f2fff9', background: '#1d2b27', opacity: 0.6 });
+  assert.throws(
+    () => createCardVisualSettings({ types: { minimal: { parts: { title: { opacity: 1.2 } } } } }),
+    (error) => error.code === 'CARD_VISUAL_FIELD_INVALID'
+  );
+});
+
+test('close persists explicit radius 0', () => {
+  const settings = createCardVisualSettings({
+    types: { minimal: { parts: { close: { radius: 0 } } } }
+  });
+  assert.equal(settings.types.minimal.parts.close.radius, 0);
+});
+
+test('text parts persist textStroke true with color and omit false', () => {
+  const settings = createCardVisualSettings({
+    types: { minimal: { parts: { title: { textStroke: true, textStrokeColor: '#112233' }, body: { textStroke: true, textStrokeColor: '#445566' }, assistantName: { show: true, textStroke: true, textStrokeColor: '#778899' } } } }
+  });
+  assert.equal(settings.types.minimal.parts.title.textStroke, true);
+  assert.equal(settings.types.minimal.parts.title.textStrokeColor, '#112233');
+  assert.equal(settings.types.minimal.parts.body.textStroke, true);
+  assert.equal(settings.types.minimal.parts.body.textStrokeColor, '#445566');
+  assert.equal(settings.types.minimal.parts.assistantName.textStroke, true);
+  assert.equal(settings.types.minimal.parts.assistantName.textStrokeColor, '#778899');
+  const off = createCardVisualSettings({
+    types: { minimal: { parts: { title: { textStroke: false, textStrokeColor: '#112233' } } } }
+  });
+  assert.equal(off.types.minimal.parts, undefined);
+  const onNoColor = createCardVisualSettings({
+    types: { minimal: { parts: { title: { textStroke: true } } } }
+  });
+  assert.equal(onNoColor.types.minimal.parts.title.textStroke, true);
+  assert.equal('textStrokeColor' in onNoColor.types.minimal.parts.title, false);
+  assert.throws(
+    () => createCardVisualSettings({ types: { minimal: { parts: { close: { textStroke: true } } } } }),
+    (error) => error.code === 'CARD_VISUAL_FIELD_UNKNOWN'
+  );
+  assert.throws(
+    () => createCardVisualSettings({ types: { minimal: { parts: { icon: { textStroke: true } } } } }),
+    (error) => error.code === 'CARD_VISUAL_FIELD_UNKNOWN'
+  );
+  assert.throws(
+    () => createCardVisualSettings({ types: { minimal: { parts: { title: { textStroke: true, textStrokeColor: 'red' } } } } }),
+    (error) => error.code === 'CARD_VISUAL_COLOR_INVALID'
+  );
+});
+
+test('visual settings persist gap without upper bound and new stroke/close fields', () => {
+  const settings = createCardVisualSettings({
+    types: {
+      minimal: {
+        appearance: { borderPaint: 'gradient' },
+        properties: { space: { gap: 96 } },
+        parts: {
+          title: { textStroke: true, textStrokeWidth: 6, textStrokePaint: 'rainbow' },
+          close: { closeIcon: 'minus', closeIconColor: '#aabbcc', strokePaint: 'gradient' }
+        }
+      }
+    }
+  });
+  assert.equal(settings.types.minimal.appearance.borderPaint, 'gradient');
+  assert.equal(settings.types.minimal.properties.space.gap, 96);
+  assert.equal(settings.types.minimal.parts.title.textStrokeWidth, 6);
+  assert.equal(settings.types.minimal.parts.title.textStrokePaint, 'rainbow');
+  assert.equal(settings.types.minimal.parts.close.closeIcon, 'minus');
+  assert.equal(settings.types.minimal.parts.close.closeIconColor, '#aabbcc');
+  assert.equal(settings.types.minimal.parts.close.strokePaint, 'gradient');
+  assert.throws(
+    () => createCardVisualSettings({ types: { minimal: { appearance: { borderPaint: 'rainbow' } } } }),
+    (error) => error.code === 'CARD_VISUAL_FIELD_INVALID'
+  );
+  assert.throws(
+    () => createCardVisualSettings({ types: { minimal: { parts: { title: { textStroke: true, textStrokeWidth: 17 } } } } }),
+    (error) => error.code === 'CARD_VISUAL_FIELD_INVALID'
+  );
+  assert.throws(
+    () => createCardVisualSettings({ types: { minimal: { parts: { close: { closeIcon: 'heart' } } } } }),
+    (error) => error.code === 'CARD_VISUAL_FIELD_INVALID'
+  );
 });

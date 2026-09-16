@@ -9,10 +9,7 @@ import {
   resolveNotificationPersistenceConfig
 } from './domain/notification-persistence-config.js';
 import { resolveSoundRule } from './domain/sound-policy.js';
-import {
-  createSoundSettingsPersistenceFromHostContext,
-  resolveSoundSettingsPersistenceConfig
-} from './domain/sound-settings-persistence-config.js';
+import { createSoundSettingsPersistenceFromHostContext } from './domain/sound-settings-persistence-config.js';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { existsSync } from 'node:fs';
@@ -33,6 +30,7 @@ import { importSoundAsset } from './domain/sound-asset-importer.js';
 import { collectSoundAssetReferences, normalizeSoundBindingInput, removeSoundBinding, removeSoundBindingRules, upsertSoundBindingRule } from './domain/sound-binding.js';
 import { createWindowsSaveFilePicker, safeFilename } from './domain/windows-file-picker.js';
 import { createWindowsVisualFilePicker } from './domain/windows-visual-file-picker.js';
+import { createWindowsFontFilePicker } from './domain/windows-font-file-picker.js';
 import { exportVisualPackage as buildVisualPackage, previewImportVisualPackage, importVisualPackage as importVisualPackageData } from './domain/visual-package-io.js';
 import { serializeVisualPackageDiagnosticReport } from './domain/visual-package-diagnostic.js';
 import {
@@ -82,15 +80,36 @@ async function renameWithRetry(source, destination, { attempts = 4, delayMs = 12
 import { projectNotificationCategories } from './domain/notification-classification.js';
 import { createNotificationPresentationInput } from './domain/notification-presentation-plan.js';
 import { resolveVisualRuleSafe } from './domain/visual-rule-resolver.js';
-import { projectNativeVisualPayload, resolveVisualDraftPayload } from './domain/native-visual-payload.js';
-import { createVisualSettingsPersistenceFromHostContext, resolveVisualSettingsPersistenceConfig } from './domain/visual-settings-persistence-config.js';
+import { projectNativeVisualPayload, resolveVisualDraftPayload, spaceToNativeStackLayout } from './domain/native-visual-payload.js';
+import { applyAppearanceToRoot, createDefaultTextPartTree, paintPartTree } from './domain/card-part-tree.js';
+import {
+  agentAvatarAssetId,
+  listStudioAgents,
+  readAgentIdentity,
+  resolveAgentsDir,
+  resolveIdentity,
+  stageAgentAvatar
+} from './domain/agent-identity.js';
+import { createVisualSettingsPersistenceFromHostContext } from './domain/visual-settings-persistence-config.js';
+import {
+  createVisualRegistryPersistence,
+  restoreEventPresentationSettings,
+  restoreNotificationDisplaySettings,
+  restoreSidebarDisplaySettings,
+  restoreSoundSettings,
+  restoreVisualRegistry,
+  restoreVisualSettings,
+  stopEventPresentationSettingsPersistence,
+  stopNotificationDisplaySettingsPersistence,
+  stopSidebarDisplaySettingsPersistence,
+  stopSoundSettingsPersistence,
+  stopVisualRegistryPersistence,
+  stopVisualSettingsPersistence
+} from './persistence/host-store-lifecycle.js';
 import { createNotificationTestNotifications, createParallelCardSample, normalizeNotificationTestInput, NOTIFICATION_TEST_EVENTS } from './domain/notification-test-generator.js';
 import { listEventDefinitions } from './domain/notification-event-catalog.js';
 import { EventPresentationSettingsStore } from './domain/event-presentation-settings-store.js';
-import {
-  createEventPresentationSettingsPersistenceFromHostContext,
-  resolveEventPresentationSettingsPersistenceConfig
-} from './domain/event-presentation-settings-persistence-config.js';
+import { createEventPresentationSettingsPersistenceFromHostContext } from './domain/event-presentation-settings-persistence-config.js';
 import { createPresentationProfileFromSettings, listEventPresentationRows } from './domain/event-presentation-settings.js';
 import { createPresentationProfile } from './domain/notification-presentation-profile.js';
 import { listEffectRuleTargets } from './domain/effect-rules.js';
@@ -98,7 +117,6 @@ import { createSceneBehaviorDiagnostics } from './domain/scene-behavior-diagnost
 import { createVisualProfileRegistry } from './domain/visual-profile-registry.js';
 import { createEventBindingRegistry } from './domain/event-binding-registry.js';
 import { createVisualRegistrySnapshot, projectVisualRegistryToEventSettings } from './domain/visual-registry-persistence.js';
-import { VisualRegistryPersistenceCoordinator } from './domain/visual-registry-persistence-coordinator.js'
 import { createVisualEventSettingsApi } from './domain/visual-event-settings-api.js';
 import {
   hasExplicitVisualBinding,
@@ -112,11 +130,16 @@ import { createVisualAssetLibrary } from './domain/visual-asset-library.js';
 import { createVisualAssetStorage } from './domain/visual-asset-storage.js';
 import { loadVisualAssetSnapshot, saveVisualAssetSnapshot } from './domain/visual-asset-persistence.js';
 import { createVisualAssetManifest } from './domain/visual-asset-manifest.js';
+import { createFontAssetLibrary } from './domain/font-asset-library.js';
+import { createFontAssetStorage } from './domain/font-asset-storage.js';
+import { loadFontAssetSnapshot, saveFontAssetSnapshot } from './domain/font-asset-persistence.js';
+import { createFontAssetManifest } from './domain/font-asset-manifest.js';
 import {
   normalizeRuntimeDiagnostic,
   projectCurrentRuntimeError,
   projectDiagnosticRecords,
   sanitizeDiagnosticDetails,
+  summarizeRuntimeDebugPayload,
   isRuntimeRecoveryDiagnostic
 } from './runtime/diagnostics-projection.js';
 
@@ -127,7 +150,7 @@ export * from './domain/notification-store-snapshot.js';
 export * from './domain/notification-store-store.js';
 export * from './domain/notification-store-persistence.js';
 
-export const pluginVersion = '0.1.6';
+export const pluginVersion = '0.1.7';
 export const pluginName = 'notification-hub-vnext';
 export const RUNTIME_TEST_CARD_PREFIX = 'nh-vnext-test-';
 export const VISUAL_WORKBENCH_CARD_PREFIX = 'nh-visual-workbench-';
@@ -164,7 +187,7 @@ function normalizeVisualPreviewProfile(input) {
     aspectRatio: CARD_ASPECT_RATIOS.includes(sourceSpace.aspectRatio) ? sourceSpace.aspectRatio : defaultSpace.aspectRatio,
     layout: CARD_LAYOUTS.includes(sourceSpace.layout) ? sourceSpace.layout : 'simple',
     anchor: CARD_ANCHORS.includes(sourceSpace.anchor) ? sourceSpace.anchor : defaultSpace.anchor,
-    gap: Number.isInteger(sourceSpace.gap) && sourceSpace.gap >= 0 && sourceSpace.gap <= 48 ? sourceSpace.gap : defaultSpace.gap,
+    gap: Number.isInteger(sourceSpace.gap) && sourceSpace.gap >= 0 ? sourceSpace.gap : defaultSpace.gap,
     margin: Number.isInteger(sourceSpace.margin) && sourceSpace.margin >= 0 && sourceSpace.margin <= 96 ? sourceSpace.margin : defaultSpace.margin
   };
   // 出现方式已不在卡片种类里；丢弃遗留的 behavior stub，几何只保留 properties.space。
@@ -180,8 +203,18 @@ function normalizeVisualPreviewProfile(input) {
   };
 }
 const RUNTIME_NOTIFICATION_CARD_GAP = 12;
-const RUNTIME_NOTIFICATION_MAX_VISIBLE = 8;
 const RUNTIME_SCENE_DISMISS_TIMEOUT_MS = 10000;
+const RUNTIME_SCENE_CREATE_TIMEOUT_MS = 10000;
+function sceneCreateOptions(extra = {}) {
+  return { retryable: false, timeoutMs: RUNTIME_SCENE_CREATE_TIMEOUT_MS, ...extra };
+}
+function runtimeHostReady(host) {
+  return Boolean(
+    host
+    && typeof host.client?.request === 'function'
+    && (host.state === 'running' || host.state === 'reconnecting')
+  );
+}
 function runtimeErrorPayload(error) {
   if (!error) return null;
   return {
@@ -200,6 +233,18 @@ function collectVisualProfileAssetReferences(profile) {
   add(minimal.appearance?.backgroundAssetId, 'card.minimal.appearance.background');
   add(minimal.skin?.background?.assetId, 'card.minimal.skin.background');
   for (const [slot, value] of Object.entries(minimal.effects?.slots ?? {})) add(value?.assetId, `card.minimal.effects.${slot}`);
+  return references;
+}
+
+function collectVisualProfileFontReferences(profile) {
+  const parts = profile?.card?.types?.minimal?.parts;
+  if (!parts || typeof parts !== 'object') return [];
+  const references = [];
+  const add = (assetId, slot) => {
+    if (typeof assetId === 'string' && assetId.trim()) references.push({ assetId, slot });
+  };
+  add(parts.title?.fontAssetId, 'card.minimal.parts.title.font');
+  add(parts.body?.fontAssetId, 'card.minimal.parts.body.font');
   return references;
 }
 
@@ -317,10 +362,10 @@ function isTickerBehavior(behaviorId) {
 }
 
 function notificationCardDimensions(appearance = {}, cardType = 'minimal', behaviorId = 'stack') {
-  // 弹幕卡锁 480×76（契约 §2.2），不复用堆叠的 420×220，也不被 wide 抬到 160。
+  // 弹幕默认 480×76，不复用堆叠的 420×220，也不被 wide 抬到 160。
   if (isTickerBehavior(behaviorId)) {
-    const width = Number.isInteger(appearance.width) ? Math.max(240, Math.min(720, appearance.width)) : 480;
-    const height = Number.isInteger(appearance.height) ? Math.max(56, Math.min(120, appearance.height)) : 76;
+    const width = Number.isInteger(appearance.width) ? Math.max(1, Math.min(1920, appearance.width)) : 480;
+    const height = Number.isInteger(appearance.height) ? Math.max(1, Math.min(1080, appearance.height)) : 76;
     return { width, height };
   }
   const sizeSets = {
@@ -332,8 +377,8 @@ function notificationCardDimensions(appearance = {}, cardType = 'minimal', behav
   const base = typeSizes[appearance.size] ?? typeSizes.medium;
   const hasExplicitWidth = Number.isInteger(appearance.width);
   const hasExplicitHeight = Number.isInteger(appearance.height);
-  const width = hasExplicitWidth ? Math.max(240, Math.min(720, appearance.width)) : base.width;
-  const height = hasExplicitHeight ? Math.max(64, Math.min(360, appearance.height)) : base.height;
+  const width = hasExplicitWidth ? Math.max(1, Math.min(1920, appearance.width)) : base.width;
+  const height = hasExplicitHeight ? Math.max(1, Math.min(1080, appearance.height)) : base.height;
   if (hasExplicitWidth && hasExplicitHeight) return { width, height };
   if (appearance.aspectRatio === 'square') return { width, height: width };
   if (appearance.aspectRatio === 'wide') return { width, height: Math.max(160, Math.round(width * 0.48)) };
@@ -422,7 +467,24 @@ function visualPreviewHandshake({ receivedDraft, updated, recreated, cardId, dra
   };
 }
 
-function notificationCardPayload(record, index, workArea, layout, visual, presentation = null, behavior = null) {
+function sampleAgentFromInput(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const id = typeof value.id === 'string' ? value.id.trim() : '';
+  if (!id) return null;
+  const name = typeof value.name === 'string' && value.name.trim() ? value.name.trim() : id;
+  return { id, name };
+}
+
+function notificationIdentity(record, ctx = null) {
+  return resolveIdentity({
+    record,
+    sessionPath: record?.session,
+    event: record,
+    ctx: ctx ?? {}
+  });
+}
+
+function notificationCardPayload(record, index, workArea, layout, visual, presentation = null, behavior = null, ctx = null) {
   const cardType = visual?.cardType ?? 'minimal';
   const behaviorId = isTickerBehavior(visual?.behaviorId) || isTickerBehavior(behavior?.behaviorProfileId)
     ? 'ticker'
@@ -442,29 +504,48 @@ function notificationCardPayload(record, index, workArea, layout, visual, presen
   const visualForNative = isTickerBehavior(behaviorId) && visual?.ticker
     ? { ...visual, ticker: resolveTickerMotion(visual.ticker) }
     : (visual?.ticker ? (({ ticker, ...rest }) => rest)(visual) : visual);
+  const showIcon = visual?.parts?.icon?.show === true;
+  const showAssistantName = visual?.parts?.assistantName?.show === true;
+  const identity = notificationIdentity(record, ctx);
+  let parts = paintPartTree(
+    applyAppearanceToRoot(
+      createDefaultTextPartTree({
+        width: dimensions.width,
+        height: dimensions.height,
+        ticker: isTickerBehavior(behaviorId),
+        popup: cardType === 'popup',
+        close: !isTickerBehavior(behaviorId) && (visual?.interaction?.dismissMode ?? 'closeButton') !== 'anywhere',
+        title: visual?.parts?.title?.show !== false,
+        body: visual?.parts?.body?.show !== false,
+        icon: showIcon,
+        assistantName: showAssistantName
+      }),
+      visual?.appearance
+    ),
+    visual?.parts,
+    visual?.glossary
+  );
+  if (showIcon && identity?.id && visual?.parts?.icon?.source !== 'custom') {
+    const assetId = agentAvatarAssetId(identity.id);
+    if (assetId) {
+      parts = parts.map((part) => (part.id === 'icon'
+        ? { ...part, backgroundAssetId: assetId, backgroundFit: part.backgroundFit || 'cover' }
+        : part));
+    }
+  }
   return {
     id: notificationCardId(record.notificationId),
     title: notificationCardText(record.title, '新通知', 120),
     body: notificationCardText(record.content, record.summary || '', 2000),
     visual: projectNativeVisualPayload(visualForNative),
+    parts,
+    ...(identity?.name ? { assistantName: notificationCardText(identity.name, identity.id, 80) } : {}),
     ...(presentation ? { presentation } : {}),
     ...(behavior ? { behavior } : {}),
     ...position,
     width: dimensions.width,
     height: dimensions.height
   };
-}
-
-function cardWidthForShelf(card) {
-  return Number.isFinite(card?.width) && card.width > 0
-    ? card.width
-    : (notificationIdFromCardId(card?.id) ? RUNTIME_NOTIFICATION_CARD_SIZE.width : RUNTIME_TEST_CARD_SIZE.width);
-}
-
-function shelfExtent(cards, spacing) {
-  const widths = cards.map(cardWidthForShelf);
-  return widths.reduce((total, width) => total + width, 0)
-    + Math.max(0, widths.length - 1) * spacing;
 }
 
 export default class NotificationHubVNextPlugin {
@@ -477,6 +558,7 @@ export default class NotificationHubVNextPlugin {
     soundPreviewBackendFactory = soundBackendFactory,
     soundFilePickerFactory = createWindowsSaveFilePicker,
     visualFilePickerFactory = createWindowsVisualFilePicker,
+    fontFilePickerFactory = createWindowsFontFilePicker,
     soundSchedulerFactory = createSoundScheduler,
     settingsSyncFactory = (options) => new SettingsRuntimeSync(options),
     notificationDisplaySettingsPersistenceFactory = createNotificationDisplaySettingsPersistence,
@@ -496,6 +578,7 @@ export default class NotificationHubVNextPlugin {
     this.soundPreviewBackendFactory = soundPreviewBackendFactory;
     this.soundFilePickerFactory = soundFilePickerFactory;
     this.visualFilePicker = visualFilePickerFactory({ platform: process.platform });
+    this.fontFilePicker = fontFilePickerFactory({ platform: process.platform });
     this.soundSchedulerFactory = soundSchedulerFactory;
     this.settingsSyncFactory = settingsSyncFactory;
     this.notificationDisplaySettingsPersistenceFactory = notificationDisplaySettingsPersistenceFactory;
@@ -554,6 +637,9 @@ export default class NotificationHubVNextPlugin {
     this.visualAssetLibrary = createVisualAssetLibrary({ storage: this.visualAssetStorage });
     this.lastVisualPackageReport = null;
     this.visualAssetSnapshotPath = path.resolve(ctx?.dataDir || process.cwd(), 'visual-assets.json');
+    this.fontAssetStorage = createFontAssetStorage(path.resolve(ctx?.dataDir || process.cwd(), 'font-assets'));
+    this.fontAssetLibrary = createFontAssetLibrary({ storage: this.fontAssetStorage });
+    this.fontAssetSnapshotPath = path.resolve(ctx?.dataDir || process.cwd(), 'font-assets.json');
     this.settingsPersistence = null;
     this.soundSettingsPersistence = null;
     this.visualSettingsPersistence = null;
@@ -655,6 +741,7 @@ export default class NotificationHubVNextPlugin {
       testSoundSettings: this.testSoundSettings.bind(this),
       runSoundWorkbench: this.runSoundWorkbench.bind(this),
       getVisualSettingsStatus: this.getVisualSettingsStatus.bind(this),
+      readAgentAvatarFile: this.readAgentAvatarFile.bind(this),
       clearVisualDiagnostics: this.clearVisualDiagnostics.bind(this),
       exportVisualDiagnostics: this.exportVisualDiagnostics.bind(this),
       openVisualWorkbenchCard: this.openVisualWorkbenchCard.bind(this),
@@ -671,9 +758,17 @@ export default class NotificationHubVNextPlugin {
       removeVisualProfile: this.removeVisualProfile.bind(this),
       listVisualAssets: this.listVisualAssets.bind(this),
       getVisualAsset: this.getVisualAsset.bind(this),
+      readVisualAssetFile: this.readVisualAssetFile.bind(this),
       importVisualAsset: this.importVisualAsset.bind(this),
       importVisualAssetFromPicker: this.importVisualAssetFromPicker.bind(this),
       removeVisualAsset: this.removeVisualAsset.bind(this),
+      listFontAssets: this.listFontAssets.bind(this),
+      getFontAsset: this.getFontAsset.bind(this),
+      readFontAssetFile: this.readFontAssetFile.bind(this),
+      importFontAsset: this.importFontAsset.bind(this),
+      importFontAssetFromPicker: this.importFontAssetFromPicker.bind(this),
+      removeFontAsset: this.removeFontAsset.bind(this),
+      getFontAssetManifest: this.getFontAssetManifest.bind(this),
       exportVisualPackageToPicker: this.exportVisualPackageToPicker.bind(this),
       previewVisualPackage: this.previewVisualPackage.bind(this),
       importVisualPackage: this.importVisualPackage.bind(this),
@@ -851,7 +946,7 @@ export default class NotificationHubVNextPlugin {
     this.runtimeError = null;
     await this.startAudioEngineHost();
     await this.restoreSoundAssets();
-    await this.restoreSoundSettings();
+    await restoreSoundSettings(this);
     if (this.useAudioEngineBackend && this.audioEngineStatus.state === 'ready') {
       try {
         await this.activateAudioEngineBackend();
@@ -867,10 +962,11 @@ export default class NotificationHubVNextPlugin {
         this.recordSoundDiagnostic(error, 'audio-engine-backend-activation');
       }
     }
-    await this.restoreVisualSettings();
-    await this.restoreEventPresentationSettings();
-    await this.restoreVisualRegistry();
+    await restoreVisualSettings(this);
+    await restoreEventPresentationSettings(this);
+    await restoreVisualRegistry(this);
     await this.restoreVisualAssets();
+    await this.restoreFontAssets();
     // Warmup is deliberately detached from lifecycle startup. Playback can load
     // lazily through the backend if this best-effort hint is unavailable.
     void Promise.resolve().then(() => this.soundBackend?.warmup?.()).then((result) => {
@@ -885,8 +981,8 @@ export default class NotificationHubVNextPlugin {
       this.recordSoundDiagnostic(error, 'audio-engine-warmup');
     });
     await this.startNotificationPersistence();
-    await this.restoreNotificationDisplaySettings();
-    await this.restoreSidebarDisplaySettings();
+    await restoreNotificationDisplaySettings(this);
+    await restoreSidebarDisplaySettings(this);
     this.startNotificationSceneSubscription();
     this.startNotificationEventSubscription();
     this.registerNotificationTestCapability();
@@ -915,7 +1011,8 @@ export default class NotificationHubVNextPlugin {
 
     try {
       await this.startRuntimeHost();
-      if (this.ctx.config?.visualAssetManifestEnabled === true) await this.applyVisualAssetManifest();
+      await this.applyVisualAssetManifest();
+      await this.applyFontAssetManifest();
     } catch (error) {
       this.runtimeError = error;
       this.recordRuntimeDiagnostic({
@@ -971,13 +1068,13 @@ export default class NotificationHubVNextPlugin {
     this.notificationPromotionQueue.close();
     await this.stopNotificationPersistence();
     try { await this.saveSoundAssets(); } catch (error) { this.recordSoundDiagnostic(error, 'asset-save'); }
-    await this.stopSoundSettingsPersistence();
-    await this.stopVisualSettingsPersistence();
-    await this.stopEventPresentationSettingsPersistence();
-    await this.stopVisualRegistryPersistence();
+    await stopSoundSettingsPersistence(this);
+    await stopVisualSettingsPersistence(this);
+    await stopEventPresentationSettingsPersistence(this);
+    await stopVisualRegistryPersistence(this);
     await this.saveVisualAssets();
-    await this.stopNotificationDisplaySettingsPersistence();
-    await this.stopSidebarDisplaySettingsPersistence();
+    await stopNotificationDisplaySettingsPersistence(this);
+    await stopSidebarDisplaySettingsPersistence(this);
     await this.stopSettingsRuntimeSync();
     try {
       await this.soundBackend?.dispose?.();
@@ -1012,56 +1109,6 @@ export default class NotificationHubVNextPlugin {
     if (this.ctx._notificationHubVNextSoundAssetServices === this.soundAssetServices) {
       delete this.ctx._notificationHubVNextSoundAssetServices;
     }
-  }
-
-  createNotificationDisplaySettingsPersistence() {
-    try {
-      return this.notificationDisplaySettingsPersistenceFactory(this.ctx);
-    } catch (error) {
-      this.recordNotificationDiagnostic(error, 'display-settings-persistence-config');
-      return null;
-    }
-  }
-
-  async restoreNotificationDisplaySettings() {
-    this.notificationDisplaySettingsPersistence = this.createNotificationDisplaySettingsPersistence();
-    if (!this.notificationDisplaySettingsPersistence) return this.notificationDisplaySettings;
-    try {
-      const restored = await this.notificationDisplaySettingsPersistence.restore();
-      if (restored) this.notificationDisplaySettings = createNotificationDisplaySettings(restored);
-    } catch (error) {
-      this.recordNotificationDiagnostic(error, 'display-settings-restore');
-    }
-    return this.notificationDisplaySettings;
-  }
-
-  async stopNotificationDisplaySettingsPersistence() {
-    this.notificationDisplaySettingsPersistence = null;
-  }
-
-  createSidebarDisplaySettingsPersistence() {
-    try {
-      return this.sidebarDisplaySettingsPersistenceFactory(this.ctx);
-    } catch (error) {
-      this.recordNotificationDiagnostic(error, 'sidebar-display-settings-persistence-config');
-      return null;
-    }
-  }
-
-  async restoreSidebarDisplaySettings() {
-    this.sidebarDisplaySettingsPersistence = this.createSidebarDisplaySettingsPersistence();
-    if (!this.sidebarDisplaySettingsPersistence) return this.sidebarDisplaySettings;
-    try {
-      const restored = await this.sidebarDisplaySettingsPersistence.restore();
-      if (restored) this.sidebarDisplaySettings = createSidebarDisplaySettings(restored);
-    } catch (error) {
-      this.recordNotificationDiagnostic(error, 'sidebar-display-settings-restore');
-    }
-    return this.sidebarDisplaySettings;
-  }
-
-  async stopSidebarDisplaySettingsPersistence() {
-    this.sidebarDisplaySettingsPersistence = null;
   }
 
   getSidebarDisplaySettings() {
@@ -1120,45 +1167,6 @@ export default class NotificationHubVNextPlugin {
     return this.notificationApi.removeNotifications(ids);
   }
 
-  createVisualSettingsPersistence() {
-    try {
-      const resolved = resolveVisualSettingsPersistenceConfig({
-        dataDir: this.ctx.dataDir,
-        config: this.ctx.config
-      });
-      if (!resolved.enabled) return null;
-      return this.visualSettingsPersistenceFactory(this.ctx, {
-        store: this.visualSettingsStore
-      });
-    } catch (error) {
-      this.ctx.log?.warn?.(`[notification-hub-vnext] Visual settings persistence unavailable: ${error.message}`);
-      return null;
-    }
-  }
-
-  async restoreVisualSettings() {
-    this.visualSettingsPersistence = this.createVisualSettingsPersistence();
-    try {
-      await this.visualSettingsPersistence?.restore?.();
-    } catch (error) {
-      this.ctx.log?.warn?.(`[notification-hub-vnext] Visual settings restore failed: ${error.message}`);
-    }
-    this.visualSettingsPersistence?.observe?.();
-    return this.visualSettingsStore.getSnapshot();
-  }
-
-  async stopVisualSettingsPersistence() {
-    const persistence = this.visualSettingsPersistence;
-    this.visualSettingsPersistence = null;
-    try {
-      await persistence?.flush?.();
-    } catch (error) {
-      this.ctx.log?.warn?.(`[notification-hub-vnext] Visual settings flush failed: ${error.message}`);
-    } finally {
-      persistence?.dispose?.();
-    }
-  }
-
   recordVisualDiagnostic(error, stage, details = {}) {
     const diagnostic = {
       code: error?.code ?? 'VISUAL_OPERATION_FAILED',
@@ -1202,16 +1210,83 @@ export default class NotificationHubVNextPlugin {
       effectRules: this.eventPresentationSettingsStore.getSnapshot().settings.visualRules,
       effectRuleTargets: listEffectRuleTargets(),
       assets: this.listVisualAssets(),
+      fonts: this.listFontAssets(),
       profiles: this.listVisualProfiles(),
-      events: listEventDefinitions({ presentationEligible: true }).map(({ eventId, categoryId, eventTypeId, label }) => ({ eventId, categoryId, eventTypeId, label }))
+      events: listEventDefinitions({ presentationEligible: true }).map(({ eventId, categoryId, eventTypeId, label }) => ({ eventId, categoryId, eventTypeId, label })),
+      studioAgents: listStudioAgents(this.ctx)
     };
   }
 
+  async readAgentAvatarFile(agentId) {
+    const identity = readAgentIdentity(resolveAgentsDir(this.ctx), agentId, this.ctx);
+    if (!identity?.avatarPath) return null;
+    const staged = stageAgentAvatar(this.ctx?.dataDir || this.ctx?.userDataDir, identity);
+    const filePath = staged?.cachePath || identity.avatarPath;
+    const buffer = await readFile(filePath);
+    const format = staged?.format || String(path.extname(identity.avatarPath).slice(1) || 'png').toLowerCase();
+    return { id: identity.id, format, buffer };
+  }
+
+  async applyAgentAvatarManifestForRecord(record) {
+    if (this.runtimeHost?.state !== 'running' || typeof this.runtimeHost.client?.request !== 'function') {
+      return { applied: false, reason: 'runtime-unavailable' };
+    }
+    const agentsDir = resolveAgentsDir(this.ctx);
+    const identities = [];
+    const seen = new Set();
+    const pushIdentity = (identity) => {
+      if (!identity?.id || seen.has(identity.id)) return;
+      seen.add(identity.id);
+      identities.push(identity);
+    };
+    pushIdentity(notificationIdentity(record, this.ctx));
+    for (const item of listStudioAgents(this.ctx)) {
+      if (!item.hasAvatar) continue;
+      pushIdentity(readAgentIdentity(agentsDir, item.id, this.ctx));
+    }
+    const items = [];
+    let cacheDir = null;
+    for (const identity of identities) {
+      const staged = stageAgentAvatar(this.ctx?.dataDir || this.ctx?.userDataDir, identity);
+      if (!staged) continue;
+      cacheDir = staged.cacheDir;
+      items.push({
+        id: staged.assetId,
+        format: staged.format === 'jpeg' ? 'jpeg' : staged.format,
+        relativePath: staged.relativePath,
+        sha256: staged.sha256,
+        enabled: true
+      });
+    }
+    if (!cacheDir || items.length === 0) return { applied: false, reason: 'no-avatar' };
+    const fingerprint = items.map((item) => `${item.id}:${item.sha256}`).sort().join('|');
+    if (this.agentAvatarManifestFingerprint === fingerprint) return { applied: true, deduplicated: true, assetCount: items.length };
+    const manifest = { version: 1, rootDir: cacheDir, items };
+    try {
+      const response = await this.runtimeHost.client.request('agent-avatars.configure', manifest, {
+        retryable: false,
+        idempotencyKey: `agent-avatars-${fingerprint.slice(0, 24)}`
+      });
+      const result = response?.payload?.result;
+      if (!result?.applied) throw Object.assign(new Error('Native returned an invalid agent avatar manifest ACK'), { code: 'AGENT_AVATAR_MANIFEST_ACK_INVALID', details: { result } });
+      this.agentAvatarManifestFingerprint = fingerprint;
+      return result;
+    } catch (error) {
+      this.recordNotificationDiagnostic(error, 'agent-avatars-configure');
+      return { applied: false, error: { code: error.code ?? 'AGENT_AVATAR_MANIFEST_APPLY_FAILED', message: error.message } };
+    }
+  }
+
   async updateVisualSettings(patch = {}) {
-    const previous = this.visualSettingsStore.getSnapshot().settings.profile.card?.types?.minimal?.appearance?.backgroundAssetId ?? null;
+    const previousProfile = this.visualSettingsStore.getSnapshot().settings.profile;
+    const previous = previousProfile.card?.types?.minimal?.appearance?.backgroundAssetId ?? null;
     const next = patch?.profile?.card?.types?.minimal?.appearance?.backgroundAssetId;
     const nextAssetId = next === undefined ? previous : next;
     if (nextAssetId && !this.visualAssetLibrary.get(nextAssetId)) throw Object.assign(new Error(`Unknown visual asset: ${nextAssetId}`), { code: 'VISUAL_ASSET_NOT_FOUND', details: { assetId: nextAssetId } });
+    const nextFontReferences = collectVisualProfileFontReferences(patch?.profile ?? previousProfile);
+    for (const reference of nextFontReferences) {
+      if (!this.fontAssetLibrary.get(reference.assetId)) throw Object.assign(new Error(`Unknown font asset: ${reference.assetId}`), { code: 'FONT_ASSET_NOT_FOUND', details: { assetId: reference.assetId } });
+    }
     if (nextAssetId && nextAssetId !== previous) await this.visualAssetLibrary.addReference(nextAssetId, { ownerType: 'profile', ownerId: 'visual.default', slot: 'card.minimal.background' });
     try {
       const snapshot = this.visualSettingsStore.updateVisualSettings(patch);
@@ -1225,58 +1300,19 @@ export default class NotificationHubVNextPlugin {
         });
       }
       if (previous && previous !== nextAssetId) this.visualAssetLibrary.removeReference(previous, { ownerType: 'profile', ownerId: 'visual.default', slot: 'card.minimal.background' });
+      for (const reference of collectVisualProfileFontReferences(previousProfile)) {
+        this.fontAssetLibrary.removeReference(reference.assetId, { ownerType: 'profile', ownerId: 'visual.default', slot: reference.slot });
+      }
+      for (const reference of collectVisualProfileFontReferences(snapshot.settings.profile)) {
+        await this.fontAssetLibrary.addReference(reference.assetId, { ownerType: 'profile', ownerId: 'visual.default', slot: reference.slot });
+      }
       await this.saveVisualAssets();
+      await this.saveFontAssets();
       return this.getVisualSettingsStatus();
     } catch (error) {
       this.recordVisualDiagnostic(error, 'CONFIG_RESOLVE');
       if (nextAssetId && nextAssetId !== previous) this.visualAssetLibrary.removeReference(nextAssetId, { ownerType: 'profile', ownerId: 'visual.default', slot: 'card.minimal.background' });
       throw error;
-    }
-  }
-
-  createEventPresentationSettingsPersistence() {
-    try {
-      const resolved = resolveEventPresentationSettingsPersistenceConfig({
-        dataDir: this.ctx.dataDir,
-        config: this.ctx.config
-      });
-      if (!resolved.enabled) return null;
-      return this.eventPresentationSettingsPersistenceFactory(this.ctx, {
-        store: this.eventPresentationSettingsStore
-      });
-    } catch (error) {
-      this.recordNotificationDiagnostic(error, 'event-presentation-settings-persistence-config');
-      return null;
-    }
-  }
-
-  async restoreEventPresentationSettings() {
-    this.eventPresentationSettingsPersistence = this.createEventPresentationSettingsPersistence();
-    try {
-      const restored = await this.eventPresentationSettingsPersistence?.restore?.();
-      if (restored) {
-        this.notificationApi.setPresentationProfile(createPresentationProfileFromSettings(restored.settings));
-        this.eventPresentationSettingsStore.markApplied(this.eventPresentationSettingsStore.getSnapshot().revision);
-      }
-    } catch (error) {
-      this.recordNotificationDiagnostic(error, 'event-presentation-settings-restore');
-    }
-    this.eventPresentationSettingsPersistence?.on?.('diagnostic', (diagnostic) => {
-      this.recordNotificationDiagnostic(diagnostic, 'event-presentation-settings-persistence');
-    });
-    this.eventPresentationSettingsPersistence?.observe?.();
-    return this.eventPresentationSettingsStore.getSnapshot();
-  }
-
-  async stopEventPresentationSettingsPersistence() {
-    const persistence = this.eventPresentationSettingsPersistence;
-    this.eventPresentationSettingsPersistence = null;
-    try {
-      await persistence?.flush?.();
-    } catch (error) {
-      this.recordNotificationDiagnostic(error, 'event-presentation-settings-flush');
-    } finally {
-      persistence?.dispose?.();
     }
   }
 
@@ -1314,51 +1350,6 @@ export default class NotificationHubVNextPlugin {
     });
   }
 
-  createVisualRegistryPersistence() {
-    if (this.visualRegistryPersistence) return this.visualRegistryPersistence;
-    try {
-      this.visualRegistryPersistence = new VisualRegistryPersistenceCoordinator({ profileRegistry: this.visualProfileRegistry, bindingRegistry: this.visualBindingRegistry, filePath: this.visualRegistryPersistencePath, revision: this.visualRegistryRevision });
-      this.visualRegistryPersistence.on('diagnostic', (diagnostic) => this.recordNotificationDiagnostic(diagnostic, 'visual-registry-persistence'));
-      return this.visualRegistryPersistence;
-    } catch (error) {
-      this.recordNotificationDiagnostic(error, 'visual-registry-persistence-config');
-      return null;
-    }
-  }
-
-  async restoreVisualRegistry() {
-    const persistence = this.createVisualRegistryPersistence();
-    if (!persistence) return null;
-    try {
-      const snapshot = await persistence.restore();
-      if (snapshot) {
-        this.visualRegistryRevision = snapshot.revision;
-        if (!this.visualProfileRegistry.has('visual.default')) {
-          this.visualProfileRegistry.register({ profileId: 'visual.default', name: '默认视觉方案', profile: this.visualSettingsStore.getSnapshot().settings.profile, source: 'builtin' });
-        }
-        if (this.visualBindingRegistry.list().length > 0) {
-          const projected = projectVisualRegistryToEventSettings({ settings: this.eventPresentationSettingsStore.getSnapshot().settings, bindingRegistry: this.visualBindingRegistry, profileRegistry: this.visualProfileRegistry });
-          const settingsSnapshot = this.eventPresentationSettingsStore.updateSettings({ events: projected.events });
-          this.notificationApi.setPresentationProfile(createPresentationProfileFromSettings(settingsSnapshot.settings));
-          this.eventPresentationSettingsStore.markApplied(settingsSnapshot.revision);
-        }
-      } else {
-        this.queueVisualRegistryPersistence();
-      }
-      return snapshot;
-    } catch (error) {
-      this.recordNotificationDiagnostic(error, 'visual-registry-restore');
-      return null;
-    }
-  }
-
-  async stopVisualRegistryPersistence() {
-    const persistence = this.visualRegistryPersistence;
-    this.visualRegistryPersistence = null;
-    if (!persistence) return;
-    try { await persistence.flush(); } catch (error) { this.recordNotificationDiagnostic(error, 'visual-registry-flush'); }
-    persistence.dispose();
-  }
 
   getVisualRegistryPersistenceStatus() {
     return this.visualRegistryPersistence?.getStatus?.() ?? { enabled: false, pending: false, revision: this.visualRegistryRevision, status: 'disabled' };
@@ -1366,9 +1357,28 @@ export default class NotificationHubVNextPlugin {
 
   listVisualAssets(query = {}) { return this.visualAssetLibrary.list(query); }
   getVisualAssetManifest() { return { ...createVisualAssetManifest(this.listVisualAssets().map((asset) => ({ assetId: asset.assetId, format: asset.format, sha256: asset.sha256, enabled: true })), { root: 'visual-assets' }), rootDir: path.dirname(this.visualAssetStorage.rootDir) }; }
-  async applyVisualAssetManifest() { if (this.runtimeHost?.state !== 'running' || typeof this.runtimeHost.client?.request !== 'function') return { applied: false, reason: 'runtime-unavailable' }; try { const manifest = this.getVisualAssetManifest(); const response = await this.runtimeHost.client.request('visual-assets.configure', manifest, { retryable: false, idempotencyKey: `visual-assets-manifest-${manifest.assets.length}` }); const result = response?.payload?.result; if (!result?.applied || result.assetCount !== manifest.assets.length) throw Object.assign(new Error('Native returned an invalid visual asset manifest ACK'), { code: 'VISUAL_ASSET_MANIFEST_ACK_INVALID', details: { result } }); return result; } catch (error) { this.recordNotificationDiagnostic(error, 'visual-assets-configure'); return { applied: false, error: { code: error.code ?? 'VISUAL_ASSET_MANIFEST_APPLY_FAILED', message: error.message } }; } }
+  async applyVisualAssetManifest() {
+    if (this.runtimeHost?.state !== 'running' || typeof this.runtimeHost.client?.request !== 'function') return { applied: false, reason: 'runtime-unavailable' };
+    try {
+      const manifest = this.getVisualAssetManifest();
+      const fingerprint = createHash('sha256').update(JSON.stringify(manifest.assets.map((asset) => [asset.assetId, asset.sha256, asset.enabled]))).digest('hex').slice(0, 16);
+      const response = await this.runtimeHost.client.request('visual-assets.configure', manifest, { retryable: false, idempotencyKey: `visual-assets-manifest-${fingerprint}` });
+      const result = response?.payload?.result;
+      if (!result?.applied || result.assetCount !== manifest.assets.length) throw Object.assign(new Error('Native returned an invalid visual asset manifest ACK'), { code: 'VISUAL_ASSET_MANIFEST_ACK_INVALID', details: { result } });
+      return result;
+    } catch (error) {
+      this.recordNotificationDiagnostic(error, 'visual-assets-configure');
+      return { applied: false, error: { code: error.code ?? 'VISUAL_ASSET_MANIFEST_APPLY_FAILED', message: error.message } };
+    }
+  }
   getVisualAsset(assetId) { return this.visualAssetLibrary.get(assetId); }
-  async importVisualAsset(input = {}) { const source = input.filePath ? { ...input, buffer: await readFile(input.filePath), name: input.name || path.basename(input.filePath) } : input; const asset = await this.visualAssetLibrary.importBuffer(source); await this.saveVisualAssets(); return asset; }
+  async readVisualAssetFile(assetId) {
+    const asset = this.visualAssetLibrary.get(assetId);
+    if (!asset) return null;
+    const buffer = await this.visualAssetStorage.read(asset.assetId, asset.format);
+    return { assetId: asset.assetId, format: asset.format, buffer };
+  }
+  async importVisualAsset(input = {}) { const source = input.filePath ? { ...input, buffer: await readFile(input.filePath), name: input.name || path.basename(input.filePath) } : input; const asset = await this.visualAssetLibrary.importBuffer(source); await this.saveVisualAssets(); await this.applyVisualAssetManifest(); return asset; }
   async importVisualAssetFromPicker({ kind = 'decoration', tags = [] } = {}) { const selected = await this.visualFilePicker.open(); if (selected?.cancelled) return { cancelled: true }; const asset = await this.importVisualAsset({ filePath: selected.path, name: path.basename(selected.path), kind, tags }); return { cancelled: false, asset }; }
 
   async readVisualPackageBuffer({ file, zipBuffer } = {}) {
@@ -1467,13 +1477,41 @@ export default class NotificationHubVNextPlugin {
   async removeVisualAsset(assetId) { const removed = await this.visualAssetLibrary.remove(assetId); await this.saveVisualAssets(); return removed; }
   async restoreVisualAssets() { try { const snapshot = await loadVisualAssetSnapshot(this.visualAssetSnapshotPath); if (snapshot) this.visualAssetLibrary.restoreSnapshot(snapshot); return snapshot; } catch (error) { this.recordNotificationDiagnostic(error, 'visual-assets-restore'); return null; } }
   async saveVisualAssets() { try { return await saveVisualAssetSnapshot(this.visualAssetLibrary.snapshot(), this.visualAssetSnapshotPath); } catch (error) { this.recordNotificationDiagnostic(error, 'visual-assets-save'); return null; } }
+  listFontAssets(query = {}) { return this.fontAssetLibrary.list(query); }
+  getFontAssetManifest() { return { ...createFontAssetManifest(this.listFontAssets().map((asset) => ({ assetId: asset.assetId, format: asset.format, sha256: asset.sha256, enabled: true })), { root: 'font-assets' }), rootDir: path.dirname(this.fontAssetStorage.rootDir) }; }
+  async applyFontAssetManifest() {
+    if (this.runtimeHost?.state !== 'running' || typeof this.runtimeHost.client?.request !== 'function') return { applied: false, reason: 'runtime-unavailable' };
+    try {
+      const manifest = this.getFontAssetManifest();
+      const fingerprint = createHash('sha256').update(JSON.stringify(manifest.assets.map((asset) => [asset.assetId, asset.sha256, asset.enabled]))).digest('hex').slice(0, 16);
+      const response = await this.runtimeHost.client.request('font-assets.configure', manifest, { retryable: false, idempotencyKey: `font-assets-manifest-${fingerprint}` });
+      const result = response?.payload?.result;
+      if (!result?.applied || result.assetCount !== manifest.assets.length) throw Object.assign(new Error('Native returned an invalid font asset manifest ACK'), { code: 'FONT_ASSET_MANIFEST_ACK_INVALID', details: { result } });
+      return result;
+    } catch (error) {
+      this.recordNotificationDiagnostic(error, 'font-assets-configure');
+      return { applied: false, error: { code: error.code ?? 'FONT_ASSET_MANIFEST_APPLY_FAILED', message: error.message } };
+    }
+  }
+  getFontAsset(assetId) { return this.fontAssetLibrary.get(assetId); }
+  async readFontAssetFile(assetId) {
+    const asset = this.fontAssetLibrary.get(assetId);
+    if (!asset) return null;
+    const buffer = await this.fontAssetStorage.read(asset.assetId, asset.format);
+    return { assetId: asset.assetId, format: asset.format, buffer };
+  }
+  async importFontAsset(input = {}) { const source = input.filePath ? { ...input, buffer: await readFile(input.filePath), name: input.name || path.basename(input.filePath) } : input; const asset = await this.fontAssetLibrary.importBuffer(source); await this.saveFontAssets(); await this.applyFontAssetManifest(); return asset; }
+  async importFontAssetFromPicker() { const selected = await this.fontFilePicker.open(); if (selected?.cancelled) return { cancelled: true }; const asset = await this.importFontAsset({ filePath: selected.path, name: path.basename(selected.path) }); return { cancelled: false, asset }; }
+  async removeFontAsset(assetId) { const removed = await this.fontAssetLibrary.remove(assetId); await this.saveFontAssets(); return removed; }
+  async restoreFontAssets() { try { const snapshot = await loadFontAssetSnapshot(this.fontAssetSnapshotPath); if (snapshot) this.fontAssetLibrary.restoreSnapshot(snapshot); return snapshot; } catch (error) { this.recordNotificationDiagnostic(error, 'font-assets-restore'); return null; } }
+  async saveFontAssets() { try { return await saveFontAssetSnapshot(this.fontAssetLibrary.snapshot(), this.fontAssetSnapshotPath); } catch (error) { this.recordNotificationDiagnostic(error, 'font-assets-save'); return null; } }
 
   queueVisualRegistryPersistence() {
     // Registry writes belong to a loaded Plugin instance. Keeping pre-load API
     // unit tests in memory prevents a fake cwd registry from contaminating later
     // lifecycle tests or an unrelated installation.
     if (this.ctx?._notificationHubVNextPlugin !== this.runtimeTestApi) return;
-    this.createVisualRegistryPersistence()?.queueCurrentSnapshot();
+    createVisualRegistryPersistence(this)?.queueCurrentSnapshot();
   }
 
   listVisualProfiles() {
@@ -1492,9 +1530,15 @@ export default class NotificationHubVNextPlugin {
     try {
       const nextProfile = profile ?? this.visualSettingsStore.getSnapshot().settings.profile;
       const nextAssetReferences = collectVisualProfileAssetReferences(nextProfile);
+      const nextFontReferences = collectVisualProfileFontReferences(nextProfile);
       for (const reference of nextAssetReferences) {
         if (!this.visualAssetLibrary.get(reference.assetId)) {
           throw Object.assign(new Error(`Unknown visual asset: ${reference.assetId}`), { code: 'VISUAL_ASSET_NOT_FOUND', details: { assetId: reference.assetId, profileId } });
+        }
+      }
+      for (const reference of nextFontReferences) {
+        if (!this.fontAssetLibrary.get(reference.assetId)) {
+          throw Object.assign(new Error(`Unknown font asset: ${reference.assetId}`), { code: 'FONT_ASSET_NOT_FOUND', details: { assetId: reference.assetId, profileId } });
         }
       }
       const previous = this.visualProfileRegistry.get(profileId);
@@ -1507,7 +1551,14 @@ export default class NotificationHubVNextPlugin {
       for (const reference of nextAssetReferences) {
         this.visualAssetLibrary.addReference(reference.assetId, { ownerType: 'profile', ownerId: record.profileId, slot: reference.slot });
       }
+      for (const reference of collectVisualProfileFontReferences(previous?.profile)) {
+        this.fontAssetLibrary.removeReference(reference.assetId, { ownerType: 'profile', ownerId: record.profileId, slot: reference.slot });
+      }
+      for (const reference of nextFontReferences) {
+        this.fontAssetLibrary.addReference(reference.assetId, { ownerType: 'profile', ownerId: record.profileId, slot: reference.slot });
+      }
       void this.saveVisualAssets();
+      void this.saveFontAssets();
       this.visualRegistryRevision += 1;
       this.queueVisualRegistryPersistence();
       return {
@@ -1536,7 +1587,11 @@ export default class NotificationHubVNextPlugin {
       for (const reference of collectVisualProfileAssetReferences(record?.profile)) {
         this.visualAssetLibrary.removeReference(reference.assetId, { ownerType: 'profile', ownerId: profileId, slot: reference.slot });
       }
+      for (const reference of collectVisualProfileFontReferences(record?.profile)) {
+        this.fontAssetLibrary.removeReference(reference.assetId, { ownerType: 'profile', ownerId: profileId, slot: reference.slot });
+      }
       void this.saveVisualAssets();
+      void this.saveFontAssets();
       this.visualRegistryRevision += 1;
       const snapshot = this.eventPresentationSettingsStore.getSnapshot();
       this.notificationApi.setPresentationProfile(createPresentationProfileFromSettings(snapshot.settings));
@@ -1634,22 +1689,6 @@ export default class NotificationHubVNextPlugin {
     };
   }
 
-  createSoundSettingsPersistence() {
-    try {
-      const resolved = resolveSoundSettingsPersistenceConfig({
-        dataDir: this.ctx.dataDir,
-        config: this.ctx.config
-      });
-      if (!resolved.enabled) return null;
-      return this.soundSettingsPersistenceFactory(this.ctx, {
-        store: this.soundSettingsStore
-      });
-    } catch (error) {
-      this.recordSoundDiagnostic(error, 'persistence-config');
-      return null;
-    }
-  }
-
   recordSoundDiagnostic(error, stage) {
     const diagnostic = {
       code: error?.code ?? 'SOUND_SETTINGS_FAILED',
@@ -1686,27 +1725,6 @@ export default class NotificationHubVNextPlugin {
     return this.soundDiagnostics.filter((entry) => entry && entry.summary).slice(-30);
   }
 
-  async restoreSoundSettings() {
-    this.soundSettingsPersistence = this.createSoundSettingsPersistence();
-    if (!this.soundSettingsPersistence) {
-      const snapshot = this.soundSettingsStore.getSnapshot();
-      this.notificationApi.setSoundEnabled(snapshot.settings.globalSoundEnabled && snapshot.settings.workModeMuted !== true);
-      this.notificationApi.setSoundProfile(snapshot.settings.profile);
-      return snapshot;
-    }
-    this.soundSettingsPersistence.on?.('diagnostic', (diagnostic) => this.recordSoundDiagnostic(diagnostic, 'persistence'));
-    try {
-      await this.soundSettingsPersistence.restore();
-    } catch (error) {
-      this.recordSoundDiagnostic(error, 'restore');
-    }
-    this.soundSettingsPersistence.observe?.();
-    const snapshot = this.soundSettingsStore.getSnapshot();
-    this.notificationApi.setSoundEnabled(snapshot.settings.globalSoundEnabled && snapshot.settings.workModeMuted !== true);
-    this.notificationApi.setSoundProfile(snapshot.settings.profile);
-    return snapshot;
-  }
-
   async restoreSoundAssets() {
     try {
       const migration = await migrateSoundAssetStorage(this.soundAssetStorage);
@@ -1733,20 +1751,6 @@ export default class NotificationHubVNextPlugin {
       this.soundAssetDiagnostics.push({ code: error.code ?? 'SOUND_ASSET_SAVE_FAILED', message: error.message, details: error.details ?? {}, timestamp: new Date().toISOString() });
       this.ctx.log?.warn?.(`[notification-hub-vnext] Sound asset save failed: ${error.message}`, error.details);
       throw error;
-    }
-  }
-
-  async stopSoundSettingsPersistence() {
-    const persistence = this.soundSettingsPersistence;
-    this.soundSettingsPersistence = null;
-    try {
-      await persistence?.flush?.();
-    } catch (error) {
-      this.recordSoundDiagnostic(error, 'flush');
-    } finally {
-      persistence?.dispose?.();
-      this.soundScheduler?.clear?.();
-      this.soundBackend?.dispose?.();
     }
   }
 
@@ -2336,7 +2340,7 @@ export default class NotificationHubVNextPlugin {
       version: 1,
       exportedAt: new Date().toISOString(),
       entries: this.getRuntimeLog()
-    }, null, 2)}\\n`;
+    }, null, 2)}\n`;
     const saved = await this.soundFilePicker.save({
       suggestedName: name,
       content,
@@ -2409,6 +2413,12 @@ export default class NotificationHubVNextPlugin {
     };
     this.notificationDiagnostics.push(diagnostic);
     if (this.notificationDiagnostics.length > 20) this.notificationDiagnostics.shift();
+    this.recordRuntimeLog('diagnostic', {
+      code: diagnostic.code,
+      message: diagnostic.message,
+      timestamp: diagnostic.timestamp,
+      details: { stage, ...diagnostic.details }
+    }, 'notification');
     this.ctx.log?.warn?.(
       `[notification-hub-vnext] Notification persistence ${stage} failed: ${diagnostic.code} ${diagnostic.message}`,
       diagnostic.details
@@ -2423,7 +2433,8 @@ export default class NotificationHubVNextPlugin {
     try {
       this.notificationEventAdapter = createNotificationEventAdapter({
         notificationApi: this.notificationApi,
-        log: this.ctx.log
+        log: this.ctx.log,
+        ctx: this.ctx
       });
       this.notificationEventUnsubscribe = this.ctx.bus.subscribe((event, sessionPath) => {
         const result = this.notificationEventAdapter?.handle(event, sessionPath);
@@ -2579,8 +2590,7 @@ export default class NotificationHubVNextPlugin {
   }
 
   drainNotificationSceneQueue(channelId = null, { onSceneError = null } = {}) {
-    if (!this.runtimeHost || this.runtimeHost.state !== 'running'
-      || typeof this.runtimeHost.client?.request !== 'function') return Promise.resolve();
+    if (!runtimeHostReady(this.runtimeHost)) return Promise.resolve();
     const channelIds = channelId === null
       ? [...this.notificationSceneQueues.keys()]
       : [channelId];
@@ -2628,9 +2638,10 @@ export default class NotificationHubVNextPlugin {
   }
 
   buildNotificationScenePayload({ record, health, layout, retainedNotificationCards, visualPayload, presentation, behavior } = {}) {
+    const tickerFlight = isTickerBehavior(visualPayload?.behaviorId) || isTickerBehavior(behavior?.behaviorProfileId);
     return notificationCardPayload(
       record,
-      retainedNotificationCards.length % RUNTIME_NOTIFICATION_MAX_VISIBLE,
+      tickerFlight ? 0 : retainedNotificationCards.length,
       health.workArea,
       layout,
       visualPayload,
@@ -2638,12 +2649,24 @@ export default class NotificationHubVNextPlugin {
       behavior ? {
         behaviorProfileId: behavior.behaviorProfileId,
         behaviorChannelId: behavior.behaviorChannelId
-      } : null
+      } : null,
+      this.ctx
     );
   }
 
-  async createNotificationSceneNative({ record, card, selector, behavior } = {}) {
+  async ensureNativeStackLayout(host, visual) {
+    if (!host?.client?.request) return;
+    if (isTickerBehavior(visual?.behaviorId)) return;
+    await host.client.request('scene.set-mode', spaceToNativeStackLayout(visual?.space), { retryable: false });
+  }
+
+  async createNotificationSceneNative({ record, card, selector, behavior, visual } = {}) {
     const host = this.runtimeHost;
+    await this.ensureNativeStackLayout(host, visual ?? {
+      behaviorId: behavior?.behaviorProfileId ?? card?.behavior?.behaviorProfileId,
+      space: visual?.space
+    });
+    await this.applyAgentAvatarManifestForRecord(record);
     try {
       if (this.visualRuntimeModeController.mode() === 'takeover' && selector && behavior) {
         const takeover = await this.visualRuntimeTakeoverAdapter.create({
@@ -2655,9 +2678,9 @@ export default class NotificationHubVNextPlugin {
         });
         if (takeover.decision === 'created') return { payload: { result: takeover.response } };
         this.visualRuntimeModeController.rollback(takeover.code ?? 'VISUAL_RUNTIME_TAKEOVER_FAILED', { declaration: 'automatic-safety-gate' });
-        return host.client.request('scene.create', card, { retryable: false, idempotencyKey: `notification-scene-${record.notificationId}` });
+        return host.client.request('scene.create', card, sceneCreateOptions({ idempotencyKey: `notification-scene-${record.notificationId}` }));
       }
-      return host.client.request('scene.create', card, { retryable: false, idempotencyKey: `notification-scene-${record.notificationId}` });
+      return host.client.request('scene.create', card, sceneCreateOptions({ idempotencyKey: `notification-scene-${record.notificationId}` }));
     } catch (error) {
       if (this.visualRuntimeModeController.mode() === 'takeover') this.visualRuntimeModeController.rollback(error.code ?? 'VISUAL_RUNTIME_TAKEOVER_FAILED', { declaration: 'automatic-safety-gate' });
       throw error;
@@ -2668,7 +2691,7 @@ export default class NotificationHubVNextPlugin {
     const intent = this.resolveVisualEventCardIntent(record);
     if (!intent.showCard) return { card: null, response: null, skipped: true, channelId, promotedCard, record };
     const host = this.runtimeHost;
-    if (!host || host.state !== 'running' || typeof host.client?.request !== 'function') {
+    if (!runtimeHostReady(host)) {
       const error = new Error('Native Runtime is not running; promoted notification scene was not created');
       error.code = 'RUNTIME_PROMOTION_NATIVE_UNAVAILABLE';
       throw error;
@@ -2687,7 +2710,7 @@ export default class NotificationHubVNextPlugin {
     const behavior = this.resolveNotificationBehavior(selector, record, intent.nativeBehavior);
     const visualProfile = intent.visualProfile;
     const visual = resolveVisualRuleSafe({ visualInput: presentationInput.visualInput, profile: visualProfile, context: { globalEnabled: visualProfile.global.enabled } });
-    const visualPayload = { enabled: visual.enabled, preset: visual.preset, intensity: visual.intensity, category: visual.category, cardType: visual.cardType, behaviorId: visual.behaviorId, space: visual.space, appearance: visual.appearance, ...(visual.ticker ? { ticker: visual.ticker } : {}) };
+    const visualPayload = { enabled: visual.enabled, preset: visual.preset, intensity: visual.intensity, category: visual.category, cardType: visual.cardType, behaviorId: visual.behaviorId, space: visual.space, appearance: visual.appearance, ...(visual.interaction ? { interaction: visual.interaction } : {}), ...(intent.visualProfile?.card?.types?.[intent.visualProfile.card.activeType ?? 'minimal']?.properties?.interaction && !visual.interaction ? { interaction: intent.visualProfile.card.types[intent.visualProfile.card.activeType ?? 'minimal'].properties.interaction } : {}), ...(visual.ticker ? { ticker: visual.ticker } : {}), ...(visual.parts ? { parts: visual.parts } : {}), ...(visual.glossary ? { glossary: visual.glossary } : {}) };
     const presentation = selector ? { eventId: selector.eventId, categoryId: selector.categoryId, eventTypeId: selector.eventTypeId, visualProfileId: selector.visual.visualProfileId } : {
       eventId: intent.eventId,
       categoryId: intent.binding?.categoryId ?? 'chat',
@@ -2696,7 +2719,7 @@ export default class NotificationHubVNextPlugin {
     };
     const card = this.buildNotificationScenePayload({ record, health, layout, retainedNotificationCards, visualPayload, presentation, behavior });
     this.recordNotificationLifecycle(record.notificationId, 'scene.create.request', { channelId: behavior?.behaviorChannelId, reason: 'promotion' });
-    const response = await this.createNotificationSceneNative({ record, card, selector, behavior });
+    const response = await this.createNotificationSceneNative({ record, card, selector, behavior, visual: visualPayload });
     if (commit) this.commitNotificationSceneShown(record, behavior);
     return { card, response: response?.payload?.result ?? null, channelId, promotedCard, record, behavior };
   }
@@ -2709,27 +2732,14 @@ export default class NotificationHubVNextPlugin {
     } catch (error) {
       this.recordNotificationDiagnostic(error, 'scene-status');
     }
-    const configuredLifetimeSeconds = this.notificationDisplaySettings.cardLifetimeSeconds;
-    const lifetimeMs = Number.isInteger(configuredLifetimeSeconds)
-      ? configuredLifetimeSeconds * 1000
-      : (Number.isInteger(record.runtimeHints?.lifetimeMs) && record.runtimeHints.lifetimeMs >= 0
-        ? record.runtimeHints.lifetimeMs
-        : 120000);
-    const timer = setTimeout(() => {
-      this.dismissNotificationScene(record.notificationId, 'expired').catch((error) => {
-        this.recordNotificationDiagnostic(error, 'scene-expire');
-      });
-    }, lifetimeMs);
-    timer.unref?.();
-    this.notificationSceneTimers.set(record.notificationId, timer);
-    return { notificationId: record.notificationId, lifetimeMs };
+    return { notificationId: record.notificationId, lifetimeMs: null, timerArmed: false };
   }
 
   async showNotificationScene(record) {
     const intent = this.resolveVisualEventCardIntent(record);
     if (!intent.showCard) return { card: null, response: null, skipped: true };
     const host = this.runtimeHost;
-    if (!host || host.state !== 'running' || typeof host.client?.request !== 'function') {
+    if (!runtimeHostReady(host)) {
       const error = new Error('Native Runtime is not running; notification scene was not created');
       error.code = 'RUNTIME_NOTIFICATION_SCENE_UNAVAILABLE';
       throw error;
@@ -2769,6 +2779,7 @@ export default class NotificationHubVNextPlugin {
       profile: visualProfile,
       context: { globalEnabled: visualProfile.global.enabled }
     });
+    const typeInteraction = visualProfile?.card?.types?.[visualProfile.card?.activeType ?? 'minimal']?.properties?.interaction;
     const visualPayload = {
       enabled: visual.enabled,
       preset: visual.preset,
@@ -2778,33 +2789,13 @@ export default class NotificationHubVNextPlugin {
       behaviorId: visual.behaviorId,
       space: visual.space,
       appearance: visual.appearance,
-      ...(visual.ticker ? { ticker: visual.ticker } : {})
+      ...(visual.interaction ?? typeInteraction ? { interaction: visual.interaction ?? typeInteraction } : {}),
+      ...(visual.ticker ? { ticker: visual.ticker } : {}),
+      ...(visual.parts ? { parts: visual.parts } : {}),
+      ...(visual.glossary ? { glossary: visual.glossary } : {})
     };
     const channelId = behavior?.behaviorChannelId ?? '__legacy__';
-    const retainedNotificationCards = notificationCards.filter((card) => {
-      const existingChannelId = card.behavior?.behaviorChannelId ?? '__legacy__';
-      return existingChannelId === channelId;
-    });
-    const workAreaWidth = Number.isFinite(health.workArea?.width) && health.workArea.width > 0 ? health.workArea.width : null;
-    const spacing = Number.isInteger(layout.spacing) && layout.spacing >= 0 ? layout.spacing : 12;
-    const projectedCard = { width: notificationCardDimensions(visualPayload.appearance, visualPayload.cardType, visualPayload.behaviorId).width };
-    while (retainedNotificationCards.length >= RUNTIME_NOTIFICATION_MAX_VISIBLE
-      || (workAreaWidth !== null && shelfExtent([...retainedNotificationCards, projectedCard], spacing) > workAreaWidth)) {
-      const oldest = retainedNotificationCards.shift();
-      if (!oldest) break;
-      const oldestNotificationId = notificationIdFromCardId(oldest.id);
-      if (oldestNotificationId) await this.dismissNotificationScene(oldestNotificationId, 'dismissed');
-      this.notificationSceneVisibleIds.delete(oldestNotificationId);
-      this.removeNotificationBehaviorCard(oldestNotificationId);
-      const timer = this.notificationSceneTimers.get(oldestNotificationId);
-      if (timer) clearTimeout(timer);
-      this.notificationSceneTimers.delete(oldestNotificationId);
-      const oldRecord = this.notificationStore.get(oldestNotificationId);
-      if (oldRecord?.status === 'shown') {
-        try { this.notificationStore.setStatus(oldestNotificationId, 'dismissed'); }
-        catch (error) { this.recordNotificationDiagnostic(error, 'scene-evict'); }
-      }
-    }
+    const retainedNotificationCards = notificationCards.filter((card) => !isTickerBehavior(card?.behavior?.behaviorProfileId));
     this.shadowEnqueueVisualRuntime(record, selector, visualPayload);
     const presentation = selector ? {
       eventId: selector.eventId,
@@ -2817,20 +2808,67 @@ export default class NotificationHubVNextPlugin {
       eventTypeId: intent.eventId,
       visualProfileId: intent.binding?.visualProfileId ?? 'visual.default'
     };
-    const card = this.buildNotificationScenePayload({
+    const tickerFlight = isTickerBehavior(visualPayload?.behaviorId) || isTickerBehavior(behavior?.behaviorProfileId);
+    let liveHealth = health;
+    let liveLayout = layout;
+    let liveRetained = retainedNotificationCards;
+    let card = this.buildNotificationScenePayload({
       record,
-      health,
-      layout,
-      retainedNotificationCards,
+      health: liveHealth,
+      layout: liveLayout,
+      retainedNotificationCards: liveRetained,
       visualPayload,
       presentation,
       behavior
     });
     this.recordNotificationLifecycle(record.notificationId, 'scene.create.request', { channelId: behavior?.behaviorChannelId });
-    const response = await this.createNotificationSceneNative({ record, card, selector, behavior }).catch((error) => {
+    let response;
+    for (let attempt = 0; attempt < 64; attempt += 1) {
+      try {
+        response = await this.createNotificationSceneNative({ record, card, selector, behavior, visual: visualPayload });
+        break;
+      } catch (error) {
+        const outOfBounds = error.code === 'LAYOUT_BEHAVIOR_CHANNEL_OUT_OF_BOUNDS'
+          || error.code === 'LAYOUT_CARD_OUT_OF_BOUNDS';
+        if (tickerFlight || !outOfBounds) {
+          behavior?.manager?.remove(record.notificationId);
+          throw error;
+        }
+        const oldest = liveRetained.find((item) => {
+          const id = notificationIdFromCardId(item?.id);
+          return id && id !== record.notificationId;
+        });
+        const oldestId = notificationIdFromCardId(oldest?.id);
+        if (!oldestId) {
+          behavior?.manager?.remove(record.notificationId);
+          throw error;
+        }
+        await this.dismissNotificationScene(oldestId, 'dismissed');
+        const healthAgain = (await host.client.request('health', {}, { retryable: true, maxAttempts: 2 }))?.payload?.result ?? {};
+        liveHealth = healthAgain;
+        liveLayout = healthAgain.layout ?? liveLayout;
+        const existingAgain = Array.isArray(healthAgain.sceneCards) ? healthAgain.sceneCards : [];
+        liveRetained = existingAgain.filter((item) => {
+          const id = notificationIdFromCardId(item?.id);
+          return id && !isTickerBehavior(item?.behavior?.behaviorProfileId);
+        });
+        card = this.buildNotificationScenePayload({
+          record,
+          health: liveHealth,
+          layout: liveLayout,
+          retainedNotificationCards: liveRetained,
+          visualPayload,
+          presentation,
+          behavior
+        });
+      }
+    }
+    if (!response) {
       behavior?.manager?.remove(record.notificationId);
-      throw error;
-    });
+      const overflow = new Error('Stack layout could not place the newest card after dropping older cards');
+      overflow.code = 'LAYOUT_BEHAVIOR_CHANNEL_OUT_OF_BOUNDS';
+      throw overflow;
+    }
     this.commitNotificationSceneShown(record, behavior);
     this.recordNotificationLifecycle(record.notificationId, 'scene.commit.shown', { channelId: behavior?.behaviorChannelId });
     return { card, response: response?.payload?.result ?? null };
@@ -3217,7 +3255,8 @@ export default class NotificationHubVNextPlugin {
     this.runtimeError = null;
     try {
       await this.startRuntimeHost();
-      if (this.ctx.config?.visualAssetManifestEnabled === true) await this.applyVisualAssetManifest();
+      await this.applyVisualAssetManifest();
+      await this.applyFontAssetManifest();
       return this.getRuntimePageStatus();
     } catch (error) {
       this.runtimeError = error;
@@ -3440,10 +3479,11 @@ export default class NotificationHubVNextPlugin {
       for (let index = 0; index < count; index += 1) {
         const notificationId = `parallel-${sample.behaviorId}-${Date.now().toString(36)}-${index + 1}`;
         const record = { notificationId, title: sample.title, content: `${sample.content} 通道：${sample.channelId}` };
-        const card = notificationCardPayload(record, index, health.workArea, health.layout, sample.visual, { eventId: `visual.parallel.${sample.behaviorId}`, categoryId: sample.category, eventTypeId: 'parallel-test', visualProfileId: `visual.${sample.behaviorId}` }, { behaviorProfileId: sample.behaviorId, behaviorChannelId: sample.channelId });
+        const card = notificationCardPayload(record, index, health.workArea, health.layout, sample.visual, { eventId: `visual.parallel.${sample.behaviorId}`, categoryId: sample.category, eventTypeId: 'parallel-test', visualProfileId: `visual.${sample.behaviorId}` }, { behaviorProfileId: sample.behaviorId, behaviorChannelId: sample.channelId }, this.ctx);
         const entry = { cardId: card.id, notificationId, cardType: sample.cardType, behaviorId: sample.behaviorId, behaviorChannelId: sample.channelId, geometry: { x: card.x, y: card.y, width: card.width, height: card.height } };
         if (host) {
-          const response = await host.client.request('scene.create', card, { retryable: false, idempotencyKey: `parallel-card-${notificationId}` });
+          await this.ensureNativeStackLayout(host, sample.visual);
+          const response = await host.client.request('scene.create', card, sceneCreateOptions({ idempotencyKey: `parallel-card-${notificationId}` }));
           entry.response = response?.payload?.result ?? null;
         }
         results.push(entry);
@@ -3532,7 +3572,7 @@ export default class NotificationHubVNextPlugin {
     };
   }
 
-  buildVisualDraftNativeCard({ health, cardId, draft = null, title, body, eventId, channelId }) {
+  buildVisualDraftNativeCard({ health, cardId, draft = null, title, body, eventId, channelId, sampleAgent = null }) {
     const sourceProfile = draft ?? this.visualSettingsStore.getSnapshot().settings.profile;
     const profile = createVisualProfile(normalizeVisualPreviewProfile(sourceProfile));
     const activeType = profile.card.types[profile.card.activeType];
@@ -3548,20 +3588,31 @@ export default class NotificationHubVNextPlugin {
       appearance: activeType.appearance,
       ...(behaviorId === 'ticker' && profile.ticker ? { ticker: profile.ticker } : {})
     }, activeType);
+    const sample = sampleAgentFromInput(sampleAgent);
     const card = notificationCardPayload(
-      { notificationId: cardId, title, content: body },
+      {
+        notificationId: cardId,
+        title,
+        content: body,
+        ...(sample ? { agent: sample } : {})
+      },
       0,
       health.workArea,
       health.layout ?? { direction: 'right', anchor: 'bottom-left', spacing: 12 },
       visual,
       { eventId, categoryId: 'chat', eventTypeId: 'preview', visualProfileId: 'draft' },
-      { behaviorProfileId: behaviorId, behaviorChannelId: channelId ?? `visual.try-one.${behaviorId}` }
+      { behaviorProfileId: behaviorId, behaviorChannelId: channelId ?? `visual.try-one.${behaviorId}` },
+      this.ctx
     );
     return { profile, card: { ...card, id: cardId, title, body } };
   }
 
-  async runVisualDraftSample({ draft = null } = {}) {
+  async runVisualDraftSample({ draft = null, sampleAgent = null } = {}) {
     const host = this.requireRuntimeTestHost();
+    const sample = sampleAgentFromInput(sampleAgent);
+    await this.applyVisualAssetManifest();
+    await this.applyFontAssetManifest();
+    await this.applyAgentAvatarManifestForRecord(sample ? { agent: sample } : null);
     const health = (await host.client.request('health', {}, { retryable: true, maxAttempts: 2 }))?.payload?.result ?? {};
     const id = `${VISUAL_TRY_CARD_PREFIX}${Date.now().toString(36)}-${Math.random().toString(16).slice(2, 8)}`;
     const { profile, card } = this.buildVisualDraftNativeCard({
@@ -3570,12 +3621,19 @@ export default class NotificationHubVNextPlugin {
       draft,
       title: '试一条',
       body: '当前工作室草稿，不写通知历史。',
-      eventId: 'visual.try-one'
+      eventId: 'visual.try-one',
+      sampleAgent: sample
     });
     const label = profile.behaviorId === 'ticker' ? '弹幕' : '堆叠';
     card.title = `试一条 · ${label}`;
-    card.body = '当前工作室草稿，不写通知历史。';
-    const response = await host.client.request('scene.create', card, { retryable: false });
+    card.body = profile.behaviorId === 'ticker'
+      ? (profile.ticker?.direction === 'right' ? '弹幕从左往右流过。' : '弹幕从右往左流过。')
+      : '当前工作室草稿，不写通知历史。';
+    await this.ensureNativeStackLayout(host, {
+      behaviorId: profile.behaviorId,
+      space: profile.card?.types?.[profile.card.activeType]?.properties?.space
+    });
+    const response = await host.client.request('scene.create', card, sceneCreateOptions());
     this.recordVisualDiagnostic({ code: 'VISUAL_DRAFT_SAMPLE_CREATED', message: 'Visual draft sample created' }, 'DRAFT_SAMPLE', { cardId: id, behaviorId: profile.behaviorId });
     return {
       generated: 1,
@@ -3604,7 +3662,11 @@ export default class NotificationHubVNextPlugin {
       const card = this.buildVisualWorkbenchCard('hold', health, id, profile.profile, binding);
       card.title = `视觉实验台 · ${eventId}`;
       card.body = `使用已绑定配置包：${binding.visualProfileId}`;
-      const response = await host.client.request('scene.create', card, { retryable: false });
+      await this.ensureNativeStackLayout(host, {
+        behaviorId: profile.profile?.behaviorId ?? card.behavior?.behaviorProfileId,
+        space: profile.profile?.card?.types?.[profile.profile.card?.activeType ?? 'minimal']?.properties?.space
+      });
+      const response = await host.client.request('scene.create', card, sceneCreateOptions());
       results.push({ eventId, visualProfileId: binding.visualProfileId, cardId: id, response: response?.payload?.result ?? null });
       if (intervalMs > 0 && index < count - 1) await new Promise((resolve) => setTimeout(resolve, intervalMs));
     }
@@ -3622,12 +3684,23 @@ export default class NotificationHubVNextPlugin {
     });
     const activeType = profile?.card?.types?.[profile.card.activeType ?? 'minimal'] ?? {};
     const nativeBehavior = resolveVisualEventNativeBehavior(profile);
-    const visualPayload = event
-      ? visual
-      : resolveVisualDraftPayload({ enabled: visual.enabled, preset: visual.preset, intensity: visual.intensity, category: visual.category, cardType: visual.cardType, behaviorId: visual.behaviorId, space: visual.space, appearance: visual.appearance, ...(profile.ticker ? { ticker: profile.ticker } : {}) }, activeType);
+    const visualPayload = resolveVisualDraftPayload({
+      enabled: visual.enabled,
+      preset: visual.preset,
+      intensity: visual.intensity,
+      category: visual.category,
+      cardType: visual.cardType,
+      behaviorId: visual.behaviorId,
+      space: visual.space,
+      appearance: visual.appearance,
+      ...(visual.interaction ? { interaction: visual.interaction } : {}),
+      ...(visual.parts ? { parts: visual.parts } : {}),
+      ...(visual.glossary ? { glossary: visual.glossary } : {}),
+      ...(profile.ticker ? { ticker: profile.ticker } : {})
+    }, activeType);
     const id = cardId ?? `${VISUAL_WORKBENCH_CARD_PREFIX}${Date.now().toString(36)}-${Math.random().toString(16).slice(2, 8)}`;
     const phaseLabels = { enter: '入场测试', hold: '持续更新测试', exit: '消失测试' };
-    const card = notificationCardPayload({ notificationId: id, title: `视觉实验台 · ${phaseLabels[phase]}`, content: '真实 Native 卡片。修改设置后点击持续 / 更新，验证当前视觉配置。' }, 0, health.workArea, health.layout ?? { direction: 'right', anchor: 'bottom-left', spacing: 12 }, visualPayload, { eventId: eventInput.eventId, categoryId: eventInput.categoryId ?? 'chat', eventTypeId: eventInput.eventTypeId ?? 'completed', visualProfileId: eventInput.visualProfileId ?? 'visual.default' }, { behaviorProfileId: nativeBehavior.behaviorProfileId, behaviorChannelId: eventInput.behaviorChannelId ?? nativeBehavior.behaviorChannelId });
+    const card = notificationCardPayload({ notificationId: id, title: `视觉实验台 · ${phaseLabels[phase]}`, content: '真实 Native 卡片。修改设置后点击持续 / 更新，验证当前视觉配置。' }, 0, health.workArea, health.layout ?? { direction: 'right', anchor: 'bottom-left', spacing: 12 }, visualPayload, { eventId: eventInput.eventId, categoryId: eventInput.categoryId ?? 'chat', eventTypeId: eventInput.eventTypeId ?? 'completed', visualProfileId: eventInput.visualProfileId ?? 'visual.default' }, { behaviorProfileId: nativeBehavior.behaviorProfileId, behaviorChannelId: eventInput.behaviorChannelId ?? nativeBehavior.behaviorChannelId }, this.ctx);
     return { ...card, id, title: `视觉实验台 · ${phaseLabels[phase]}`, body: '真实 Native 卡片。修改设置后点击持续 / 更新，验证当前视觉配置。' };
   }
 
@@ -3636,7 +3709,12 @@ export default class NotificationHubVNextPlugin {
     if (!['enter', 'hold', 'exit'].includes(phase)) throw Object.assign(new Error('实验台阶段必须是 enter、hold 或 exit'), { code: 'VISUAL_WORKBENCH_PHASE_INVALID' });
     const health = (await host.client.request('health', {}, { retryable: true, maxAttempts: 2 }))?.payload?.result ?? {};
     const card = this.buildVisualWorkbenchCard(phase, health, null, draft);
-    const response = await host.client.request('scene.create', card, { retryable: false });
+    const source = draft ?? this.visualSettingsStore.getSnapshot().settings.profile;
+    await this.ensureNativeStackLayout(host, {
+      behaviorId: source?.behaviorId ?? card.behavior?.behaviorProfileId,
+      space: source?.card?.types?.[source.card?.activeType ?? 'minimal']?.properties?.space
+    });
+    const response = await host.client.request('scene.create', card, sceneCreateOptions());
     this.visualWorkbenchCardId = card.id;
     return { phase, card, response: response?.payload?.result ?? null };
   }
@@ -3687,7 +3765,7 @@ export default class NotificationHubVNextPlugin {
     return { dismissed, count: dismissed.length, historyWritten: false };
   }
 
-  buildVisualPreviewCard(health, cardId, draft = null) {
+  buildVisualPreviewCard(health, cardId, draft = null, sampleAgent = null) {
     // Preview owns its source boundary: an explicit draft is never resolved through
     // the persisted store or visual.default category policy.
     const { card } = this.buildVisualDraftNativeCard({
@@ -3697,7 +3775,8 @@ export default class NotificationHubVNextPlugin {
       title: '实时视觉预览',
       body: '当前编辑草稿的 Native 预览，不会写入通知历史。',
       eventId: 'visual.preview',
-      channelId: 'visual.preview'
+      channelId: 'visual.preview',
+      sampleAgent
     });
     return card;
   }
@@ -3707,18 +3786,27 @@ export default class NotificationHubVNextPlugin {
       || /card.?not.?found|scene.?card.?not.?found/i.test(error?.message ?? '');
   }
 
-  async openVisualPreviewCard({ draft = null } = {}) {
+  async openVisualPreviewCard({ draft = null, sampleAgent = null } = {}) {
     this.visualPreviewClosedExplicitly = false;
-    if (this.visualPreviewCardId) return this.updateVisualPreviewCard({ draft });
+    if (this.visualPreviewCardId) return this.updateVisualPreviewCard({ draft, sampleAgent });
     const sessionGeneration = ++this.visualPreviewSessionGeneration;
     const host = this.requireRuntimeTestHost();
+    const sample = sampleAgentFromInput(sampleAgent);
+    await this.applyVisualAssetManifest();
+    await this.applyFontAssetManifest();
+    await this.applyAgentAvatarManifestForRecord(sample ? { agent: sample } : null);
     const health = (await host.client.request('health', {}, { retryable: true, maxAttempts: 2 }))?.payload?.result ?? {};
     if (this.visualPreviewClosedExplicitly || sessionGeneration !== this.visualPreviewSessionGeneration) {
       throw Object.assign(new Error('Realtime Native preview session is closed'), { code: 'VISUAL_PREVIEW_SESSION_CLOSED' });
     }
     const id = `${VISUAL_PREVIEW_CARD_PREFIX}${Date.now().toString(36)}-${Math.random().toString(16).slice(2, 8)}`;
-    const card = this.buildVisualPreviewCard(health, id, draft);
-    const response = await host.client.request('scene.create', card, { retryable: false });
+    const card = this.buildVisualPreviewCard(health, id, draft, sample);
+    const source = draft ?? this.visualSettingsStore.getSnapshot().settings.profile;
+    await this.ensureNativeStackLayout(host, {
+      behaviorId: source?.behaviorId ?? card.behavior?.behaviorProfileId,
+      space: source?.card?.types?.[source.card?.activeType ?? 'minimal']?.properties?.space
+    });
+    const response = await host.client.request('scene.create', card, sceneCreateOptions());
     const responseResult = response?.payload?.result ?? null;
     if (this.visualPreviewClosedExplicitly || sessionGeneration !== this.visualPreviewSessionGeneration) {
       await host.client.request('scene.dismiss', { id }, { retryable: false }).catch(() => {});
@@ -3737,15 +3825,17 @@ export default class NotificationHubVNextPlugin {
     };
   }
 
-  async updateVisualPreviewCard({ draft = null } = {}) {
+  async updateVisualPreviewCard({ draft = null, sampleAgent = null } = {}) {
     const host = this.requireRuntimeTestHost();
+    const sample = sampleAgentFromInput(sampleAgent);
     if (!this.visualPreviewCardId) {
       if (this.visualPreviewClosedExplicitly) {
         throw Object.assign(new Error('Realtime Native preview session is closed'), { code: 'VISUAL_PREVIEW_SESSION_CLOSED' });
       }
-      return this.openVisualPreviewCard({ draft });
+      return this.openVisualPreviewCard({ draft, sampleAgent: sample });
     }
     const sessionGeneration = this.visualPreviewSessionGeneration;
+    await this.applyAgentAvatarManifestForRecord(sample ? { agent: sample } : null);
     const health = (await host.client.request('health', {}, { retryable: true, maxAttempts: 2 }))?.payload?.result ?? {};
     if (this.visualPreviewClosedExplicitly || sessionGeneration !== this.visualPreviewSessionGeneration) {
       throw Object.assign(new Error('Realtime Native preview session is closed'), { code: 'VISUAL_PREVIEW_SESSION_CLOSED' });
@@ -3761,13 +3851,13 @@ export default class NotificationHubVNextPlugin {
       if (this.visualPreviewClosedExplicitly || sessionGeneration !== this.visualPreviewSessionGeneration) {
         throw Object.assign(new Error('Realtime Native preview session is closed'), { code: 'VISUAL_PREVIEW_SESSION_CLOSED' });
       }
-      const recreated = await this.openVisualPreviewCard({ draft });
+      const recreated = await this.openVisualPreviewCard({ draft, sampleAgent: sample });
       this.recordVisualDiagnostic({ code: 'VISUAL_PREVIEW_RECREATED', message: 'Realtime Native preview card recreated' }, 'PREVIEW_RECREATE', { cardId: recreated.cardId, previousCardId });
       return { ...recreated, updated: false, recreated: true };
     }
     const currentGeometry = sceneCardGeometryFromResult(health, this.visualPreviewCardId) ?? this.visualPreviewCardGeometry;
     const card = {
-      ...this.buildVisualPreviewCard(health, this.visualPreviewCardId, draft),
+      ...this.buildVisualPreviewCard(health, this.visualPreviewCardId, draft, sample),
       ...(currentGeometry ? { x: currentGeometry.x, y: currentGeometry.y } : {})
     };
     const sourceProfile = draft ?? this.visualSettingsStore.getSnapshot().settings.profile;
@@ -3802,7 +3892,7 @@ export default class NotificationHubVNextPlugin {
       if (this.visualPreviewClosedExplicitly || sessionGeneration !== this.visualPreviewSessionGeneration) {
         throw Object.assign(new Error('Realtime Native preview session is closed'), { code: 'VISUAL_PREVIEW_SESSION_CLOSED' });
       }
-      const recreated = await this.openVisualPreviewCard({ draft });
+      const recreated = await this.openVisualPreviewCard({ draft, sampleAgent: sample });
       return { ...recreated, updated: false, recreated: true };
     }
   }
@@ -3836,7 +3926,7 @@ export default class NotificationHubVNextPlugin {
       ...position,
       ...RUNTIME_TEST_CARD_SIZE
     };
-    const response = await host.client.request('scene.create', card, { retryable: false });
+    const response = await host.client.request('scene.create', card, sceneCreateOptions());
     return { card, response: response?.payload?.result ?? null };
   }
 
@@ -3902,7 +3992,7 @@ export default class NotificationHubVNextPlugin {
   }
 
   requireRuntimeTestHost() {
-    if (this.runtimeHost?.state !== 'running' || typeof this.runtimeHost.client?.request !== 'function') {
+    if (!runtimeHostReady(this.runtimeHost)) {
       const error = new Error('Native Runtime is not running');
       error.code = this.runtimeError?.code ?? 'RUNTIME_TEST_RUNTIME_UNAVAILABLE';
       throw error;
@@ -3939,7 +4029,7 @@ export default class NotificationHubVNextPlugin {
         else if (event !== 'stdout' && event !== 'stderr') this.recordRuntimeLog(event, forwarded, 'runtime');
         this.runtimeStatus = adapter.getRuntimeStatus?.() ?? this.runtimeStatus;
         this.runtimeError = this.runtimeStatus.lastError ?? this.runtimeError;
-        this.ctx.log?.debug?.(`[notification-hub-vnext] runtime:${event}`, event === 'stdout' || event === 'stderr' ? '[redacted]' : payload);
+        this.ctx.log?.debug?.(`[notification-hub-vnext] runtime:${event}`, summarizeRuntimeDebugPayload(event, payload));
       });
     }
   }
@@ -3986,7 +4076,6 @@ export * from './runtime/scene-state-recovery.js';
 export * from './runtime/recovery-plan.js';
 export * from './runtime/scene-state-store.js';
 export * from './runtime/scene-state-persistence.js';
-export * from './runtime/scene-state-config.js';
 export * from './runtime/host-adapter.js';
 export * from './runtime/host-config.js';
 export * from './api/notification-api.js';

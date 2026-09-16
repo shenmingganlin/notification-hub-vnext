@@ -35,6 +35,11 @@ export function sanitizeDiagnosticDetails(value) {
     .map(([key, entry]) => [key, sanitizeDiagnosticDetails(entry)]));
 }
 
+export function summarizeRuntimeDebugPayload(event, payload) {
+  if (event === 'stdout' || event === 'stderr') return '[redacted]';
+  return sanitizeDiagnosticDetails(payload);
+}
+
 export function normalizeRuntimeDiagnostic(diagnostic, source = 'runtime') {
   const code = typeof diagnostic?.code === 'string' && diagnostic.code.trim()
     ? diagnostic.code

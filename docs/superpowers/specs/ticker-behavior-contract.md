@@ -47,7 +47,7 @@
 
 | 字段 | 类型 | 默认 | 范围 | 说明 |
 |---|---|---|---|---|
-| `direction` | enum | `left` | 锁 `left` | 右→左；文字左移保持正立可读 |
+| `direction` | enum | `left` | `left` / `right` | `left`=从右往左（默认）；`right`=从左往右；整池统一；出生锁定，中途改设置不掉头；文字保持正立 |
 | `speedPxPerSec` | int | **400** | 150–800 | 见 §2.1 |
 | `band` | enum | `top` | `top` / `bottom` | 弹幕带在屏幕上半还是下半 |
 | `bandRatio` | float | **0.28** | 0.15–**1.00** | 弹幕带占工作区高度的比例（放开到可满屏） |

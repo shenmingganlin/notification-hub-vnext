@@ -1,13 +1,13 @@
 import { EventEmitter } from 'node:events';
-import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
-import path from 'node:path';
+import { readFile } from 'node:fs/promises';
+import { replaceFileAtomically } from '../persistence/atomic-file-replace.js';
 import { createSoundSettingsStoreSnapshot, SOUND_SETTINGS_STORE_VERSION } from './sound-settings-store.js';
 
 const fail = (code, message, details = {}) => Object.assign(new Error(message), { code, details });
 const encode = (snapshot) => { if (snapshot.version !== SOUND_SETTINGS_STORE_VERSION) throw fail('SOUND_SETTINGS_STORE_SNAPSHOT_VERSION_UNSUPPORTED', 'Unsupported sound settings snapshot version'); return `${JSON.stringify(snapshot)}\n`; };
 const decode = (text) => { let value; try { value = JSON.parse(text); } catch { throw fail('SOUND_SETTINGS_SNAPSHOT_PARSE_FAILED', 'Sound settings snapshot contains invalid JSON'); } return createSoundSettingsStoreSnapshot(value.settings, value.revision, { updatedAt: value.updatedAt }); };
 
-export async function saveSoundSettingsSnapshot(snapshot, filePath) { if (typeof filePath !== 'string' || !filePath.trim()) throw fail('SOUND_SETTINGS_PATH_INVALID', 'Sound settings path must be a non-empty string'); const temporaryPath = `${filePath}.tmp-${process.pid}-${Date.now()}`; try { await mkdir(path.dirname(filePath), { recursive: true }); await writeFile(temporaryPath, encode(snapshot), { encoding: 'utf8', flag: 'wx' }); await rename(temporaryPath, filePath); return filePath; } catch (cause) { await rm(temporaryPath, { force: true }).catch(() => {}); if (cause.code?.startsWith('SOUND_SETTINGS_')) throw cause; throw fail('SOUND_SETTINGS_PERSIST_FAILED', 'Failed to persist sound settings snapshot', { path: filePath, cause: cause.message }); } }
+export async function saveSoundSettingsSnapshot(snapshot, filePath) { if (typeof filePath !== 'string' || !filePath.trim()) throw fail('SOUND_SETTINGS_PATH_INVALID', 'Sound settings path must be a non-empty string'); try { return await replaceFileAtomically(filePath, encode(snapshot)); } catch (cause) { if (cause.code?.startsWith('SOUND_SETTINGS_')) throw cause; throw fail('SOUND_SETTINGS_PERSIST_FAILED', 'Failed to persist sound settings snapshot', { path: filePath, cause: cause.message }); } }
 export async function loadSoundSettingsSnapshot(filePath) { try { return decode(await readFile(filePath, 'utf8')); } catch (cause) { if (cause.code === 'ENOENT') return null; if (cause.code?.startsWith('SOUND_SETTINGS_')) throw fail('SOUND_SETTINGS_LOAD_FAILED', 'Failed to load sound settings snapshot', { path: filePath, cause: cause.code }); throw fail('SOUND_SETTINGS_LOAD_FAILED', 'Failed to load sound settings snapshot', { path: filePath, cause: cause.message }); } }
 
 export class SoundSettingsPersistenceCoordinator extends EventEmitter {

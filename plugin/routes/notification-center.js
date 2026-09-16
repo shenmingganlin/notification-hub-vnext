@@ -369,14 +369,13 @@ ${PAGE_NAVIGATION_STYLE}
 <main class="shell">
   ${renderPageNavigation({ active: 'notification-center', currentUrl })}
   <header class="topbar">
-    <div><h1>通知中心</h1><p class="lead">查看、筛选和管理通知历史。桌面卡片的显示时间只影响新通知，不会删除历史记录。</p></div>
+    <div><h1>通知中心</h1><p class="lead">查看、筛选和管理通知历史。</p></div>
     <div class="topbar-actions"><label class="notification-search"><span>搜索通知</span><input id="notification-search" type="search" placeholder="搜索标题、摘要、正文或通知 ID" autocomplete="off"></label><div id="status" class="status" aria-live="polite">读取中</div></div>
   </header>
   <section class="control-grid" aria-label="通知中心控制区">
-    <article class="control-panel filter-panel"><div class="filter-panel-header"><div><h2>筛选通知</h2><p class="control-panel-intro">按事件语义筛选；同组多选取并集，不同条件同时生效。</p></div><button id="clear-filters" class="filter-clear" type="button">清除筛选</button></div><div class="filter-group"><strong>快速视图</strong><div class="filter-control"><button id="all-filter" class="active" type="button">全部</button><button id="unread-filter" type="button">未读</button><button id="important-filter" type="button">重要</button></div></div><div class="filter-group"><strong>事件类型</strong><div class="filter-control"><button id="all-event-filter" class="active" type="button">全部事件</button><button id="assistant-reply-event-filter" type="button" data-event-filter="assistant_reply">助手回复</button><button id="tool-success-event-filter" type="button" data-event-filter="tool_success">工具成功</button><button id="tool-error-event-filter" type="button" data-event-filter="tool_error">工具失败</button><button id="timeout-event-filter" type="button" data-event-filter="timeout">超时</button><button id="model-service-error-event-filter" type="button" data-event-filter="model_service_error">模型服务异常</button><button id="error-event-filter" type="button" data-event-filter="error">其他错误</button></div></div><details class="advanced-filters"><summary>更多筛选</summary><div class="advanced-filter-grid"><label>来源<select id="producer-filter" aria-label="通知来源"><option value="">全部来源</option><option value="hana">Hana</option><option value="api">外部 API</option></select></label><label>通道<select id="channel-filter" aria-label="通知通道"><option value="">全部通道</option><option value="chat">当前对话</option></select></label></div></details><span id="summary" class="summary">正在读取通知…</span></article>
-    <article class="control-panel display-panel"><h2>显示设置</h2><p class="control-panel-intro">只影响页面和新桌面卡片，不影响历史数据。</p><div class="display-settings">
+    <article class="control-panel filter-panel"><div class="filter-panel-header"><div><h2>筛选通知</h2><p class="control-panel-intro">按事件语义筛选；同组多选取并集，不同条件同时生效。</p></div><button id="clear-filters" class="filter-clear" type="button">清除筛选</button></div><div class="filter-group"><strong>快速视图</strong><div class="filter-control"><button id="all-filter" class="active" type="button">全部</button><button id="unread-filter" type="button">未读</button><button id="important-filter" type="button">重要</button></div></div><div class="filter-group"><strong>事件类型</strong><div class="filter-control"><button id="all-event-filter" class="active" type="button">全部事件</button><button id="assistant-reply-event-filter" type="button" data-event-filter="assistant_reply">助手回复</button><button id="tool-success-event-filter" type="button" data-event-filter="tool_success">工具成功</button><button id="tool-error-event-filter" type="button" data-event-filter="tool_error">工具失败</button><button id="timeout-event-filter" type="button" data-event-filter="timeout">超时</button><button id="model-service-error-event-filter" type="button" data-event-filter="model_service_error">模型服务异常</button><button id="error-event-filter" type="button" data-event-filter="error">其他错误</button></div></div><details class="advanced-filters"><summary>更多筛选</summary><div class="advanced-filter-grid"><label>来源<select id="producer-filter" aria-label="通知来源"><option value="">全部来源</option><option value="hana">Hana</option><option value="api">外部 API</option></select></label><label>通道<select id="channel-filter" aria-label="通知通道"><option value="">全部通道</option><option value="chat">当前对话</option><option value="channel">频道</option><option value="dm">私信</option></select></label></div></details><span id="summary" class="summary">正在读取通知…</span></article>
+    <article class="control-panel display-panel"><h2>显示设置</h2><p class="control-panel-intro">只限制当前页面一次加载的条数，不删历史。</p><div class="display-settings">
       <div class="display-setting-row"><div class="display-setting-label"><strong>页面显示数量</strong><small>通知历史仍然完整保留</small></div><div class="display-limit-control"><select id="display-limit-select" aria-label="通知显示上限"><option value="30">30</option><option value="100">100</option><option value="500">500</option><option value="1000">1000</option><option value="unlimited">无限</option><option value="custom">自定义</option></select><input id="display-limit-custom" class="display-limit-custom" type="number" min="1" max="10000" step="1" value="100" aria-label="自定义通知显示上限" hidden></div></div>
-      <div class="display-setting-row"><div class="display-setting-label"><strong>桌面卡片持续时间</strong><small>0 秒表示立即自动消失，范围 0～3600 秒</small></div><div class="display-limit-control lifetime-control"><select id="lifetime-select" aria-label="桌面卡片持续时间"><option value="30">30 秒</option><option value="60">60 秒</option><option value="120">2 分钟</option><option value="300">5 分钟</option><option value="custom">自定义</option></select><input id="lifetime-custom" class="lifetime-custom" type="number" min="0" max="3600" step="1" value="120" aria-label="自定义卡片持续时间（秒）" hidden><span>秒</span></div></div>
       <div class="settings-actions"><button id="refresh" class="secondary" type="button">刷新列表</button><button id="save-display-settings" type="button">保存显示设置</button></div>
     </div></article>
   </section>
@@ -390,7 +389,6 @@ ${PAGE_NAVIGATION_STYLE}
   var busy = false;
   var refreshQueued = false;
   var displayLimit = 100;
-  var cardLifetimeSeconds = 120;
   var displayLimitMode = "preset";
   var filterState = { view: "all", events: [], producerKind: null, channelKind: null, search: "" };
   var searchParams = new URLSearchParams(window.location.search);
@@ -470,28 +468,17 @@ ${PAGE_NAVIGATION_STYLE}
     displayLimit = data && data.displayLimit !== undefined
       ? data.displayLimit
       : (data && data.limit !== undefined ? data.limit : (settings.limit !== undefined ? settings.limit : 100));
-    cardLifetimeSeconds = data && data.cardLifetimeSeconds !== undefined
-      ? data.cardLifetimeSeconds
-      : (settings.cardLifetimeSeconds !== undefined ? settings.cardLifetimeSeconds : 120);
     var select = $("display-limit-select");
     select.value = displayLimit === null ? "unlimited" : String(displayLimit);
     if (!["30", "100", "500", "1000", "unlimited"].includes(select.value)) select.value = "custom";
     $("display-limit-custom").value = displayLimit === null || displayLimit === undefined ? 100 : displayLimit;
     $("display-limit-custom").hidden = select.value !== "custom";
-    var lifetimeSelect = $("lifetime-select");
-    lifetimeSelect.value = ["30", "60", "120", "300"].includes(String(cardLifetimeSeconds)) ? String(cardLifetimeSeconds) : "custom";
-    $("lifetime-custom").value = cardLifetimeSeconds;
-    $("lifetime-custom").hidden = lifetimeSelect.value !== "custom";
   }
   function selectedDisplayLimit() {
     var value = $("display-limit-select").value;
     if (value === "unlimited") return "unlimited";
     if (value === "custom") return String($("display-limit-custom").value);
     return value;
-  }
-  function selectedLifetimeSeconds() {
-    var value = $("lifetime-select").value === "custom" ? $("lifetime-custom").value : $("lifetime-select").value;
-    return Number(value);
   }
   function statusLabel(value) { return { read: "已读", received: "未读", shown: "未读", unread: "未读" }[value] || value || "未知"; }
   function isToolNotification(record) { return ["tool_use", "tool_result", "tool_error"].indexOf(record && record.type) >= 0 || (record && record.source) === "hana.tool"; }
@@ -607,7 +594,7 @@ ${PAGE_NAVIGATION_STYLE}
     var viewLabel = { all: "全部通知", unread: "未读通知", important: "重要通知" }[filterState.view] || "通知";
     var activeLabels = filterState.events.map(function (eventName) { return { assistant_reply: "助手回复", tool_success: "工具成功", tool_error: "工具失败", timeout: "超时", model_service_error: "模型服务异常", error: "其他错误" }[eventName] || eventName; });
     if (filterState.producerKind) activeLabels.push(filterState.producerKind === "api" ? "外部 API" : "Hana");
-    if (filterState.channelKind) activeLabels.push(filterState.channelKind === "chat" ? "当前对话" : filterState.channelKind);
+    if (filterState.channelKind) activeLabels.push({ chat: "当前对话", channel: "频道", dm: "私信" }[filterState.channelKind] || filterState.channelKind);
     var filterLabel = activeLabels.length ? " · 条件：" + activeLabels.join("、") : " · " + viewLabel;
     $("summary").textContent = "当前显示 " + notifications.length + " 条" + filterLabel + (data.hasMore ? "，还有更多" : "，按最新时间排列");
     $("status").textContent = "已连接";
@@ -658,18 +645,12 @@ ${PAGE_NAVIGATION_STYLE}
   function loadDisplaySettings() { return request("notification-center-display-settings").then(function (data) { syncDisplayLimitControls(data); return data; }); }
   $("refresh").addEventListener("click", refresh);
   $("display-limit-select").addEventListener("change", function () { $("display-limit-custom").hidden = $("display-limit-select").value !== "custom"; });
-  $("lifetime-select").addEventListener("change", function () { $("lifetime-custom").hidden = $("lifetime-select").value !== "custom"; });
   function saveDisplaySettings() {
     if (busy) return;
     var selected = selectedDisplayLimit();
-    var lifetime = selectedLifetimeSeconds();
-    if (!Number.isInteger(lifetime) || lifetime < 0 || lifetime > 3600) {
-      $("feedback").textContent = "卡片持续时间必须是 0 到 3600 秒的整数。";
-      return;
-    }
     var body = selected === "unlimited"
-      ? { mode: "unlimited", limit: null, cardLifetimeSeconds: lifetime }
-      : { mode: ["30", "100", "500", "1000"].indexOf(selected) >= 0 ? "preset" : "custom", limit: Number(selected), cardLifetimeSeconds: lifetime };
+      ? { mode: "unlimited", limit: null }
+      : { mode: ["30", "100", "500", "1000"].indexOf(selected) >= 0 ? "preset" : "custom", limit: Number(selected) };
     busy = true;
     $("save-display-settings").disabled = true;
     $("feedback").textContent = "正在保存显示设置…";
@@ -678,9 +659,8 @@ ${PAGE_NAVIGATION_STYLE}
         return loadDisplaySettings().then(function (verified) {
           var verifiedSettings = verified && verified.settings || {};
           var verifiedLimit = verifiedSettings.mode === "unlimited" ? null : verifiedSettings.limit;
-          var verifiedLifetime = verifiedSettings.cardLifetimeSeconds;
-          if (verifiedLimit !== (selected === "unlimited" ? null : Number(selected)) || verifiedLifetime !== lifetime) throw new Error("服务端返回的显示设置与刚才保存的值不一致。");
-          $("feedback").textContent = "显示数量和卡片持续时间已确认保存。";
+          if (verifiedLimit !== (selected === "unlimited" ? null : Number(selected))) throw new Error("服务端返回的显示设置与刚才保存的值不一致。");
+          $("feedback").textContent = "显示数量已确认保存。";
           refreshQueued = true;
         });
       })

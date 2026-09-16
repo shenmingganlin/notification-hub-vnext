@@ -22,6 +22,23 @@ export default function registerVisualAssetRoute(app, ctx) {
   const pluginOf = () => getPlugin(ctx);
   app.post('/visual-assets/import', async (c) => { try { const plugin = pluginOf(); if (!plugin?.importVisualAssetFromPicker) return c.json({ ok:false, error:errorPayload({ code:'VISUAL_ASSET_API_UNAVAILABLE', message:'视觉素材库暂不可用。' }) }, 503); return c.json({ ok:true, ...(await plugin.importVisualAssetFromPicker(await c.req.json().catch(() => ({})))) }); } catch (error) { return c.json({ ok:false, error:errorPayload(error) }, 400); } });
   app.get('/visual-assets', (c) => { try { const plugin = pluginOf(); if (!plugin?.listVisualAssets) return c.json({ ok:false, error:errorPayload({ code:'VISUAL_ASSET_API_UNAVAILABLE', message:'视觉素材库暂不可用。' }) }, 503); return c.json({ ok:true, assets: plugin.listVisualAssets(c.req.query?.() ?? {}) }); } catch (error) { return c.json({ ok:false, error:errorPayload(error) }, 500); } });
+  app.get('/visual-assets/:assetId/file', async (c) => {
+    try {
+      const plugin = pluginOf();
+      if (!plugin?.readVisualAssetFile) return c.json({ ok: false, error: errorPayload({ code: 'VISUAL_ASSET_API_UNAVAILABLE', message: '视觉素材库暂不可用。' }) }, 503);
+      const file = await plugin.readVisualAssetFile(c.req.param('assetId'));
+      if (!file) return c.json({ ok: false, error: errorPayload({ code: 'VISUAL_ASSET_NOT_FOUND', message: '视觉素材不存在。' }) }, 404);
+      const mime = file.format === 'jpg' ? 'image/jpeg' : file.format === 'webp' ? 'image/webp' : 'image/png';
+      const accept = String(c.req.header?.('Accept') || c.req.header?.('accept') || '');
+      if (accept.includes('application/json')) {
+        const bytes = Buffer.isBuffer(file.buffer) ? file.buffer : Buffer.from(file.buffer);
+        return c.json({ ok: true, assetId: file.assetId, format: file.format, dataUrl: 'data:' + mime + ';base64,' + bytes.toString('base64') });
+      }
+      return c.body(file.buffer, 200, { 'Content-Type': mime, 'Cache-Control': 'no-store' });
+    } catch (error) {
+      return c.json({ ok: false, error: errorPayload(error) }, 500);
+    }
+  });
   app.get('/visual-assets/:assetId', (c) => { try { const plugin = pluginOf(); const asset = plugin?.getVisualAsset?.(c.req.param('assetId')); if (!asset) return c.json({ ok:false, error:errorPayload({ code:'VISUAL_ASSET_NOT_FOUND', message:'视觉素材不存在。' }) }, 404); return c.json({ ok:true, asset }); } catch (error) { return c.json({ ok:false, error:errorPayload(error) }, 500); } });
   app.delete('/visual-assets/:assetId', async (c) => { try { const plugin = pluginOf(); if (!plugin?.removeVisualAsset) return c.json({ ok:false, error:errorPayload({ code:'VISUAL_ASSET_API_UNAVAILABLE', message:'视觉素材库暂不可用。' }) }, 503); return c.json({ ok:true, removed:await plugin.removeVisualAsset(c.req.param('assetId')) }); } catch (error) { return c.json({ ok:false, error:errorPayload(error) }, error.code === 'VISUAL_ASSET_NOT_FOUND' ? 404 : error.code === 'VISUAL_ASSET_IN_USE' ? 409 : 400); } });
 

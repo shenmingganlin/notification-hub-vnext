@@ -9,15 +9,19 @@ function processError(code, message, details = {}) {
   return Object.assign(new Error(message), { code, details });
 }
 
-function sceneStateFingerprint(snapshot) {
+export function sceneStateFingerprint(snapshot) {
   if (snapshot === null || typeof snapshot !== 'object') return null;
   try {
-    const comparable = JSON.parse(JSON.stringify(snapshot));
-    delete comparable.updatedAt;
-    return JSON.stringify(comparable);
+    return JSON.stringify(snapshot, (key, value) => (key === 'updatedAt' ? undefined : value));
   } catch {
     return null;
   }
+}
+
+export function sceneStateSyncDelayMs({ intervalMs, cardCount } = {}) {
+  if (!Number.isFinite(intervalMs) || intervalMs <= 0) return intervalMs;
+  if (cardCount === 0 && intervalMs >= 500) return Math.max(intervalMs, 2000);
+  return intervalMs;
 }
 
 export class RuntimeProcessManager extends EventEmitter {
@@ -94,6 +98,8 @@ export class RuntimeProcessManager extends EventEmitter {
     this.sceneStateSyncInFlight = false;
     this.sceneStateSyncGeneration = 0;
     this.lastSceneStateFingerprint = null;
+    this.lastSceneStateSyncAt = 0;
+    this.lastObservedCardCount = 0;
     this.recoveryInProgress = false;
     this.recoveryAttempts = new Map();
     this.recoveryReplay = new RecoveryReplayCoordinator({
@@ -424,6 +430,12 @@ export class RuntimeProcessManager extends EventEmitter {
         || this.intentionalStop
         || this.state !== 'running'
         || this.sceneStateSyncInFlight) return;
+      const now = Date.now();
+      const delayMs = sceneStateSyncDelayMs({
+        intervalMs: this.sceneStateSyncIntervalMs,
+        cardCount: this.lastObservedCardCount
+      });
+      if (this.lastSceneStateSyncAt > 0 && now - this.lastSceneStateSyncAt < delayMs) return;
       this.sceneStateSyncInFlight = true;
       try {
         const response = await this.recoveryClient.request('health', {}, {
@@ -432,6 +444,7 @@ export class RuntimeProcessManager extends EventEmitter {
         });
         if (generation !== this.sceneStateSyncGeneration || this.intentionalStop) return;
         const snapshot = response?.payload?.result?.sceneStateSnapshot;
+        this.lastSceneStateSyncAt = Date.now();
         if (!snapshot) {
           this.emitDiagnostic(
             'RUNTIME_SCENE_STATE_SYNC_EMPTY',
@@ -440,6 +453,7 @@ export class RuntimeProcessManager extends EventEmitter {
           );
           return;
         }
+        this.lastObservedCardCount = Array.isArray(snapshot.cards) ? snapshot.cards.length : 0;
         const observed = this.observeSceneStateSnapshot(snapshot, { updateRecovery: true });
         if (observed) {
           this.emit('scene.changed', {

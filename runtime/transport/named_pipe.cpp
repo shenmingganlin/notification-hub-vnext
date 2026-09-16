@@ -18,6 +18,7 @@
 #include <limits>
 #include <iostream>
 #include <regex>
+#include <algorithm>
 #include <array>
 #include <sstream>
 #include <string>
@@ -56,6 +57,55 @@ bool parse_visual_assets_config_payload(std::string_view payload, std::size_t& a
     if (asset_count > 1000) { error_code = "VISUAL_ASSET_MANIFEST_TOO_LARGE"; error_message = "visual asset manifest contains too many assets"; return false; }
     { std::unordered_set<std::string> asset_ids, sha256s; asset_ids.reserve(asset_count); sha256s.reserve(asset_count);
         for (const auto& asset : assets) { std::string lower_sha(asset.sha256); std::transform(lower_sha.begin(), lower_sha.end(), lower_sha.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); }); if (!asset_ids.insert(asset.asset_id).second || !sha256s.insert(lower_sha).second) { error_code = "VISUAL_ASSET_MANIFEST_DUPLICATE"; error_message = "visual asset manifest contains duplicate assetId or sha256"; return false; } } }
+    return true;
+}
+
+bool parse_font_assets_config_payload(std::string_view payload, std::size_t& asset_count, std::vector<scene::VisualAssetRecord>& assets, std::string& root_dir, std::string& error_code, std::string& error_message) {
+    if (payload.find("\"version\":1") == std::string_view::npos) { error_code = "FONT_ASSET_MANIFEST_VERSION_INVALID"; error_message = "font asset manifest version must be 1"; return false; }
+    if (payload.find("..") != std::string_view::npos || payload.find("http") != std::string_view::npos) { error_code = "FONT_ASSET_MANIFEST_PATH_INVALID"; error_message = "font asset manifest contains an unsafe path"; return false; }
+    if (payload.find("\"assets\":[") == std::string_view::npos) { error_code = "FONT_ASSET_MANIFEST_INVALID"; error_message = "font asset manifest assets must be an array"; return false; }
+    const std::regex root_pattern(R"(\"rootDir\"\s*:\s*\"([A-Za-z]:\\\\[^\"]+)\")");
+    const std::string text(payload);
+    std::smatch root_match;
+    if (!std::regex_search(text, root_match, root_pattern) || root_match[1].str().find("..") != std::string::npos) { error_code = "FONT_ASSET_ROOT_INVALID"; error_message = "font asset manifest rootDir must be a safe absolute Windows path"; return false; }
+    root_dir = root_match[1].str();
+    asset_count = 0;
+    assets.clear();
+    const std::regex asset_pattern(R"(\"assetId\"\s*:\s*\"([A-Za-z0-9][A-Za-z0-9._-]{0,79})\"\s*,\s*\"format\"\s*:\s*\"(ttf|otf)\"\s*,\s*\"relativePath\"\s*:\s*\"([^\"]+)\"\s*,\s*\"sha256\"\s*:\s*\"([A-Fa-f0-9]{64})\"\s*,\s*\"enabled\"\s*:\s*(true|false))");
+    for (std::sregex_iterator it(text.begin(), text.end(), asset_pattern), end; it != end; ++it) {
+        scene::VisualAssetRecord asset{(*it)[1].str(), (*it)[2].str(), (*it)[3].str(), (*it)[4].str(), (*it)[5].str() == "true"};
+        const auto extension = "." + asset.format;
+        if (asset.relative_path.find("..") != std::string::npos || asset.relative_path.find('\\\\') != std::string::npos || asset.relative_path.find("http") != std::string::npos || asset.relative_path.rfind(asset.asset_id + extension) != asset.relative_path.size() - asset.asset_id.size() - extension.size()) { error_code = "FONT_ASSET_MANIFEST_PATH_INVALID"; error_message = "font asset manifest record path is invalid"; return false; }
+        assets.push_back(std::move(asset)); ++asset_count;
+    }
+    if (asset_count == 0 && payload.find("\"assets\":[]") == std::string_view::npos) { error_code = "FONT_ASSET_MANIFEST_INVALID"; error_message = "font asset manifest record is invalid"; return false; }
+    if (asset_count > 1000) { error_code = "FONT_ASSET_MANIFEST_TOO_LARGE"; error_message = "font asset manifest contains too many assets"; return false; }
+    { std::unordered_set<std::string> asset_ids, sha256s; asset_ids.reserve(asset_count); sha256s.reserve(asset_count);
+        for (const auto& asset : assets) { std::string lower_sha(asset.sha256); std::transform(lower_sha.begin(), lower_sha.end(), lower_sha.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); }); if (!asset_ids.insert(asset.asset_id).second || !sha256s.insert(lower_sha).second) { error_code = "FONT_ASSET_MANIFEST_DUPLICATE"; error_message = "font asset manifest contains duplicate assetId or sha256"; return false; } } }
+    return true;
+}
+
+bool parse_agent_avatars_config_payload(std::string_view payload, std::size_t& asset_count, std::vector<scene::VisualAssetRecord>& assets, std::string& root_dir, std::string& error_code, std::string& error_message) {
+    if (payload.find("\"version\":1") == std::string_view::npos) { error_code = "AGENT_AVATAR_MANIFEST_VERSION_INVALID"; error_message = "agent avatar manifest version must be 1"; return false; }
+    if (payload.find("..") != std::string_view::npos || payload.find("http") != std::string_view::npos) { error_code = "AGENT_AVATAR_MANIFEST_PATH_INVALID"; error_message = "agent avatar manifest contains an unsafe path"; return false; }
+    if (payload.find("\"items\":[") == std::string_view::npos) { error_code = "AGENT_AVATAR_MANIFEST_INVALID"; error_message = "agent avatar manifest items must be an array"; return false; }
+    const std::regex root_pattern(R"(\"rootDir\"\s*:\s*\"([A-Za-z]:\\\\[^\"]+)\")");
+    const std::string text(payload);
+    std::smatch root_match;
+    if (!std::regex_search(text, root_match, root_pattern) || root_match[1].str().find("..") != std::string::npos) { error_code = "AGENT_AVATAR_ROOT_INVALID"; error_message = "agent avatar manifest rootDir must be a safe absolute Windows path"; return false; }
+    root_dir = root_match[1].str();
+    asset_count = 0;
+    assets.clear();
+    const std::regex asset_pattern(R"(\"id\"\s*:\s*\"([A-Za-z0-9][A-Za-z0-9._-]{0,79})\"\s*,\s*\"format\"\s*:\s*\"(png|webp|jpg|jpeg)\"\s*,\s*\"relativePath\"\s*:\s*\"([^\"]+)\"\s*,\s*\"sha256\"\s*:\s*\"([A-Fa-f0-9]{64})\"\s*,\s*\"enabled\"\s*:\s*(true|false))");
+    for (std::sregex_iterator it(text.begin(), text.end(), asset_pattern), end; it != end; ++it) {
+        scene::VisualAssetRecord asset{(*it)[1].str(), (*it)[2].str(), (*it)[3].str(), (*it)[4].str(), (*it)[5].str() == "true"};
+        if (asset.relative_path.find("..") != std::string::npos || asset.relative_path.find('\\\\') != std::string::npos || asset.relative_path.find("http") != std::string::npos || asset.relative_path.find('/') != std::string::npos) { error_code = "AGENT_AVATAR_MANIFEST_PATH_INVALID"; error_message = "agent avatar manifest record path is invalid"; return false; }
+        assets.push_back(std::move(asset)); ++asset_count;
+    }
+    if (asset_count == 0 && payload.find("\"items\":[]") == std::string_view::npos) { error_code = "AGENT_AVATAR_MANIFEST_INVALID"; error_message = "agent avatar manifest record is invalid"; return false; }
+    if (asset_count > 1000) { error_code = "AGENT_AVATAR_MANIFEST_TOO_LARGE"; error_message = "agent avatar manifest contains too many assets"; return false; }
+    { std::unordered_set<std::string> asset_ids, sha256s; asset_ids.reserve(asset_count); sha256s.reserve(asset_count);
+        for (const auto& asset : assets) { std::string lower_sha(asset.sha256); std::transform(lower_sha.begin(), lower_sha.end(), lower_sha.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); }); if (!asset_ids.insert(asset.asset_id).second || !sha256s.insert(lower_sha).second) { error_code = "AGENT_AVATAR_MANIFEST_DUPLICATE"; error_message = "agent avatar manifest contains duplicate id or sha256"; return false; } } }
     return true;
 }
 
@@ -266,11 +316,11 @@ bool parse_visual_style(std::string_view payload, size_t& position, scene::Visua
         else if (key == "behavior" && !seen_behavior) {
             if (!parse_object([&](const std::string& nested) { if (nested == "layout") return parse_json_string_token(payload, position, visual.layout); if (nested == "boundary") return parse_json_string_token(payload, position, visual.boundary); return false; })) return false; seen_behavior = true;
         } else if (key == "appearance" && !seen_appearance) {
-            if (!parse_object([&](const std::string& nested) { double number{}; if (nested == "size") return parse_json_string_token(payload, position, visual.size); if (nested == "aspectRatio") return parse_json_string_token(payload, position, visual.aspect_ratio); if (nested == "backgroundColor") return parse_json_string_token(payload, position, visual.background_color); if (nested == "backgroundAssetId") return parse_json_string_token(payload, position, visual.background_asset_id); if (nested == "backgroundFit") return parse_json_string_token(payload, position, visual.background_fit); if (nested == "backgroundPadding") { if (!parse_number(number)) return false; visual.background_padding = static_cast<float>(number); return true; } if (nested == "borderRadius") { if (!parse_number(number)) return false; visual.border_radius = static_cast<int>(number); return true; } if (nested == "opacity") { if (!parse_number(number)) return false; visual.opacity = static_cast<float>(number); return true; } return false; })) return false; seen_appearance = true;
+            if (!parse_object([&](const std::string& nested) { double number{}; if (nested == "size") return parse_json_string_token(payload, position, visual.size); if (nested == "aspectRatio") return parse_json_string_token(payload, position, visual.aspect_ratio); if (nested == "backgroundColor") return parse_json_string_token(payload, position, visual.background_color); if (nested == "backgroundAssetId") return parse_json_string_token(payload, position, visual.background_asset_id); if (nested == "backgroundFit") return parse_json_string_token(payload, position, visual.background_fit); if (nested == "backgroundPadding") { if (!parse_number(number)) return false; visual.background_padding = static_cast<float>(number); return true; } if (nested == "borderRadius") { if (!parse_number(number)) return false; visual.border_radius = static_cast<int>(number); return true; } if (nested == "opacity") { if (!parse_number(number)) return false; visual.opacity = static_cast<float>(number); return true; } if (nested == "borderWidth") { if (!parse_number(number)) return false; visual.border_width = static_cast<int>(number); return true; } if (nested == "borderColor") return parse_json_string_token(payload, position, visual.border_color); if (nested == "paintOverflow") { if (!parse_number(number)) return false; visual.paint_overflow = static_cast<int>(number); return true; } if (nested == "backgroundScale") { if (!parse_number(number)) return false; visual.background_scale = static_cast<float>(number); visual.background_transform_specified = true; return true; } if (nested == "backgroundX") { if (!parse_number(number)) return false; visual.background_x = static_cast<float>(number); visual.background_transform_specified = true; return true; } if (nested == "backgroundY") { if (!parse_number(number)) return false; visual.background_y = static_cast<float>(number); visual.background_transform_specified = true; return true; } return false; })) return false; seen_appearance = true;
         } else if (key == "interaction" && !seen_interaction) {
-            if (!parse_object([&](const std::string& nested) { double number{}; if (nested == "dismissMode") return parse_json_string_token(payload, position, visual.dismiss_mode); if (nested == "closeButtonPosition") return parse_json_string_token(payload, position, visual.close_button_position); if (nested == "timeoutMs") { if (!parse_number(number)) return false; visual.dismiss_timeout_ms = static_cast<int>(number); return true; } return false; })) return false; seen_interaction = true;
+            if (!parse_object([&](const std::string& nested) { double number{}; if (nested == "dismissMode") return parse_json_string_token(payload, position, visual.dismiss_mode); if (nested == "closeButtonPosition") return parse_json_string_token(payload, position, visual.close_button_position); if (nested == "timeoutMs") { if (!parse_number(number)) return false; visual.dismiss_timeout_ms = static_cast<int>(number); return true; } if (nested == "hoverHighlight") return parse_json_bool_token(payload, position, visual.hover_highlight); if (nested == "autoDismiss") return parse_json_bool_token(payload, position, visual.auto_dismiss); return false; })) return false; seen_interaction = true;
         } else if (key == "ticker" && !seen_ticker) {
-            if (!parse_object([&](const std::string& nested) { double number{}; if (nested == "speedPxPerSec") { if (!parse_number(number)) return false; visual.ticker_speed_px_per_second = static_cast<int>(number); return true; } if (nested == "band") return parse_json_string_token(payload, position, visual.ticker_band); if (nested == "bandRatio") { if (!parse_number(number)) return false; visual.ticker_band_ratio = number; return true; } if (nested == "trackCount") { if (!parse_number(number)) return false; visual.ticker_track_count = static_cast<int>(number); return true; } if (nested == "trackGapPx") { if (!parse_number(number)) return false; visual.ticker_track_gap_px = static_cast<int>(number); return true; } if (nested == "minGapPx") { if (!parse_number(number)) return false; visual.ticker_min_gap_px = static_cast<int>(number); return true; } if (nested == "clickThrough") return parse_json_bool_token(payload, position, visual.ticker_click_through); if (nested == "hoverPause") return parse_json_bool_token(payload, position, visual.ticker_hover_pause); if (nested == "overflow") return parse_json_string_token(payload, position, visual.ticker_overflow); return false; })) return false;
+            if (!parse_object([&](const std::string& nested) { double number{}; if (nested == "speedPxPerSec") { if (!parse_number(number)) return false; visual.ticker_speed_px_per_second = static_cast<int>(number); return true; } if (nested == "band") return parse_json_string_token(payload, position, visual.ticker_band); if (nested == "bandRatio") { if (!parse_number(number)) return false; visual.ticker_band_ratio = number; return true; } if (nested == "trackCount") { if (!parse_number(number)) return false; visual.ticker_track_count = static_cast<int>(number); return true; } if (nested == "trackGapPx") { if (!parse_number(number)) return false; visual.ticker_track_gap_px = static_cast<int>(number); return true; } if (nested == "minGapPx") { if (!parse_number(number)) return false; visual.ticker_min_gap_px = static_cast<int>(number); return true; } if (nested == "clickThrough") return parse_json_bool_token(payload, position, visual.ticker_click_through); if (nested == "hoverPause") return parse_json_bool_token(payload, position, visual.ticker_hover_pause); if (nested == "overflow") return parse_json_string_token(payload, position, visual.ticker_overflow); if (nested == "direction") return parse_json_string_token(payload, position, visual.ticker_direction); return false; })) return false;
             visual.ticker_specified = true; seen_ticker = true;
         } else return false;
         skip(); if (position < payload.size() && payload[position] == ',') { ++position; continue; } if (position < payload.size() && payload[position] == '}') { ++position; break; } return false;
@@ -365,6 +415,12 @@ bool parse_scene_card_payload(std::string_view payload, scene::SceneCardState& c
         ++position;
         return true;
     };
+    const auto parse_number = [&](double& value) {
+        skip(); const auto start = position;
+        while (position < payload.size() && (std::isdigit(static_cast<unsigned char>(payload[position])) || payload[position] == '-' || payload[position] == '+' || payload[position] == '.')) ++position;
+        if (start == position) return false;
+        try { const std::string token(payload.substr(start, position - start)); std::size_t used = 0; value = std::stod(token, &used); return used == token.size(); } catch (...) { return false; }
+    };
     if (!consume('{')) return false;
     auto parse_presentation = [&]() {
         if (!consume('{')) return false;
@@ -417,12 +473,14 @@ bool parse_scene_card_payload(std::string_view payload, scene::SceneCardState& c
     bool seen_id = false;
     bool seen_title = false;
     bool seen_body = false;
+    bool seen_assistant_name = false;
     bool seen_x = false;
     bool seen_y = false;
     bool seen_width = false;
     bool seen_height = false;
     bool seen_presentation = false;
     bool seen_behavior = false;
+    bool seen_parts = false;
     while (true) {
         skip();
         if (position < payload.size() && payload[position] == '}') {
@@ -432,12 +490,13 @@ bool parse_scene_card_payload(std::string_view payload, scene::SceneCardState& c
         std::string key;
         if (!parse_json_string_token(payload, position, key) || !consume(':')) return false;
         skip();
-        if (key == "id" || key == "title" || key == "body") {
+        if (key == "id" || key == "title" || key == "body" || key == "assistantName") {
             std::string value;
             if (!parse_json_string_token(payload, position, value)) return false;
             if (key == "id" && !seen_id) { card.id = std::move(value); seen_id = true; }
             else if (key == "title" && !seen_title) { card.title = std::move(value); seen_title = true; }
             else if (key == "body" && !seen_body) { card.body = std::move(value); seen_body = true; }
+            else if (key == "assistantName" && !seen_assistant_name) { card.assistant_name = std::move(value); seen_assistant_name = true; }
             else return false;
         } else if (key == "visual") {
             if (card.visual.specified || !parse_visual_style(payload, position, card.visual)) return false;
@@ -447,6 +506,231 @@ bool parse_scene_card_payload(std::string_view payload, scene::SceneCardState& c
         } else if (key == "behavior") {
             if (seen_behavior || !parse_behavior()) return false;
             seen_behavior = true;
+        } else if (key == "parts") {
+            if (seen_parts) return false;
+            seen_parts = true;
+            if (!consume('[')) return false;
+            while (true) {
+                skip();
+                if (position < payload.size() && payload[position] == ']') { ++position; break; }
+                if (!consume('{')) return false;
+                scene::CardPart part{};
+                bool seen_part_id = false;
+                bool seen_kind = false;
+                bool seen_binding = false;
+                bool seen_px = false;
+                bool seen_py = false;
+                bool seen_pw = false;
+                bool seen_ph = false;
+                bool seen_radius = false;
+                bool seen_fill = false;
+                bool seen_background = false;
+                bool seen_opacity = false;
+                bool seen_stroke = false;
+                bool seen_stroke_width = false;
+                bool seen_bg_id = false;
+                bool seen_bg_fit = false;
+                bool seen_bg_scale = false;
+                bool seen_bg_x = false;
+                bool seen_bg_y = false;
+                bool seen_font_size = false;
+                bool seen_font_family = false;
+                bool seen_font_asset_id = false;
+                bool seen_text_paint = false;
+                bool seen_font_bold = false;
+                bool seen_font_italic = false;
+                bool seen_font_underline = false;
+                bool seen_font_strike = false;
+                bool seen_fit_width = false;
+                bool seen_fit_compensate = false;
+                bool seen_text_stroke = false;
+                bool seen_text_stroke_color = false;
+                bool seen_text_stroke_width = false;
+                bool seen_text_stroke_paint = false;
+                bool seen_stroke_paint = false;
+                bool seen_close_icon = false;
+                bool seen_close_icon_color = false;
+                while (true) {
+                    skip();
+                    if (position < payload.size() && payload[position] == '}') { ++position; break; }
+                    std::string part_key;
+                    if (!parse_json_string_token(payload, position, part_key) || !consume(':')) return false;
+                    skip();
+                    if (part_key == "id" || part_key == "kind" || part_key == "binding") {
+                        std::string value;
+                        if (!parse_json_string_token(payload, position, value)) return false;
+                        if (part_key == "id" && !seen_part_id) { part.id = std::move(value); seen_part_id = true; }
+                        else if (part_key == "kind" && !seen_kind) { part.kind = std::move(value); seen_kind = true; }
+                        else if (part_key == "binding" && !seen_binding) { part.binding = std::move(value); seen_binding = true; }
+                        else return false;
+                    } else if (part_key == "fill" || part_key == "stroke" || part_key == "background") {
+                        std::string value;
+                        if (!parse_json_string_token(payload, position, value)) return false;
+                        if (!value.empty() && !scene::valid_hex_color(value)) return false;
+                        if (part_key == "fill" && !seen_fill) { part.fill = std::move(value); seen_fill = true; }
+                        else if (part_key == "stroke" && !seen_stroke) { part.stroke = std::move(value); seen_stroke = true; }
+                        else if (part_key == "background" && !seen_background) { part.background = std::move(value); seen_background = true; }
+                        else return false;
+                    } else if (part_key == "backgroundAssetId" || part_key == "backgroundFit") {
+                        std::string value;
+                        if (!parse_json_string_token(payload, position, value)) return false;
+                        if (part_key == "backgroundAssetId" && !seen_bg_id) {
+                            if (!value.empty()) {
+                                if (value.size() > 80 || !std::isalnum(static_cast<unsigned char>(value[0]))) return false;
+                                for (const auto c : value) if (!(std::isalnum(static_cast<unsigned char>(c)) || c == '.' || c == '_' || c == '-')) return false;
+                            }
+                            part.background_asset_id = std::move(value);
+                            seen_bg_id = true;
+                        } else if (part_key == "backgroundFit" && !seen_bg_fit) {
+                            if (!value.empty() && value != "fill" && value != "contain" && value != "cover") return false;
+                            part.background_fit = std::move(value);
+                            seen_bg_fit = true;
+                        } else return false;
+                    } else if (part_key == "backgroundScale" || part_key == "backgroundX" || part_key == "backgroundY" || part_key == "opacity") {
+                        double number{};
+                        if (!parse_number(number)) return false;
+                        const auto f = static_cast<float>(number);
+                        if (part_key == "opacity" && !seen_opacity) {
+                            if (f < 0.0f || f > 1.0f) return false;
+                            part.opacity = f;
+                            seen_opacity = true;
+                        } else if (part_key == "backgroundScale" && !seen_bg_scale) {
+                            if (f < 0.2f || f > 8.0f) return false;
+                            part.background_scale = f;
+                            part.background_transform_specified = true;
+                            seen_bg_scale = true;
+                        } else if (part_key == "backgroundX" && !seen_bg_x) {
+                            if (f < 0.0f || f > 1.0f) return false;
+                            part.background_x = f;
+                            part.background_transform_specified = true;
+                            seen_bg_x = true;
+                        } else if (part_key == "backgroundY" && !seen_bg_y) {
+                            if (f < 0.0f || f > 1.0f) return false;
+                            part.background_y = f;
+                            part.background_transform_specified = true;
+                            seen_bg_y = true;
+                        } else return false;
+                    } else if (part_key == "fontAssetId") {
+                        std::string value;
+                        if (!parse_json_string_token(payload, position, value) || seen_font_asset_id) return false;
+                        if (!value.empty()) {
+                            if (value.size() > 80 || !std::isalnum(static_cast<unsigned char>(value[0]))) return false;
+                            for (const auto c : value) if (!(std::isalnum(static_cast<unsigned char>(c)) || c == '.' || c == '_' || c == '-')) return false;
+                        }
+                        part.font_asset_id = std::move(value);
+                        seen_font_asset_id = true;
+                    } else if (part_key == "fontFamily" || part_key == "textPaint") {
+                        std::string value;
+                        if (!parse_json_string_token(payload, position, value)) return false;
+                        if (part_key == "fontFamily" && !seen_font_family) {
+                            if (!value.empty() && value != "yahei" && value != "heiti" && value != "songti" && value != "segoe") return false;
+                            part.font_family = std::move(value);
+                            seen_font_family = true;
+                        } else if (part_key == "textPaint" && !seen_text_paint) {
+                            if (!value.empty() && value != "solid" && value != "rainbow") return false;
+                            part.text_paint = value.empty() ? "solid" : std::move(value);
+                            seen_text_paint = true;
+                        } else return false;
+                    } else if (part_key == "fitWidth" || part_key == "fitCompensate") {
+                        bool value{};
+                        if (!parse_json_bool_token(payload, position, value)) return false;
+                        if (part_key == "fitWidth") {
+                            if (seen_fit_width) return false;
+                            part.fit_width = value;
+                            seen_fit_width = true;
+                        } else {
+                            if (seen_fit_compensate) return false;
+                            part.fit_compensate = value;
+                            seen_fit_compensate = true;
+                        }
+                    } else if (part_key == "textStroke") {
+                        bool value{};
+                        if (!parse_json_bool_token(payload, position, value) || seen_text_stroke) return false;
+                        part.text_stroke = value;
+                        seen_text_stroke = true;
+                    } else if (part_key == "textStrokeColor") {
+                        std::string value;
+                        if (!parse_json_string_token(payload, position, value) || seen_text_stroke_color) return false;
+                        if (!value.empty() && !scene::valid_hex_color(value)) return false;
+                        part.text_stroke_color = std::move(value);
+                        seen_text_stroke_color = true;
+                    } else if (part_key == "textStrokePaint" || part_key == "strokePaint" || part_key == "closeIcon") {
+                        std::string value;
+                        if (!parse_json_string_token(payload, position, value)) return false;
+                        if (part_key == "textStrokePaint" && !seen_text_stroke_paint) {
+                            if (!value.empty() && value != "solid" && value != "rainbow") return false;
+                            part.text_stroke_paint = value.empty() ? "solid" : std::move(value);
+                            seen_text_stroke_paint = true;
+                        } else if (part_key == "strokePaint" && !seen_stroke_paint) {
+                            if (!value.empty() && value != "solid" && value != "gradient") return false;
+                            part.stroke_paint = value.empty() ? "solid" : std::move(value);
+                            seen_stroke_paint = true;
+                        } else if (part_key == "closeIcon" && !seen_close_icon) {
+                            if (!value.empty() && value != "x" && value != "none" && value != "circle" && value != "minus" && value != "star" && value != "plus" && value != "disc") return false;
+                            part.close_icon = std::move(value);
+                            seen_close_icon = true;
+                        } else return false;
+                    } else if (part_key == "closeIconColor") {
+                        std::string value;
+                        if (!parse_json_string_token(payload, position, value) || seen_close_icon_color) return false;
+                        if (!value.empty() && !scene::valid_hex_color(value)) return false;
+                        part.close_icon_color = std::move(value);
+                        seen_close_icon_color = true;
+                    } else if (part_key == "fontBold" || part_key == "fontItalic" || part_key == "fontUnderline" || part_key == "fontStrike") {
+                        bool value{};
+                        if (!parse_json_bool_token(payload, position, value)) return false;
+                        if (part_key == "fontBold" && !seen_font_bold) { part.font_bold = value; seen_font_bold = true; }
+                        else if (part_key == "fontItalic" && !seen_font_italic) { part.font_italic = value; seen_font_italic = true; }
+                        else if (part_key == "fontUnderline" && !seen_font_underline) { part.font_underline = value; seen_font_underline = true; }
+                        else if (part_key == "fontStrike" && !seen_font_strike) { part.font_strike = value; seen_font_strike = true; }
+                        else return false;
+                    } else if (part_key == "x" || part_key == "y" || part_key == "w" || part_key == "h" || part_key == "strokeWidth" || part_key == "fontSize" || part_key == "radius" || part_key == "textStrokeWidth") {
+                        const auto start = position;
+                        if (position < payload.size() && payload[position] == '-') ++position;
+                        const auto digits = position;
+                        while (position < payload.size() && std::isdigit(static_cast<unsigned char>(payload[position]))) ++position;
+                        if (digits == position) return false;
+                        int value = 0;
+                        const auto parsed = std::from_chars(payload.data() + start, payload.data() + position, value);
+                        if (parsed.ec != std::errc{} || parsed.ptr != payload.data() + position) return false;
+                        if (part_key == "x" && !seen_px) { part.x = value; seen_px = true; }
+                        else if (part_key == "y" && !seen_py) { part.y = value; seen_py = true; }
+                        else if (part_key == "w" && !seen_pw) { part.w = value; seen_pw = true; }
+                        else if (part_key == "h" && !seen_ph) { part.h = value; seen_ph = true; }
+                        else if (part_key == "strokeWidth" && !seen_stroke_width) {
+                            if (value < 0 || value > 32) return false;
+                            part.stroke_width = value;
+                            seen_stroke_width = true;
+                        } else if (part_key == "fontSize" && !seen_font_size) {
+                            if (value < 8 || value > 72) return false;
+                            part.font_size = value;
+                            seen_font_size = true;
+                        } else if (part_key == "radius" && !seen_radius) {
+                            if (value < 0 || value > 240) return false;
+                            part.radius = value;
+                            part.radius_specified = true;
+                            seen_radius = true;
+                        } else if (part_key == "textStrokeWidth" && !seen_text_stroke_width) {
+                            if (value < 1 || value > 16) return false;
+                            part.text_stroke_width = value;
+                            seen_text_stroke_width = true;
+                        }
+                        else return false;
+                    } else return false;
+                    skip();
+                    if (position < payload.size() && payload[position] == ',') { ++position; continue; }
+                    if (position < payload.size() && payload[position] == '}') { ++position; break; }
+                    return false;
+                }
+                if (!seen_part_id || !seen_kind || !seen_px || !seen_py || !seen_pw || !seen_ph) return false;
+                if (part.id.empty() || part.w <= 0 || part.h <= 0) return false;
+                if (!seen_font_bold && (part.id == "title" || part.binding == "title")) part.font_bold = true;
+                card.parts.push_back(std::move(part));
+                skip();
+                if (position < payload.size() && payload[position] == ',') { ++position; continue; }
+                if (position < payload.size() && payload[position] == ']') { ++position; break; }
+                return false;
+            }
         } else if (key == "x" || key == "y" || key == "width" || key == "height") {
             const auto start = position;
             if (position < payload.size() && payload[position] == '-') ++position;
@@ -508,9 +792,15 @@ bool parse_scene_mode_payload(std::string_view payload, scene::StackLayoutOption
     bool seen_work_area_width = false;
     bool seen_work_area_height = false;
     bool seen_dpi_scale = false;
+    bool seen_margin_left = false;
+    bool seen_margin_right = false;
+    bool seen_margin_top = false;
+    bool seen_margin_bottom = false;
+    bool seen_wrap = false;
     std::string layout;
     std::string direction;
     std::string anchor;
+    std::string wrap;
     while (true) {
         skip();
         if (position < payload.size() && payload[position] == '}') {
@@ -519,24 +809,32 @@ bool parse_scene_mode_payload(std::string_view payload, scene::StackLayoutOption
         }
         std::string key;
         if (!parse_json_string_token(payload, position, key) || !consume(':')) return false;
-        if (key == "layout" || key == "direction" || key == "anchor") {
+        if (key == "layout" || key == "direction" || key == "anchor" || key == "wrap") {
             std::string value;
             if (!parse_json_string_token(payload, position, value)) return false;
             if (key == "layout" && !seen_layout) { layout = std::move(value); seen_layout = true; }
             else if (key == "direction" && !seen_direction) { direction = std::move(value); seen_direction = true; }
             else if (key == "anchor" && !seen_anchor) { anchor = std::move(value); seen_anchor = true; }
+            else if (key == "wrap" && !seen_wrap) { wrap = std::move(value); seen_wrap = true; }
             else return false;
-        } else if (key == "spacing" || key == "workAreaWidth" || key == "workAreaHeight" || key == "dpiScale") {
+        } else if (key == "spacing" || key == "workAreaWidth" || key == "workAreaHeight" || key == "dpiScale"
+            || key == "marginLeft" || key == "marginRight" || key == "marginTop" || key == "marginBottom") {
             double numeric = 0.0;
             if (!parse_number(numeric)) return false;
             if (key != "dpiScale"
                 && (std::floor(numeric) != numeric
                     || numeric < static_cast<double>((std::numeric_limits<int>::min)())
                     || numeric > static_cast<double>((std::numeric_limits<int>::max)()))) return false;
+            if ((key == "marginLeft" || key == "marginRight" || key == "marginTop" || key == "marginBottom")
+                && numeric < 0.0) return false;
             if (key == "spacing" && !seen_spacing) { options.spacing = static_cast<int>(numeric); seen_spacing = true; }
             else if (key == "workAreaWidth" && !seen_work_area_width) { options.work_area_width = static_cast<int>(numeric); seen_work_area_width = true; }
             else if (key == "workAreaHeight" && !seen_work_area_height) { options.work_area_height = static_cast<int>(numeric); seen_work_area_height = true; }
             else if (key == "dpiScale" && !seen_dpi_scale) { options.dpi_scale = static_cast<float>(numeric); seen_dpi_scale = true; }
+            else if (key == "marginLeft" && !seen_margin_left) { options.margin_left = static_cast<int>(numeric); seen_margin_left = true; }
+            else if (key == "marginRight" && !seen_margin_right) { options.margin_right = static_cast<int>(numeric); seen_margin_right = true; }
+            else if (key == "marginTop" && !seen_margin_top) { options.margin_top = static_cast<int>(numeric); seen_margin_top = true; }
+            else if (key == "marginBottom" && !seen_margin_bottom) { options.margin_bottom = static_cast<int>(numeric); seen_margin_bottom = true; }
             else return false;
         } else return false;
         skip();
@@ -562,6 +860,10 @@ bool parse_scene_mode_payload(std::string_view payload, scene::StackLayoutOption
     else if (anchor == "top-right") options.anchor = scene::StackAnchor::TopRight;
     else if (anchor == "bottom-left") options.anchor = scene::StackAnchor::BottomLeft;
     else if (anchor == "bottom-right") options.anchor = scene::StackAnchor::BottomRight;
+    else return false;
+    if (!seen_wrap || wrap == "parallel") options.wrap = scene::StackWrap::Parallel;
+    else if (wrap == "off") options.wrap = scene::StackWrap::Off;
+    else if (wrap == "snake") options.wrap = scene::StackWrap::Snake;
     else return false;
     return true;
 }
@@ -738,13 +1040,35 @@ int run_named_pipe_server(std::string_view pipe_name, bool drop_after_health, bo
                 const bool is_layout_command = parsed.message.type == "scene.set-mode";
                 const bool is_config_command = parsed.message.type == "config.update";
                 const bool is_visual_assets_command = parsed.message.type == "visual-assets.configure";
+                const bool is_font_assets_command = parsed.message.type == "font-assets.configure";
+                const bool is_agent_avatars_command = parsed.message.type == "agent-avatars.configure";
                 std::size_t requested_visual_asset_count = 0;
                 std::vector<scene::VisualAssetRecord> requested_visual_assets;
                 std::string requested_visual_asset_root;
                 std::string visual_manifest_error_code;
                 std::string visual_manifest_error_message;
+                std::size_t requested_font_asset_count = 0;
+                std::vector<scene::VisualAssetRecord> requested_font_assets;
+                std::string requested_font_asset_root;
+                std::string font_manifest_error_code;
+                std::string font_manifest_error_message;
+                std::size_t requested_agent_avatar_count = 0;
+                std::vector<scene::VisualAssetRecord> requested_agent_avatars;
+                std::string requested_agent_avatar_root;
+                std::string agent_avatar_manifest_error_code;
+                std::string agent_avatar_manifest_error_message;
                 if (is_visual_assets_command && !parse_visual_assets_config_payload(parsed.message.payload_json, requested_visual_asset_count, requested_visual_assets, requested_visual_asset_root, visual_manifest_error_code, visual_manifest_error_message)) {
                     protocol::ProtocolError error{visual_manifest_error_code, visual_manifest_error_message, parsed.message.request_id, parsed.message.trace_id, parsed.message.type};
+                    if (!send_payload(pipe, protocol::serialize_error(error))) { close_pipe(pipe); return 11; }
+                    continue;
+                }
+                if (is_font_assets_command && !parse_font_assets_config_payload(parsed.message.payload_json, requested_font_asset_count, requested_font_assets, requested_font_asset_root, font_manifest_error_code, font_manifest_error_message)) {
+                    protocol::ProtocolError error{font_manifest_error_code, font_manifest_error_message, parsed.message.request_id, parsed.message.trace_id, parsed.message.type};
+                    if (!send_payload(pipe, protocol::serialize_error(error))) { close_pipe(pipe); return 11; }
+                    continue;
+                }
+                if (is_agent_avatars_command && !parse_agent_avatars_config_payload(parsed.message.payload_json, requested_agent_avatar_count, requested_agent_avatars, requested_agent_avatar_root, agent_avatar_manifest_error_code, agent_avatar_manifest_error_message)) {
+                    protocol::ProtocolError error{agent_avatar_manifest_error_code, agent_avatar_manifest_error_message, parsed.message.request_id, parsed.message.trace_id, parsed.message.type};
                     if (!send_payload(pipe, protocol::serialize_error(error))) { close_pipe(pipe); return 11; }
                     continue;
                 }
@@ -806,6 +1130,18 @@ int run_named_pipe_server(std::string_view pipe_name, bool drop_after_health, bo
                     for (auto& asset : requested_visual_assets) if (asset.enabled && !verify_asset_file(requested_visual_asset_root, asset)) asset.enabled = false;
 #endif
                     scene_controller.configure_visual_assets(requested_visual_assets, requested_visual_asset_root);
+                }
+                if (!deduplicated && is_font_assets_command) {
+#ifdef _WIN32
+                    for (auto& asset : requested_font_assets) if (asset.enabled && !verify_asset_file(requested_font_asset_root, asset)) asset.enabled = false;
+#endif
+                    scene_controller.configure_font_assets(requested_font_assets, requested_font_asset_root);
+                }
+                if (!deduplicated && is_agent_avatars_command) {
+#ifdef _WIN32
+                    for (auto& asset : requested_agent_avatars) if (asset.enabled && !verify_asset_file(requested_agent_avatar_root, asset)) asset.enabled = false;
+#endif
+                    scene_controller.configure_agent_avatars(requested_agent_avatars, requested_agent_avatar_root);
                 }
                 if (!deduplicated && is_layout_command) {
                     std::string apply_error_code;
@@ -938,6 +1274,8 @@ int run_named_pipe_server(std::string_view pipe_name, bool drop_after_health, bo
                 std::string result_json;
                 if (is_config_command) result_json = runtime_config.result_json(deduplicated);
                 else if (is_visual_assets_command) result_json = std::string("{\"status\":\"accepted\",\"deduplicated\":") + (deduplicated ? "true" : "false") + ",\"applied\":true,\"assetCount\":" + std::to_string(requested_visual_asset_count) + "}";
+                else if (is_font_assets_command) result_json = std::string("{\"status\":\"accepted\",\"deduplicated\":") + (deduplicated ? "true" : "false") + ",\"applied\":true,\"assetCount\":" + std::to_string(requested_font_asset_count) + "}";
+                else if (is_agent_avatars_command) result_json = std::string("{\"status\":\"accepted\",\"deduplicated\":") + (deduplicated ? "true" : "false") + ",\"applied\":true,\"assetCount\":" + std::to_string(requested_agent_avatar_count) + "}";
                 else if (parsed.message.type == "scene.update" && !is_card_update) result_json = scene_controller.state_result_json(deduplicated);
                 else if (parsed.message.type == "scene.dismiss") result_json = scene_controller.dismiss_result_json(deduplicated, requested_dismiss_id);
                 else if (parsed.message.type == "scene.create" || is_card_update || is_layout_command) result_json = scene_controller.cards_result_json(deduplicated);

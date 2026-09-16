@@ -43,6 +43,7 @@ using notification_hub::scene::StackAnchor;
 using notification_hub::scene::StackCardInput;
 using notification_hub::scene::StackDirection;
 using notification_hub::scene::StackLayoutOptions;
+using notification_hub::scene::StackWrap;
 using notification_hub::scene::layout_stack;
 using notification_hub::scene::layout_shelf;
 using notification_hub::scene::fallback_work_area;
@@ -50,6 +51,7 @@ using notification_hub::scene::valid_work_area;
 using notification_hub::scene::query_primary_work_area;
 using notification_hub::scene::SceneWindowState;
 using notification_hub::scene::WindowConfig;
+using notification_hub::scene::CardPart;
 using notification_hub::scene::close_button_bounds;
 using notification_hub::scene::point_inside_card;
 using notification_hub::scene::valid_visual_style;
@@ -135,9 +137,9 @@ bool hit_test_self_test() {
     if (!point_inside_card(210.0f, 90.0f, width, height)) return false;
     if (!point_inside_card(10.0f, 90.0f, width, height)) return false;
     if (!point_inside_card(24.0f, 24.0f, width, height)) return false;
+    if (!point_inside_card(10.0f, 10.0f, width, height)) return false;
+    if (!point_inside_card(11.0f, 11.0f, width, height)) return false;
     if (point_inside_card(0.0f, 0.0f, width, height)) return false;
-    if (point_inside_card(10.0f, 10.0f, width, height)) return false;
-    if (point_inside_card(11.0f, 11.0f, width, height)) return false;
 
     const auto event = create_event(
         "interaction-self-test", "hit-test", "INTERACTION_HIT_TEST_OK", "info", true,
@@ -173,6 +175,161 @@ bool visual_asset_self_test(std::string_view asset_path, std::string_view asset_
 #endif
 }
 
+bool root_wallpaper_self_test(std::string_view asset_path, std::string_view asset_sha256) {
+#ifndef _WIN32
+    static_cast<void>(asset_path);
+    static_cast<void>(asset_sha256);
+    return false;
+#else
+    if (asset_path.empty() || asset_sha256.empty()) return false;
+    const auto red_visible = [](const Pixel& sample) {
+        return sample.red > 180 && sample.green < 100 && sample.blue < 100 && sample.alpha > 180;
+    };
+
+    VisualStyle visual{};
+    visual.specified = true;
+    visual.enabled = true;
+    visual.background_color = "#0044aa";
+    visual.opacity = 1.0f;
+    visual.paint_overflow = 0;
+
+    std::vector<CardPart> rooted_parts{
+        {"root", "block", "", 0, 0, 420, 180, 0, "#0044aa", "", 0},
+    };
+    rooted_parts[0].background_asset_path = std::string(asset_path);
+    rooted_parts[0].background_asset_sha256 = std::string(asset_sha256);
+
+    SceneWindow rooted(WindowConfig{
+        L"Root Wallpaper Self Test",
+        L"PNG background",
+        420,
+        180,
+        true,
+        0,
+        0,
+        false,
+        visual,
+        rooted_parts});
+    if (!rooted.create() || !rooted.is_renderer_ready() || !rooted.show() || !rooted.paint(true)) return false;
+    Pixel rooted_sample{};
+    const bool rooted_sampled = rooted.capture_pixels() && rooted.sample_pixel(380, 150, rooted_sample);
+    const bool rooted_red = rooted_sampled && red_visible(rooted_sample);
+    rooted.request_close();
+    const auto rooted_pump = rooted.run_message_pump(false);
+    if (!rooted_red || rooted_pump != 0 || rooted.is_created()) {
+        std::cerr << "root wallpaper self-test sample=" << static_cast<int>(rooted_sample.red) << "," << static_cast<int>(rooted_sample.green) << "," << static_cast<int>(rooted_sample.blue) << "," << static_cast<int>(rooted_sample.alpha) << "\n";
+        return false;
+    }
+
+    VisualStyle fallback_visual = visual;
+    fallback_visual.background_asset_path = std::string(asset_path);
+    fallback_visual.background_asset_sha256 = std::string(asset_sha256);
+    const std::vector<CardPart> fallback_parts{
+        {"root", "block", "", 0, 0, 420, 180, 0, "#0044aa", "", 0},
+    };
+    SceneWindow fallback(WindowConfig{
+        L"Root Wallpaper Fallback Self Test",
+        L"PNG background",
+        420,
+        180,
+        true,
+        0,
+        0,
+        false,
+        fallback_visual,
+        fallback_parts});
+    if (!fallback.create() || !fallback.is_renderer_ready() || !fallback.show() || !fallback.paint(true)) return false;
+    Pixel fallback_sample{};
+    const bool fallback_sampled = fallback.capture_pixels() && fallback.sample_pixel(380, 150, fallback_sample);
+    const bool fallback_red = fallback_sampled && red_visible(fallback_sample);
+    fallback.request_close();
+    const auto fallback_pump = fallback.run_message_pump(false);
+    if (!fallback_red || fallback_pump != 0 || fallback.is_created()) {
+        std::cerr << "root wallpaper fallback sample=" << static_cast<int>(fallback_sample.red) << "," << static_cast<int>(fallback_sample.green) << "," << static_cast<int>(fallback_sample.blue) << "," << static_cast<int>(fallback_sample.alpha) << "\n";
+        return false;
+    }
+    return true;
+#endif
+}
+
+bool close_part_image_self_test(std::string_view asset_path, std::string_view asset_sha256) {
+#ifndef _WIN32
+    static_cast<void>(asset_path);
+    static_cast<void>(asset_sha256);
+    return false;
+#else
+    if (asset_path.empty() || asset_sha256.empty()) return false;
+    const auto red_visible = [](const Pixel& sample) {
+        return sample.red > 180 && sample.green < 100 && sample.blue < 100 && sample.alpha > 180;
+    };
+    const auto blue_plate = [](const Pixel& sample) {
+        return sample.blue > sample.red + 40 && sample.red < 80 && sample.blue > 100 && sample.alpha > 180;
+    };
+
+    VisualStyle visual{};
+    visual.specified = true;
+    visual.enabled = true;
+    visual.background_color = "#0044aa";
+    visual.opacity = 1.0f;
+    visual.paint_overflow = 0;
+    visual.dismiss_mode = "closeButton";
+
+    CardPart close{};
+    close.id = "close";
+    close.kind = "close";
+    close.x = 200;
+    close.y = 40;
+    close.w = 80;
+    close.h = 80;
+    close.background_asset_path = std::string(asset_path);
+    close.background_asset_sha256 = std::string(asset_sha256);
+    close.close_icon = "none";
+
+    const std::vector<CardPart> parts{
+        {"root", "block", "", 0, 0, 320, 160, 0, "#0044aa", "", 0},
+        close,
+    };
+
+    SceneWindow window(WindowConfig{
+        L"Close Part Image Self Test",
+        L"T",
+        320,
+        160,
+        true,
+        0,
+        0,
+        false,
+        visual,
+        parts});
+    if (!window.create() || !window.is_renderer_ready() || !window.show() || !window.paint(true)) {
+        std::cerr << "close part image create failed\n";
+        return false;
+    }
+    Pixel plate{};
+    Pixel close_center{};
+    const bool sampled = window.capture_pixels()
+        && window.sample_pixel(40, 80, plate)
+        && window.sample_pixel(240, 80, close_center);
+    const bool plate_is_blue = sampled && blue_plate(plate);
+    const bool close_shows_image = sampled && red_visible(close_center);
+    window.request_close();
+    const auto pump = window.run_message_pump(false);
+    if (!plate_is_blue || !close_shows_image || pump != 0 || window.is_created()) {
+        std::cerr << "close part image samples: sampled=" << sampled
+                  << " plate=" << static_cast<int>(plate.red) << ","
+                  << static_cast<int>(plate.green) << ","
+                  << static_cast<int>(plate.blue) << ","
+                  << static_cast<int>(plate.alpha)
+                  << " close=" << static_cast<int>(close_center.red) << ","
+                  << static_cast<int>(close_center.green) << ","
+                  << static_cast<int>(close_center.blue) << ","
+                  << static_cast<int>(close_center.alpha) << "\n";
+        return false;
+    }
+    return true;
+#endif
+}
+
 bool visual_asset_opacity_self_test(std::string_view asset_path, std::string_view asset_sha256) {
 #ifndef _WIN32
     static_cast<void>(asset_path); static_cast<void>(asset_sha256); return false;
@@ -184,15 +341,20 @@ bool visual_asset_opacity_self_test(std::string_view asset_path, std::string_vie
     visual.background_asset_path = std::string(asset_path);
     visual.background_asset_sha256 = std::string(asset_sha256);
     visual.background_color = "#0e1916";
-    visual.opacity = 0.5f;
+    visual.opacity = 0.15f;
     window.update_visual(visual);
     if (!window.create() || !window.is_renderer_ready() || !window.show() || !window.paint(true)) return false;
     Pixel sample{};
     const bool sampled = window.capture_pixels() && window.sample_pixel(380, 150, sample);
-    const bool valid = sampled && sample.red > 60 && sample.red < 200 && sample.alpha > 60 && sample.alpha < 255;
+    const bool wallpaper_still_there = sampled && sample.alpha > 80 && sample.red > 80
+        && sample.red > sample.green + 40 && sample.red > sample.blue + 40;
     window.request_close();
     const auto pump_result = window.run_message_pump(false);
-    return valid && pump_result == 0 && !window.is_created();
+    if (!wallpaper_still_there || pump_result != 0 || window.is_created()) {
+        std::cerr << "opacity self-test sample=" << static_cast<int>(sample.red) << "," << static_cast<int>(sample.green) << "," << static_cast<int>(sample.blue) << "," << static_cast<int>(sample.alpha) << "\n";
+        return false;
+    }
+    return true;
 #endif
 }
 
@@ -245,11 +407,11 @@ bool visual_self_test() {
     const auto close_y = static_cast<int>((close_bounds.top + close_bounds.bottom) * 0.5f);
     const bool sampled = window.sample_pixel(0, 0, transparent)
         && window.sample_pixel(200, 100, surface)
-        && window.sample_pixel(11, 90, accent)
+        && window.sample_pixel(2, 90, accent)
         && window.sample_pixel(close_x, close_y, close_background);
     const bool transparent_corner = sampled && pixels_captured && transparent.alpha <= 16;
     const bool opaque_surface = sampled && pixels_captured && surface.alpha >= 220 && surface.red < 80 && surface.green < 100;
-    const bool visible_accent = sampled && pixels_captured && accent.alpha >= 220 && accent.green > accent.red + 80;
+    const bool visible_accent = sampled && pixels_captured && accent.alpha >= 220 && accent.red < 80 && accent.green < 100;
     const bool visible_close = sampled && pixels_captured && close_background.alpha >= 180
         && close_background.red > surface.red + 20;
 
@@ -286,6 +448,194 @@ bool visual_self_test() {
         "visual-self-test", "pixel-sampled", "RENDERER_VISUAL_REGRESSION_OK", "info", true,
         "Structural card pixel assertions completed", std::string(kTimestamp));
     std::cout << serialize_jsonl(event);
+    return true;
+#endif
+}
+
+bool zero_opacity_hit_self_test() {
+#ifndef _WIN32
+    std::cerr << "INTERACTION_UNSUPPORTED: Zero-opacity hit testing requires Windows\n";
+    return false;
+#else
+    VisualStyle visual{};
+    visual.specified = true;
+    visual.enabled = true;
+    visual.background_color = "#cc2020";
+    visual.opacity = 0.0f;
+    visual.border_radius = 0;
+    visual.paint_overflow = 0;
+
+    SceneWindow window(WindowConfig{
+        L"Notification Hub Zero Opacity Hit Self Test",
+        L"Clear",
+        420,
+        180,
+        true,
+        0,
+        0,
+        false,
+        visual});
+    if (!window.create() || !window.is_renderer_ready() || !window.show() || !window.paint(true)) {
+        std::cerr << "zero opacity create failed\n";
+        return false;
+    }
+
+    Pixel center{};
+    Pixel corner{};
+    const bool sampled = window.capture_pixels()
+        && window.sample_pixel(210, 90, center)
+        && window.sample_pixel(0, 0, corner);
+    const bool plate_clear = sampled && center.red <= 8 && center.green <= 8 && center.blue <= 8
+        && center.alpha >= 1 && center.alpha <= 2;
+    const bool corner_clear = sampled && corner.alpha == 0;
+    const bool geometry_hit = window.hit_test_client_point(210.0f, 90.0f)
+        && !window.hit_test_client_point(0.0f, 0.0f);
+
+    const auto hwnd = static_cast<HWND>(window.native_handle());
+    const int virtual_left = GetSystemMetrics(SM_XVIRTUALSCREEN);
+    const int virtual_top = GetSystemMetrics(SM_YVIRTUALSCREEN);
+    const int virtual_width = GetSystemMetrics(SM_CXVIRTUALSCREEN);
+    const int virtual_height = GetSystemMetrics(SM_CYVIRTUALSCREEN);
+    const POINT candidates[] = {
+        {virtual_left + 32, virtual_top + 32},
+        {virtual_left + virtual_width - 452, virtual_top + 32},
+        {virtual_left + 32, virtual_top + virtual_height - 212},
+        {virtual_left + virtual_width - 452, virtual_top + virtual_height - 212},
+        {virtual_left + (virtual_width - 420) / 2, virtual_top + (virtual_height - 180) / 2}
+    };
+    bool card_owned = false;
+    bool corner_transparent = false;
+    for (const auto& candidate : candidates) {
+        if (SetWindowPos(
+                hwnd,
+                nullptr,
+                candidate.x,
+                candidate.y,
+                0,
+                0,
+                SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_SHOWWINDOW) == FALSE) continue;
+        if (!window.paint()) continue;
+        POINT origin{0, 0};
+        if (ClientToScreen(hwnd, &origin) == FALSE) continue;
+        const auto center_point = POINT{origin.x + 210, origin.y + 90};
+        const auto corner_point = POINT{origin.x, origin.y};
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(500);
+        do {
+            card_owned = WindowFromPoint(center_point) == hwnd;
+            corner_transparent = WindowFromPoint(corner_point) != hwnd;
+            if (card_owned && corner_transparent) break;
+            Sleep(10);
+        } while (std::chrono::steady_clock::now() < deadline);
+        if (card_owned && corner_transparent) break;
+    }
+
+    window.request_close();
+    const auto pump_result = window.run_message_pump(false);
+    if (!plate_clear || !corner_clear || !geometry_hit || !card_owned || !corner_transparent
+        || pump_result != 0 || window.is_created()) {
+        std::cerr << "zero opacity hit: sampled=" << sampled
+                  << " plateClear=" << plate_clear
+                  << " cornerClear=" << corner_clear
+                  << " geometryHit=" << geometry_hit
+                  << " cardOwned=" << card_owned
+                  << " cornerTransparent=" << corner_transparent
+                  << " center=" << static_cast<int>(center.red) << ","
+                  << static_cast<int>(center.green) << ","
+                  << static_cast<int>(center.blue) << ","
+                  << static_cast<int>(center.alpha) << "\n";
+        return false;
+    }
+    return true;
+#endif
+}
+
+bool part_height_self_test() {
+#ifndef _WIN32
+    std::cerr << "RENDERER_UNSUPPORTED: Part height sampling requires Windows\n";
+    return false;
+#else
+    VisualStyle visual{};
+    visual.specified = true;
+    visual.enabled = true;
+    visual.background_color = "#cc2020";
+    visual.opacity = 1.0f;
+    visual.border_radius = 0;
+    visual.paint_overflow = 0;
+    visual.dismiss_mode = "anywhere";
+
+    CardPart band{};
+    band.id = "band";
+    band.kind = "block";
+    band.x = 0;
+    band.y = 0;
+    band.w = 80;
+    band.h = 30;
+    band.fill = "#20cc40";
+    band.background = "#20cc40";
+    band.radius_specified = true;
+    band.radius = 0;
+
+    SceneWindow window(WindowConfig{
+        L"Notification Hub Part Height Self Test",
+        L"H",
+        160,
+        30,
+        true,
+        0,
+        0,
+        false,
+        visual,
+        {band}});
+    if (!window.create() || !window.is_renderer_ready() || !window.show() || !window.paint(true)) {
+        std::cerr << "part height create failed\n";
+        return false;
+    }
+
+    const auto is_red = [](const Pixel& sample) {
+        return sample.alpha > 180 && sample.red > 160 && sample.red > sample.green + 40 && sample.red > sample.blue + 40;
+    };
+    const auto is_green = [](const Pixel& sample) {
+        return sample.alpha > 180 && sample.green > 160 && sample.green > sample.red + 40 && sample.green > sample.blue + 40;
+    };
+
+    Pixel part_top{};
+    Pixel part_mid{};
+    Pixel part_bottom{};
+    Pixel plate_top{};
+    Pixel plate_mid{};
+    Pixel plate_bottom{};
+    const bool sampled = window.capture_pixels()
+        && window.sample_pixel(40, 1, part_top)
+        && window.sample_pixel(40, 15, part_mid)
+        && window.sample_pixel(40, 28, part_bottom)
+        && window.sample_pixel(120, 1, plate_top)
+        && window.sample_pixel(120, 15, plate_mid)
+        && window.sample_pixel(120, 28, plate_bottom);
+    const bool part_spans = sampled && is_green(part_top) && is_green(part_mid) && is_green(part_bottom);
+    const bool plate_spans = sampled && is_red(plate_top) && is_red(plate_mid) && is_red(plate_bottom);
+
+    window.request_close();
+    const auto pump_result = window.run_message_pump(false);
+    if (!part_spans || !plate_spans || pump_result != 0 || window.is_created()) {
+        std::cerr << "part height samples: sampled=" << sampled
+                  << " partTop=" << static_cast<int>(part_top.red) << ","
+                  << static_cast<int>(part_top.green) << ","
+                  << static_cast<int>(part_top.blue) << ","
+                  << static_cast<int>(part_top.alpha)
+                  << " partBottom=" << static_cast<int>(part_bottom.red) << ","
+                  << static_cast<int>(part_bottom.green) << ","
+                  << static_cast<int>(part_bottom.blue) << ","
+                  << static_cast<int>(part_bottom.alpha)
+                  << " plateTop=" << static_cast<int>(plate_top.red) << ","
+                  << static_cast<int>(plate_top.green) << ","
+                  << static_cast<int>(plate_top.blue) << ","
+                  << static_cast<int>(plate_top.alpha)
+                  << " plateBottom=" << static_cast<int>(plate_bottom.red) << ","
+                  << static_cast<int>(plate_bottom.green) << ","
+                  << static_cast<int>(plate_bottom.blue) << ","
+                  << static_cast<int>(plate_bottom.alpha) << "\n";
+        return false;
+    }
     return true;
 #endif
 }
@@ -342,11 +692,113 @@ bool layout_self_test() {
         return false;
     }
 
+    const auto flush = layout_stack(
+        {{ "a", 100, 40 }, { "b", 100, 40 }},
+        StackLayoutOptions{StackDirection::Down, StackAnchor::TopLeft, 0, 500, 300, 1.0f});
+    if (!flush.ok || flush.placements.size() != 2
+        || flush.placements[0].y != 0 || flush.placements[1].y != 40) {
+        std::cerr << "stack layout gap 0 failed\n";
+        return false;
+    }
+
     const auto too_large = layout_stack(
         {{"large", 600, 40}},
         StackLayoutOptions{StackDirection::Down, StackAnchor::TopLeft, 0, 500, 300, 1.0f});
     if (too_large.ok || too_large.code != "LAYOUT_CARD_OUT_OF_BOUNDS"
         || too_large.failing_card_id != "large") return false;
+
+    StackLayoutOptions wrap_options;
+    wrap_options.direction = StackDirection::Down;
+    wrap_options.anchor = StackAnchor::BottomRight;
+    wrap_options.spacing = 0;
+    wrap_options.work_area_width = 200;
+    wrap_options.work_area_height = 80;
+    wrap_options.dpi_scale = 1.0f;
+    const auto wrapped = layout_stack(
+        {{ "a", 80, 40 }, { "b", 80, 40 }, { "c", 80, 40 }},
+        wrap_options);
+    if (!wrapped.ok || wrapped.placements.size() != 3
+        || wrapped.placements[0].id != "b" || wrapped.placements[0].x != 120 || wrapped.placements[0].y != 0
+        || wrapped.placements[1].id != "c" || wrapped.placements[1].x != 120 || wrapped.placements[1].y != 40
+        || wrapped.placements[2].id != "a" || wrapped.placements[2].x != 40 || wrapped.placements[2].y != 40) {
+        std::cerr << "stack layout wrap failed\n";
+        return false;
+    }
+
+    StackLayoutOptions grow_left_options;
+    grow_left_options.direction = StackDirection::Right;
+    grow_left_options.anchor = StackAnchor::BottomRight;
+    grow_left_options.spacing = 0;
+    grow_left_options.work_area_width = 200;
+    grow_left_options.work_area_height = 80;
+    grow_left_options.dpi_scale = 1.0f;
+    const auto grow_left = layout_stack(
+        {{ "old", 80, 40 }, { "new", 80, 40 }},
+        grow_left_options);
+    if (!grow_left.ok || grow_left.placements.size() != 2
+        || grow_left.placements[0].id != "old" || grow_left.placements[0].x != 40 || grow_left.placements[0].y != 40
+        || grow_left.placements[1].id != "new" || grow_left.placements[1].x != 120 || grow_left.placements[1].y != 40) {
+        std::cerr << "stack layout grow left failed\n";
+        return false;
+    }
+
+    StackLayoutOptions wrap_off_options = wrap_options;
+    wrap_off_options.wrap = StackWrap::Off;
+    const auto wrap_off = layout_stack(
+        {{ "a", 80, 40 }, { "b", 80, 40 }, { "c", 80, 40 }},
+        wrap_off_options);
+    if (wrap_off.ok || wrap_off.code != "LAYOUT_CARD_OUT_OF_BOUNDS") {
+        std::cerr << "stack layout wrap off failed\n";
+        return false;
+    }
+
+    StackLayoutOptions snake_options;
+    snake_options.direction = StackDirection::Right;
+    snake_options.anchor = StackAnchor::TopLeft;
+    snake_options.spacing = 0;
+    snake_options.work_area_width = 320;
+    snake_options.work_area_height = 80;
+    snake_options.dpi_scale = 1.0f;
+    snake_options.wrap = StackWrap::Snake;
+    const auto snaked = layout_stack(
+        {{ "1", 80, 40 }, { "2", 80, 40 }, { "3", 80, 40 }, { "4", 80, 40 },
+         { "5", 80, 40 }, { "6", 80, 40 }, { "7", 80, 40 }, { "8", 80, 40 }},
+        snake_options);
+    if (!snaked.ok || snaked.placements.size() != 8
+        || snaked.placements[0].id != "1" || snaked.placements[0].x != 0 || snaked.placements[0].y != 0
+        || snaked.placements[3].id != "4" || snaked.placements[3].x != 240 || snaked.placements[3].y != 0
+        || snaked.placements[4].id != "5" || snaked.placements[4].x != 240 || snaked.placements[4].y != 40
+        || snaked.placements[7].id != "8" || snaked.placements[7].x != 0 || snaked.placements[7].y != 40) {
+        std::cerr << "stack layout snake failed\n";
+        return false;
+    }
+
+    const auto snake_hole = layout_stack(
+        {{ "2", 80, 40 }, { "3", 80, 40 }, { "4", 80, 40 }, { "5", 80, 40 },
+         { "6", 80, 40 }, { "7", 80, 40 }, { "8", 80, 40 }},
+        snake_options);
+    if (!snake_hole.ok || snake_hole.placements.size() != 7
+        || snake_hole.placements[0].id != "2" || snake_hole.placements[0].x != 0
+        || snake_hole.placements[3].id != "5" || snake_hole.placements[3].x != 240
+        || snake_hole.placements[4].id != "6" || snake_hole.placements[4].x != 240 || snake_hole.placements[4].y != 40
+        || snake_hole.placements[6].id != "8" || snake_hole.placements[6].x != 80 || snake_hole.placements[6].y != 40) {
+        std::cerr << "stack layout snake hole failed\n";
+        return false;
+    }
+
+    StackLayoutOptions snake_mixed_options = snake_options;
+    snake_mixed_options.work_area_width = 200;
+    const auto snake_mixed = layout_stack(
+        {{ "1", 80, 40 }, { "2", 40, 30 }, { "3", 40, 30 }, { "4", 80, 40 }, { "5", 40, 30 }},
+        snake_mixed_options);
+    if (!snake_mixed.ok || snake_mixed.placements.size() != 5
+        || snake_mixed.placements[0].x != 0 || snake_mixed.placements[0].y != 0
+        || snake_mixed.placements[2].x != 120 || snake_mixed.placements[2].y != 0
+        || snake_mixed.placements[3].id != "4" || snake_mixed.placements[3].x != 120 || snake_mixed.placements[3].y != 40
+        || snake_mixed.placements[4].id != "5" || snake_mixed.placements[4].x != 80 || snake_mixed.placements[4].y != 40) {
+        std::cerr << "stack layout snake mixed failed\n";
+        return false;
+    }
 
     const auto invalid_dpi = layout_stack(
         {}, StackLayoutOptions{StackDirection::Down, StackAnchor::TopLeft, 0, 500, 300, 0.0f});
@@ -391,6 +843,23 @@ bool layout_self_test() {
         {{"origin", 100, 40}},
         StackLayoutOptions{StackDirection::Right, StackAnchor::TopLeft, 0, 500, 300, 1.0f, 40, 50});
     if (!shelf_origin.ok || shelf_origin.placements[0].x != 40 || shelf_origin.placements[0].y != 50) return false;
+
+    StackLayoutOptions inset_options;
+    inset_options.direction = StackDirection::Down;
+    inset_options.anchor = StackAnchor::TopRight;
+    inset_options.work_area_width = 500;
+    inset_options.work_area_height = 300;
+    inset_options.dpi_scale = 1.0f;
+    inset_options.margin_left = 18;
+    inset_options.margin_right = 18;
+    inset_options.margin_top = 18;
+    inset_options.margin_bottom = 18;
+    const auto inset = layout_stack({{"inset", 100, 40}}, inset_options);
+    if (!inset.ok || inset.placements.size() != 1
+        || inset.placements[0].x != 382 || inset.placements[0].y != 18) {
+        std::cerr << "stack layout inset failed\n";
+        return false;
+    }
 
     const auto event = create_event(
         "layout-self-test", "layout-planned", "LAYOUT_STACK_SHELF_OK", "info", true,
@@ -450,16 +919,34 @@ bool ticker_self_test() {
     if (ticker_entry_delay_ms(0.0, 400.0) != 0.0) return false;
     if (ticker_entry_delay_ms(-320.0, 0.0) != 0.0) return false;
 
-    // §2.1 位置是时间的纯函数：400 px/s 走 1 秒 = 左移 400。
+    // §2.1 位置是时间的纯函数：400 px/s 走 1 秒 = 左移 400。三参数保持左飞。
     if (ticker_position_x(1920.0, 400.0, 1000.0) != 1520.0) return false;
     if (ticker_position_x(1920.0, 400.0, 0.0) != 1920.0) return false;
     // 同一时刻无论分几拍推进，结果必须一致（禁止逐帧累加导致漂移）。
     const auto once = ticker_position_x(1920.0, 400.0, 250.0);
     if (once != ticker_position_x(1920.0, 400.0, 250.0)) return false;
 
+    // 右飞：x = spawn + speed × t；spawn 在 lane 左侧屏外。
+    const auto spawn_right_x = 0.0 - 480.0;
+    if (ticker_position_x(spawn_right_x, 400.0, 1000.0, true) != -80.0) return false;
+    if (ticker_position_x(spawn_right_x, 400.0, 0.0, true) != spawn_right_x) return false;
+    const auto right_once = ticker_position_x(spawn_right_x, 400.0, 250.0, true);
+    if (right_once != ticker_position_x(spawn_right_x, 400.0, 250.0, true)) return false;
+
+    // 右飞净空：ahead.left - lane_left - minGap。
+    const auto lane_left_px = 0;
+    const auto ahead_left = 200.0;
+    if (ticker_track_clearance(true, ahead_left, lane_left_px, 64, true) != 136.0) return false;
+
     // §8 出屏判定含 24px 缓冲：右侧边缘必须越过 lane 左边再退 24px 才算离开。
     if (ticker_is_offscreen(100.0, 120, 24)) return false;  // 100 < 96 为假
     if (!ticker_is_offscreen(95.0, 120, 24)) return false;  // 95 < 96 为真
+    // 右飞出屏：card.left > lane.right + 24。
+    const auto lane_right_px = 1920;
+    const auto card_left_on_edge = 1944.0;
+    const auto card_left_past = 1945.0;
+    if (ticker_is_offscreen(card_left_on_edge, lane_right_px, 24, true)) return false;
+    if (!ticker_is_offscreen(card_left_past, lane_right_px, 24, true)) return false;
 
     // §2.3 band 贴顶/贴底与轨道 y。
     if (ticker_band_top_y(true, 0, 1080, 302) != 0) return false;
@@ -492,6 +979,18 @@ bool ticker_self_test() {
         std::cerr << "ticker track count must have no upper limit\n";
         return false;
     }
+    auto fly_right_style = ticker_style;
+    fly_right_style.ticker_direction = "right";
+    if (!valid_visual_style(fly_right_style)) {
+        std::cerr << "ticker direction right must be valid\n";
+        return false;
+    }
+    auto bad_direction = ticker_style;
+    bad_direction.ticker_direction = "up";
+    if (valid_visual_style(bad_direction)) {
+        std::cerr << "unknown ticker direction must be rejected\n";
+        return false;
+    }
 
     const auto event = create_event(
         "ticker-self-test", "ticker-planned", "TICKER_MOTION_CONTRACT_OK", "info", true,
@@ -501,11 +1000,487 @@ bool ticker_self_test() {
     return true;
 }
 
+bool overflow_origin_self_test() {
+#ifndef _WIN32
+    return true;
+#else
+    int recovered_x = 88;
+    int recovered_y = 188;
+    notification_hub::scene::paint_origin_to_hit_origin(recovered_x, recovered_y, 12);
+    if (recovered_x != 100 || recovered_y != 200) {
+        std::cerr << "paint origin to hit origin helper drifted\n";
+        return false;
+    }
+    const auto paint = notification_hub::scene::paint_box_from_hit_box(100, 200, 320, 160, 12);
+    if (paint.x != 88 || paint.y != 188 || paint.width != 344 || paint.height != 184) {
+        std::cerr << "hit box to paint box helper drifted\n";
+        return false;
+    }
+
+    RuntimeSceneController controller;
+    VisualStyle visual{};
+    visual.specified = true;
+    visual.enabled = true;
+    SceneCardState card{
+        "overflow-origin-card",
+        "Overflow origin",
+        "Hit-box must stay put",
+        "",
+        SceneWindowState{100, 200, 320, 160},
+        320,
+        160,
+        visual};
+    std::string error_code;
+    std::string error_message;
+    if (!controller.create_card(card, error_code, error_message)) {
+        std::cerr << "overflow origin create failed: " << error_code << " " << error_message << "\n";
+        return false;
+    }
+    controller.pump_messages();
+
+    auto snapshot = controller.cards_json();
+    if (snapshot.find("\"x\":100") == std::string::npos
+        || snapshot.find("\"y\":200") == std::string::npos) {
+        std::cerr << "overflow origin create snapshot drifted: " << snapshot << "\n";
+        return false;
+    }
+
+    auto hwnd = FindWindowW(L"NotificationHubVNextSceneWindow", L"Overflow origin");
+    RECT bounds{};
+    if (hwnd == nullptr || GetWindowRect(hwnd, &bounds) == FALSE
+        || bounds.left != 100 || bounds.top != 200
+        || bounds.right - bounds.left != 320 || bounds.bottom - bounds.top != 160) {
+        std::cerr << "overflow=0 HWND is not the hit-box: "
+                  << bounds.left << "," << bounds.top << " "
+                  << (bounds.right - bounds.left) << "x" << (bounds.bottom - bounds.top) << "\n";
+        controller.dismiss_card("overflow-origin-card", error_code, error_message);
+        return false;
+    }
+
+    card.visual.paint_overflow = 12;
+    if (!controller.update_card(card, error_code, error_message)) {
+        std::cerr << "overflow origin update 12 failed: " << error_code << " " << error_message << "\n";
+        return false;
+    }
+    controller.pump_messages();
+    snapshot = controller.cards_json();
+    if (snapshot.find("\"x\":100") == std::string::npos
+        || snapshot.find("\"y\":200") == std::string::npos) {
+        std::cerr << "overflow=12 snapshot drifted: " << snapshot << "\n";
+        controller.dismiss_card("overflow-origin-card", error_code, error_message);
+        return false;
+    }
+    if (GetWindowRect(hwnd, &bounds) == FALSE
+        || bounds.left != 88 || bounds.top != 188
+        || bounds.right - bounds.left != 344 || bounds.bottom - bounds.top != 184) {
+        std::cerr << "overflow=12 HWND is not the paint-box: "
+                  << bounds.left << "," << bounds.top << " "
+                  << (bounds.right - bounds.left) << "x" << (bounds.bottom - bounds.top) << "\n";
+        controller.dismiss_card("overflow-origin-card", error_code, error_message);
+        return false;
+    }
+
+    card.visual.paint_overflow = 24;
+    if (!controller.update_card(card, error_code, error_message)) {
+        std::cerr << "overflow origin update 24 failed: " << error_code << " " << error_message << "\n";
+        controller.dismiss_card("overflow-origin-card", error_code, error_message);
+        return false;
+    }
+    controller.pump_messages();
+    snapshot = controller.cards_json();
+    if (snapshot.find("\"x\":100") == std::string::npos
+        || snapshot.find("\"y\":200") == std::string::npos) {
+        std::cerr << "overflow=24 snapshot drifted: " << snapshot << "\n";
+        controller.dismiss_card("overflow-origin-card", error_code, error_message);
+        return false;
+    }
+    if (GetWindowRect(hwnd, &bounds) == FALSE
+        || bounds.left != 76 || bounds.top != 176
+        || bounds.right - bounds.left != 368 || bounds.bottom - bounds.top != 208) {
+        std::cerr << "overflow=24 HWND is not the paint-box: "
+                  << bounds.left << "," << bounds.top << " "
+                  << (bounds.right - bounds.left) << "x" << (bounds.bottom - bounds.top) << "\n";
+        controller.dismiss_card("overflow-origin-card", error_code, error_message);
+        return false;
+    }
+
+    if (!controller.dismiss_card("overflow-origin-card", error_code, error_message)) {
+        std::cerr << "overflow origin dismiss failed: " << error_code << " " << error_message << "\n";
+        return false;
+    }
+    return true;
+#endif
+}
+
+bool pointer_dismiss_after_drag_self_test() {
+#ifndef _WIN32
+    return true;
+#else
+    auto make_card = [](const wchar_t* title) {
+        WindowConfig config;
+        config.title = title;
+        config.body = L"Close must survive drag";
+        config.width = 320;
+        config.height = 160;
+        config.x = 100;
+        config.y = 200;
+        config.has_initial_position = true;
+        config.visual.specified = true;
+        config.visual.enabled = true;
+        config.visual.dismiss_mode = "closeButton";
+        config.visual.paint_overflow = 12;
+        return config;
+    };
+    const auto close_bounds = close_button_bounds(320.0f, 160.0f);
+    const auto close_client_x = static_cast<int>(close_bounds.left + (close_bounds.right - close_bounds.left) / 2.0f) + 12;
+    const auto close_client_y = static_cast<int>(close_bounds.top + (close_bounds.bottom - close_bounds.top) / 2.0f) + 12;
+    const auto close_lparam = MAKELPARAM(close_client_x, close_client_y);
+
+    SceneWindow dragged(make_card(L"Pointer dismiss after drag"));
+    if (!dragged.create() || !dragged.show() || !dragged.paint()) {
+        std::cerr << "pointer dismiss after drag create failed\n";
+        return false;
+    }
+    int hwnd_x = 0;
+    int hwnd_y = 0;
+    int present_x = 0;
+    int present_y = 0;
+    if (!dragged.get_window_position(hwnd_x, hwnd_y)
+        || !dragged.layered_present_origin(present_x, present_y)
+        || hwnd_x != present_x || hwnd_y != present_y) {
+        std::cerr << "pointer dismiss initial layered origin mismatch hwnd="
+                  << hwnd_x << "," << hwnd_y << " present=" << present_x << "," << present_y << "\n";
+        return false;
+    }
+    const auto hwnd = static_cast<HWND>(dragged.native_handle());
+    SendMessageW(hwnd, WM_LBUTTONDOWN, MK_LBUTTON, MAKELPARAM(80, 80));
+    SendMessageW(hwnd, WM_MOUSEMOVE, MK_LBUTTON, MAKELPARAM(140, 110));
+    SendMessageW(hwnd, WM_LBUTTONUP, 0, MAKELPARAM(140, 110));
+    if (dragged.is_dragging()) {
+        std::cerr << "pointer dismiss drag stayed active after mouse-up\n";
+        return false;
+    }
+    if (!dragged.get_window_position(hwnd_x, hwnd_y)
+        || !dragged.layered_present_origin(present_x, present_y)
+        || hwnd_x != present_x || hwnd_y != present_y) {
+        std::cerr << "pointer dismiss layered origin desynced after drag hwnd="
+                  << hwnd_x << "," << hwnd_y << " present=" << present_x << "," << present_y << "\n";
+        return false;
+    }
+    if (hwnd_x == 88 && hwnd_y == 188) {
+        std::cerr << "pointer dismiss drag did not move the HWND\n";
+        return false;
+    }
+    SendMessageW(hwnd, WM_LBUTTONDOWN, MK_LBUTTON, close_lparam);
+    SendMessageW(hwnd, WM_LBUTTONUP, 0, close_lparam);
+    if (!dragged.is_close_requested() || dragged.close_reason() != "user-close") {
+        std::cerr << "pointer dismiss close after drag failed reason=" << dragged.close_reason() << "\n";
+        return false;
+    }
+    dragged.destroy();
+
+    SceneWindow stale(make_card(L"Pointer dismiss stale drag"));
+    if (!stale.create() || !stale.show() || !stale.paint()) {
+        std::cerr << "pointer dismiss stale drag create failed\n";
+        return false;
+    }
+    if (!stale.begin_drag_client_point(80.0f, 80.0f) || !stale.is_dragging()) {
+        std::cerr << "pointer dismiss stale drag did not start\n";
+        return false;
+    }
+    const auto stale_hwnd = static_cast<HWND>(stale.native_handle());
+    SendMessageW(stale_hwnd, WM_LBUTTONDOWN, MK_LBUTTON, close_lparam);
+    SendMessageW(stale_hwnd, WM_LBUTTONUP, 0, close_lparam);
+    if (stale.is_dragging()) {
+        std::cerr << "pointer dismiss stale drag stayed active through close click\n";
+        return false;
+    }
+    if (!stale.is_close_requested() || stale.close_reason() != "user-close") {
+        std::cerr << "pointer dismiss close after stale drag failed reason=" << stale.close_reason() << "\n";
+        return false;
+    }
+    stale.destroy();
+    return true;
+#endif
+}
+
+bool ticker_text_fill_self_test() {
+#ifndef _WIN32
+    return true;
+#else
+    VisualStyle visual{};
+    visual.specified = true;
+    visual.enabled = true;
+    visual.background_color = "#0e1916";
+    visual.border_width = 0;
+    visual.border_radius = 8;
+    visual.opacity = 1.0f;
+    visual.ticker_specified = true;
+
+    const std::vector<CardPart> parts{
+        {"root", "block", "", 0, 0, 480, 76, 0, "#0e1916", "", 0},
+        {"title", "text", "title", 14, 8, 452, 60, 0, "#ff2244", "", 0},
+    };
+
+    SceneWindow window(WindowConfig{
+        L"HHHHHHHHHHHHHHHHHHHH",
+        L"",
+        480,
+        76,
+        true,
+        0,
+        0,
+        false,
+        visual,
+        parts});
+    if (!window.create() || !window.is_renderer_ready() || !window.show() || !window.paint(true)) {
+        std::cerr << "ticker text fill create failed\n";
+        return false;
+    }
+    bool saw_red_text = false;
+    Pixel sample{};
+    const bool captured = window.capture_pixels();
+    if (captured) {
+        for (int y = 16; y <= 44 && !saw_red_text; y += 2) {
+            for (int x = 20; x <= 220 && !saw_red_text; x += 2) {
+                if (!window.sample_pixel(x, y, sample)) continue;
+                if (sample.alpha >= 180 && sample.red > sample.green + 40
+                    && sample.red > sample.blue + 40 && sample.red > 140) {
+                    saw_red_text = true;
+                }
+            }
+        }
+    }
+    window.request_close();
+    const auto pump = window.run_message_pump(false);
+    if (!saw_red_text || pump != 0) {
+        std::cerr << "ticker text fill samples: captured=" << captured
+                  << " last=" << static_cast<int>(sample.red) << ","
+                  << static_cast<int>(sample.green) << ","
+                  << static_cast<int>(sample.blue) << ","
+                  << static_cast<int>(sample.alpha) << "\n";
+        return false;
+    }
+    return true;
+#endif
+}
+
+bool root_part_plate_self_test() {
+#ifndef _WIN32
+    return true;
+#else
+    VisualStyle visual{};
+    visual.specified = true;
+    visual.enabled = true;
+    visual.background_color = "#ff0000";
+    visual.border_width = 0;
+    visual.border_radius = 16;
+    visual.opacity = 1.0f;
+    visual.paint_overflow = 0;
+
+    const std::vector<CardPart> parts{
+        {"root", "block", "", 0, 0, 320, 160, 0, "#0044aa", "", 0},
+        {"title", "text", "title", 30, 24, 200, 34},
+        {"body", "text", "body", 30, 62, 260, 76},
+    };
+
+    SceneWindow rooted(WindowConfig{
+        L"Root Part Plate Self Test",
+        L"T",
+        320,
+        160,
+        true,
+        0,
+        0,
+        false,
+        visual,
+        parts});
+    if (!rooted.create() || !rooted.is_renderer_ready() || !rooted.show() || !rooted.paint(true)) {
+        std::cerr << "root part plate create failed\n";
+        return false;
+    }
+    Pixel center{};
+    Pixel corner{};
+    const bool sampled = rooted.capture_pixels()
+        && rooted.sample_pixel(160, 80, center)
+        && rooted.sample_pixel(1, 1, corner);
+    const bool center_is_root_blue = sampled
+        && center.blue > center.red + 40
+        && center.red < 80
+        && center.blue > 100;
+    const bool corner_not_squared = sampled && corner.alpha <= 40;
+    rooted.request_close();
+    const auto rooted_pump = rooted.run_message_pump(false);
+    if (!center_is_root_blue || !corner_not_squared || rooted_pump != 0) {
+        std::cerr << "root plate samples: sampled=" << sampled
+                  << " center=" << static_cast<int>(center.red) << ","
+                  << static_cast<int>(center.green) << ","
+                  << static_cast<int>(center.blue) << ","
+                  << static_cast<int>(center.alpha)
+                  << " corner=" << static_cast<int>(corner.red) << ","
+                  << static_cast<int>(corner.green) << ","
+                  << static_cast<int>(corner.blue) << ","
+                  << static_cast<int>(corner.alpha) << "\n";
+        return false;
+    }
+
+    SceneWindow fallback(WindowConfig{
+        L"Root Part Plate Fallback Self Test",
+        L"B",
+        320,
+        160,
+        true,
+        0,
+        0,
+        false,
+        visual,
+        {}});
+    if (!fallback.create() || !fallback.is_renderer_ready() || !fallback.show() || !fallback.paint(true)) {
+        std::cerr << "root part plate fallback create failed\n";
+        return false;
+    }
+    Pixel fallback_center{};
+    const bool fallback_sampled = fallback.capture_pixels() && fallback.sample_pixel(160, 80, fallback_center);
+    const bool fallback_is_red = fallback_sampled
+        && fallback_center.red > fallback_center.blue + 40
+        && fallback_center.red > 100;
+    fallback.request_close();
+    const auto fallback_pump = fallback.run_message_pump(false);
+    if (!fallback_is_red || fallback_pump != 0) {
+        std::cerr << "root plate fallback: sampled=" << fallback_sampled
+                  << " center=" << static_cast<int>(fallback_center.red) << ","
+                  << static_cast<int>(fallback_center.green) << ","
+                  << static_cast<int>(fallback_center.blue) << ","
+                  << static_cast<int>(fallback_center.alpha) << "\n";
+        return false;
+    }
+    return true;
+#endif
+}
+
+bool fit_width_self_test() {
+#ifndef _WIN32
+    return true;
+#else
+    VisualStyle visual{};
+    visual.specified = true;
+    visual.enabled = true;
+    visual.background_color = "#0e1916";
+    visual.border_width = 0;
+    visual.border_radius = 8;
+    visual.opacity = 1.0f;
+
+    CardPart title{"title", "text", "title", 20, 24, 320, 36, 0, "#f2fff9", "", 0};
+    title.background = "#cc3333";
+    title.opacity = 1.0f;
+    title.fit_width = true;
+    title.font_size = 20;
+    const std::vector<CardPart> parts{
+        {"root", "block", "", 0, 0, 400, 160, 0, "#0e1916", "", 0},
+        title,
+    };
+
+    SceneWindow window(WindowConfig{
+        L"Hi",
+        L"body",
+        400,
+        160,
+        true,
+        0,
+        0,
+        false,
+        visual,
+        parts});
+    if (!window.create() || !window.is_renderer_ready() || !window.show() || !window.paint(true)) {
+        std::cerr << "fit-width self-test create failed\n";
+        return false;
+    }
+    Pixel plate{};
+    Pixel unused{};
+    Pixel left_of_box{};
+    const bool sampled = window.capture_pixels()
+        && window.sample_pixel(28, 40, plate)
+        && window.sample_pixel(260, 40, unused)
+        && window.sample_pixel(16, 40, left_of_box);
+    const bool plate_near = sampled && plate.alpha >= 180 && plate.red > plate.green + 40 && plate.red > 140;
+    const bool far_is_surface = sampled && unused.red < 80 && unused.green < 90 && unused.blue < 90;
+    const bool left_stays = sampled && left_of_box.red < 80 && left_of_box.green < 90 && left_of_box.blue < 90;
+    window.request_close();
+    const auto pump = window.run_message_pump(false);
+    if (!plate_near || !far_is_surface || !left_stays || pump != 0) {
+        std::cerr << "fit-width samples: sampled=" << sampled
+                  << " plate=" << static_cast<int>(plate.red) << ","
+                  << static_cast<int>(plate.green) << ","
+                  << static_cast<int>(plate.blue) << ","
+                  << static_cast<int>(plate.alpha)
+                  << " unused=" << static_cast<int>(unused.red) << ","
+                  << static_cast<int>(unused.green) << ","
+                  << static_cast<int>(unused.blue) << ","
+                  << static_cast<int>(unused.alpha)
+                  << " left=" << static_cast<int>(left_of_box.red) << ","
+                  << static_cast<int>(left_of_box.green) << ","
+                  << static_cast<int>(left_of_box.blue) << "\n";
+        return false;
+    }
+
+    CardPart shifted{"title", "text", "title", 20, 24, 320, 36, 0, "#f2fff9", "", 0};
+    shifted.background = "#cc3333";
+    shifted.opacity = 1.0f;
+    shifted.fit_width = true;
+    shifted.fit_compensate = true;
+    shifted.font_size = 20;
+    const std::vector<CardPart> compensated_parts{
+        {"root", "block", "", 0, 0, 400, 160, 0, "#0e1916", "", 0},
+        shifted,
+    };
+    SceneWindow compensated(WindowConfig{
+        L"Hi",
+        L"body",
+        400,
+        160,
+        true,
+        0,
+        0,
+        false,
+        visual,
+        compensated_parts});
+    if (!compensated.create() || !compensated.is_renderer_ready() || !compensated.show() || !compensated.paint(true)) {
+        std::cerr << "fit-width compensate create failed\n";
+        return false;
+    }
+    Pixel grown{};
+    Pixel still_far{};
+    const bool grown_sampled = compensated.capture_pixels()
+        && compensated.sample_pixel(18, 40, grown)
+        && compensated.sample_pixel(260, 40, still_far);
+    const bool plate_grew_left = grown_sampled && grown.alpha >= 180 && grown.red > grown.green + 40 && grown.red > 140;
+    const bool compensated_far = grown_sampled && still_far.red < 80 && still_far.green < 90 && still_far.blue < 90;
+    compensated.request_close();
+    const auto compensated_pump = compensated.run_message_pump(false);
+    if (!plate_grew_left || !compensated_far || compensated_pump != 0) {
+        std::cerr << "fit-width compensate samples: sampled=" << grown_sampled
+                  << " grown=" << static_cast<int>(grown.red) << ","
+                  << static_cast<int>(grown.green) << ","
+                  << static_cast<int>(grown.blue) << ","
+                  << static_cast<int>(grown.alpha)
+                  << " far=" << static_cast<int>(still_far.red) << ","
+                  << static_cast<int>(still_far.green) << ","
+                  << static_cast<int>(still_far.blue) << "\n";
+        return false;
+    }
+    return true;
+#endif
+}
+
 bool scene_controller_self_test() {
 #ifndef _WIN32
     std::cerr << "SCENE_UNSUPPORTED: Runtime scene controller requires Windows\n";
     return false;
 #else
+    if (!overflow_origin_self_test()) return false;
+    if (!pointer_dismiss_after_drag_self_test()) return false;
+    if (!root_part_plate_self_test()) return false;
+    if (!ticker_text_fill_self_test()) return false;
     RuntimeSceneController controller;
     const SceneWindowState requested{137, 83, 500, 220};
     std::string error_code;
@@ -550,6 +1525,7 @@ bool scene_controller_self_test() {
         "controller-card",
         "Controller Card",
         "Native controller interaction",
+        "",
         SceneWindowState{700, 150, 320, 160},
         320,
         160};
@@ -581,6 +1557,7 @@ bool scene_controller_self_test() {
         "controller-card-2",
         "Second Controller Card",
         "Reflow after dismiss",
+        "",
         SceneWindowState{700, 330, 320, 160},
         320,
         160};
@@ -735,6 +1712,39 @@ bool scene_controller_self_test() {
         return false;
     }
 
+    {
+        RuntimeSceneController isolated;
+        SceneCardState channel_card{
+            "channel-keep-xy",
+            "Channel Keep XY",
+            "Must keep JS coordinates without active layout",
+            "",
+            SceneWindowState{400, 300, 320, 160},
+            320,
+            160};
+        channel_card.behavior_specified = true;
+        channel_card.behavior_profile_id = "stack";
+        channel_card.behavior_channel_id = "stack.main";
+        if (!isolated.create_card(channel_card, error_code, error_message)) {
+            std::cerr << "scene controller channel-without-layout create failed: " << error_code << " " << error_message << "\n";
+            return false;
+        }
+        isolated.pump_messages();
+        const auto channel_hwnd = FindWindowW(L"NotificationHubVNextSceneWindow", L"Channel Keep XY");
+        RECT channel_rect{};
+        const bool kept_xy = channel_hwnd != nullptr
+            && GetWindowRect(channel_hwnd, &channel_rect) != FALSE
+            && channel_rect.left == 400
+            && channel_rect.top == 300;
+        if (!kept_xy) {
+            std::cerr << "scene controller reflowed a behavior-channel card without active layout: "
+                      << channel_rect.left << "," << channel_rect.top << "\n";
+            return false;
+        }
+        isolated.dismiss_card("channel-keep-xy", error_code, error_message, "self-test");
+        isolated.pump_messages();
+    }
+
     const auto event = create_event(
         "scene-controller-self-test", "state-applied", "RUNTIME_SCENE_WINDOW_APPLY_OK", "info", true,
         "Runtime scene controller applied state to the native window", std::string(kTimestamp));
@@ -753,6 +1763,7 @@ bool controller_desktop_visual_self_test() {
         "controller-visual-card",
         "Controller desktop visual",
         "Real layered window pixels",
+        "",
         SceneWindowState{700, 150, 320, 160},
         320,
         160};
@@ -1211,6 +2222,7 @@ bool unicode_text_self_test() {
         "unicode-card",
         title,
         "UTF-8 text conversion",
+        "",
         SceneWindowState{120, 140, 320, 120},
         0,
         0};
@@ -1331,6 +2343,35 @@ bool window_self_test() {
         std::cerr << serialize_jsonl(event);
         return false;
     }
+    VisualStyle auto_style{};
+    auto_style.specified = true;
+    auto_style.auto_dismiss = true;
+    auto_style.dismiss_mode = "closeButton";
+    auto_style.dismiss_timeout_ms = 120000;
+    if (!valid_visual_style(auto_style)) {
+        std::cerr << "timeoutMs 120000 with autoDismiss must be valid\n";
+        return false;
+    }
+    auto_style.dismiss_timeout_ms = 40;
+    SceneWindow timed({
+        L"Auto dismiss self test",
+        L"timer",
+        320,
+        120,
+        true,
+        0,
+        0,
+        false,
+        auto_style});
+    if (!timed.create() || !timed.show()) {
+        std::cerr << "autoDismiss window create/show failed\n";
+        return false;
+    }
+    if (timed.run_message_pump(false) != 0 || timed.close_reason() != "timeout") {
+        std::cerr << "autoDismiss timer did not close card reason=" << timed.close_reason() << "\n";
+        return false;
+    }
+
     const auto event = create_event(
         "window-self-test", "dismissed", "RENDERER_WINDOW_LIFECYCLE_OK", "info", true,
         "Native scene window lifecycle completed", std::string(kTimestamp));
@@ -1350,9 +2391,15 @@ bool protocol_self_test() {
         R"({"protocolVersion":1,"requestId":"req-corpus-audio","traceId":"trace-corpus-audio","type":"audio.play","timestamp":"2026-08-01T00:00:00.000Z","payload":{"soundId":"default"}})";
     constexpr std::string_view visual_assets =
         R"({"protocolVersion":1,"requestId":"req-corpus-assets","traceId":"trace-corpus-assets","type":"visual-assets.configure","timestamp":"2026-08-01T00:00:00.000Z","payload":{"version":1,"assets":[]}})";
+    constexpr std::string_view font_assets =
+        R"({"protocolVersion":1,"requestId":"req-corpus-fonts","traceId":"trace-corpus-fonts","type":"font-assets.configure","timestamp":"2026-08-01T00:00:00.000Z","payload":{"version":1,"assets":[]}})";
+    constexpr std::string_view agent_avatars =
+        R"({"protocolVersion":1,"requestId":"req-corpus-agent-avatars","traceId":"trace-corpus-agent-avatars","type":"agent-avatars.configure","timestamp":"2026-08-01T00:00:00.000Z","payload":{"version":1,"items":[]}})";
     constexpr std::string_view voice_event =
         R"({"protocolVersion":1,"requestId":"evt-corpus-voice","traceId":"trace-corpus-voice","type":"event","timestamp":"2026-08-01T00:00:00.000Z","payload":{"eventType":"audio.voice_finished","result":{}}})";
     if (!expect_valid(audio_play, "audio.play") || !expect_valid(visual_assets, "visual-assets.configure")
+        || !expect_valid(font_assets, "font-assets.configure")
+        || !expect_valid(agent_avatars, "agent-avatars.configure")
         || !expect_valid(voice_event, "event")) return false;
     if (!expect_rejected(
             R"({"protocolVersion":1,"requestId":"req-invalid-time","traceId":"trace-invalid-time","type":"health","timestamp":"2026-08-01","payload":{}})",
@@ -1485,6 +2532,16 @@ int main(int argc, char** argv) {
         std::cout << "notification-hub-runtime scene controller self-test: " << (passed ? "ok" : "failed") << "\n";
         return passed ? 0 : 1;
     }
+    if (argc > 1 && std::string_view(argv[1]) == "--fit-width-self-test") {
+        const bool passed = fit_width_self_test();
+        std::cout << "notification-hub-runtime fit-width self-test: " << (passed ? "ok" : "failed") << "\n";
+        return passed ? 0 : 1;
+    }
+    if (argc > 1 && std::string_view(argv[1]) == "--root-part-self-test") {
+        const bool passed = root_part_plate_self_test() && ticker_text_fill_self_test() && fit_width_self_test();
+        std::cout << "notification-hub-runtime root part self-test: " << (passed ? "ok" : "failed") << "\n";
+        return passed ? 0 : 1;
+    }
     if (argc > 1 && std::string_view(argv[1]) == "--controller-desktop-visual-self-test") {
         const bool passed = controller_desktop_visual_self_test();
         std::cout << "notification-hub-runtime controller desktop visual self-test: " << (passed ? "ok" : "failed") << "\n";
@@ -1530,9 +2587,29 @@ int main(int argc, char** argv) {
         std::cout << "notification-hub-runtime visual self-test: " << (passed ? "ok" : "failed") << "\n";
         return passed ? 0 : 1;
     }
+    if (argc > 1 && std::string_view(argv[1]) == "--zero-opacity-hit-self-test") {
+        const bool passed = zero_opacity_hit_self_test();
+        std::cout << "notification-hub-runtime zero opacity hit self-test: " << (passed ? "ok" : "failed") << "\n";
+        return passed ? 0 : 1;
+    }
+    if (argc > 1 && std::string_view(argv[1]) == "--part-height-self-test") {
+        const bool passed = part_height_self_test();
+        std::cout << "notification-hub-runtime part height self-test: " << (passed ? "ok" : "failed") << "\n";
+        return passed ? 0 : 1;
+    }
     if (argc > 3 && std::string_view(argv[1]) == "--visual-asset-self-test") {
         const bool passed = visual_asset_self_test(argv[2], argv[3]);
         std::cout << "notification-hub-runtime visual asset self-test: " << (passed ? "ok" : "failed") << "\n";
+        return passed ? 0 : 1;
+    }
+    if (argc > 3 && std::string_view(argv[1]) == "--root-wallpaper-self-test") {
+        const bool passed = root_wallpaper_self_test(argv[2], argv[3]);
+        std::cout << "notification-hub-runtime root wallpaper self-test: " << (passed ? "ok" : "failed") << "\n";
+        return passed ? 0 : 1;
+    }
+    if (argc > 3 && std::string_view(argv[1]) == "--close-part-image-self-test") {
+        const bool passed = close_part_image_self_test(argv[2], argv[3]);
+        std::cout << "notification-hub-runtime close part image self-test: " << (passed ? "ok" : "failed") << "\n";
         return passed ? 0 : 1;
     }
     if (argc > 3 && std::string_view(argv[1]) == "--visual-asset-opacity-self-test") {

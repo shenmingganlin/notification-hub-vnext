@@ -338,10 +338,562 @@ test('Node client completes hello, health, and shutdown over Named Pipe', async 
   assert.deepEqual(withoutTimestamp(rejectedSnapshot), withoutTimestamp(stackedSnapshot));
   assert.notEqual(rejectedSnapshot.updatedAt, stackedSnapshot.updatedAt);
 
+  const insetStackedCard = await client.request('scene.set-mode', {
+    layout: 'stack',
+    direction: 'down',
+    anchor: 'top-right',
+    spacing: 12,
+    workAreaWidth: 800,
+    workAreaHeight: 600,
+    dpiScale: 1,
+    marginLeft: 18,
+    marginRight: 18,
+    marginTop: 18,
+    marginBottom: 18
+  }, { retryable: false, idempotencyKey: 'scene-stack-margin-1' });
+  assert.equal(insetStackedCard.type, 'ack');
+
+  const wideMargin = await client.request('scene.set-mode', {
+    layout: 'stack',
+    direction: 'down',
+    anchor: 'top-right',
+    spacing: 12,
+    workAreaWidth: 800,
+    workAreaHeight: 600,
+    dpiScale: 1,
+    marginLeft: 99,
+    marginRight: 18,
+    marginTop: 18,
+    marginBottom: 18
+  }, { retryable: false, idempotencyKey: 'scene-stack-margin-99' });
+  assert.equal(wideMargin.type, 'ack');
+  assert.deepEqual(insetStackedCard.payload.result.sceneCards.map((card) => ({
+    id: card.id,
+    x: card.x,
+    y: card.y
+  })), [
+    { id: 'card-a', x: 462, y: 18 },
+    { id: 'card-unicode-中文-🚀', x: 462, y: 190 },
+    { id: 'card-control-character', x: 462, y: 362 }
+  ]);
+
   const shutdown = await client.request('shutdown');
   assert.equal(shutdown.type, 'ack');
   assert.equal(shutdown.payload.requestType, 'shutdown');
 
+  const [exitCode] = await once(runtime, 'exit');
+  assert.equal(exitCode, 0, `Runtime exited with stderr: ${stderr}`);
+});
+
+test('Runtime accepts optional parts on scene.create without treating them as unknown keys', async (t) => {
+  if (!runtimePath) {
+    t.skip('requires a Runtime executable path; CTest supplies it');
+    return;
+  }
+  const pipeName = `\\\\.\\pipe\\notification-hub-vnext-parts-${process.pid}`;
+  const runtime = spawn(runtimePath, ['--pipe-server', pipeName], {
+    stdio: ['ignore', 'pipe', 'pipe'],
+    windowsHide: true
+  });
+  t.after(async () => {
+    if (!runtime.killed) runtime.kill();
+  });
+
+  let stdout = '';
+  let stderr = '';
+  runtime.stdout.setEncoding('utf8');
+  runtime.stderr.setEncoding('utf8');
+  runtime.stdout.on('data', (chunk) => { stdout += chunk; });
+  runtime.stderr.on('data', (chunk) => { stderr += chunk; });
+
+  await new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(`Runtime ready timeout; stderr=${stderr}`)), 3000);
+    const onData = () => {
+      if (!stdout.includes('named pipe ready:')) return;
+      clearTimeout(timer);
+      runtime.stdout.off('data', onData);
+      resolve();
+    };
+    runtime.stdout.on('data', onData);
+    runtime.once('error', (error) => {
+      clearTimeout(timer);
+      reject(error);
+    });
+  });
+
+  const client = new PipeClient({
+    pipeName,
+    connectTimeoutMs: 3000,
+    requestTimeoutMs: 3000,
+    reconnectDelayMs: 10
+  });
+  t.after(() => client.close());
+
+  await client.request('hello', { clientVersion: 'node-parts' });
+  const created = await client.request('scene.create', {
+    id: 'card-parts',
+    title: 'Parts card',
+    body: 'Drawn from parts',
+    assistantName: '明微',
+    x: 80,
+    y: 80,
+    width: 320,
+    height: 160,
+    visual: {
+      enabled: true,
+      preset: 'minimal',
+      intensity: 'balanced',
+      category: 'plugin',
+      cardType: 'minimal',
+      behavior: { layout: 'simple', boundary: 'work-area' },
+      appearance: { size: 'medium', aspectRatio: 'default', backgroundColor: '#0e1916', backgroundFit: 'fill', backgroundPadding: 0, borderRadius: 16, opacity: 0.96, borderWidth: 2, borderColor: '#62d0a8', paintOverflow: 12 },
+      interaction: { dismissMode: 'closeButton', closeButtonPosition: 'top-right', timeoutMs: 30000, hoverHighlight: true }
+    },
+    parts: [
+      { id: 'title', kind: 'text', binding: 'title', x: 30, y: 24, w: 200, h: 34, fill: '#f2fff9' },
+      { id: 'body', kind: 'text', binding: 'body', x: 30, y: 62, w: 260, h: 76 },
+      { id: 'close', kind: 'close', x: 270, y: 22, w: 28, h: 28, fill: '#1d2b27', stroke: '#62d0a8', strokeWidth: 1, radius: 14 },
+      { id: 'future-icon', kind: 'image', x: 8, y: 8, w: 16, h: 16, radius: 8 },
+      { id: 'assistantName', kind: 'text', binding: 'assistantName', x: 30, y: 8, w: 120, h: 16 }
+    ]
+  }, { retryable: false, idempotencyKey: 'card-parts-create' });
+  assert.equal(created.type, 'ack');
+  const createdCard = created.payload.result.sceneCards.find((card) => card.id === 'card-parts');
+  assert.ok(createdCard);
+  assert.equal(createdCard.visual.appearance.borderWidth, 2);
+  assert.equal(createdCard.visual.appearance.borderColor, '#62d0a8');
+  assert.equal(createdCard.visual.appearance.paintOverflow, 12);
+  assert.equal(createdCard.visual.interaction.hoverHighlight, true);
+
+  const updated = await client.request('scene.update', {
+    id: 'card-parts',
+    title: 'Parts updated',
+    body: 'Still from parts',
+    x: 90,
+    y: 90,
+    width: 320,
+    height: 160,
+    parts: [
+      { id: 'title', kind: 'text', binding: 'title', x: 30, y: 24, w: 200, h: 34 }
+    ]
+  }, { retryable: false, idempotencyKey: 'card-parts-update' });
+  assert.equal(updated.type, 'ack');
+  assert.ok(updated.payload.result.sceneCards.some((card) => card.id === 'card-parts' && card.x === 90));
+});
+
+test('Runtime accepts root block parts without treating them as unknown keys', async (t) => {
+  if (!runtimePath) {
+    t.skip('requires a Runtime executable path; CTest supplies it');
+    return;
+  }
+  const pipeName = `\\\\.\\pipe\\notification-hub-vnext-root-part-${process.pid}`;
+  const runtime = spawn(runtimePath, ['--pipe-server', pipeName], {
+    stdio: ['ignore', 'pipe', 'pipe'],
+    windowsHide: true
+  });
+  t.after(async () => {
+    if (!runtime.killed) runtime.kill();
+  });
+
+  let stdout = '';
+  let stderr = '';
+  runtime.stdout.setEncoding('utf8');
+  runtime.stderr.setEncoding('utf8');
+  runtime.stdout.on('data', (chunk) => { stdout += chunk; });
+  runtime.stderr.on('data', (chunk) => { stderr += chunk; });
+
+  await new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(`Runtime ready timeout; stderr=${stderr}`)), 3000);
+    const onData = () => {
+      if (!stdout.includes('named pipe ready:')) return;
+      clearTimeout(timer);
+      runtime.stdout.off('data', onData);
+      resolve();
+    };
+    runtime.stdout.on('data', onData);
+    runtime.once('error', (error) => {
+      clearTimeout(timer);
+      reject(error);
+    });
+  });
+
+  const client = new PipeClient({
+    pipeName,
+    connectTimeoutMs: 3000,
+    requestTimeoutMs: 3000,
+    reconnectDelayMs: 10
+  });
+  t.after(() => client.close());
+
+  await client.request('hello', { clientVersion: 'node-root-part' });
+  const created = await client.request('scene.create', {
+    id: 'card-root-part',
+    title: 'Root plate',
+    body: 'Drawn from root part',
+    x: 80,
+    y: 80,
+    width: 320,
+    height: 160,
+    visual: {
+      enabled: true,
+      preset: 'minimal',
+      intensity: 'balanced',
+      category: 'plugin',
+      cardType: 'minimal',
+      behavior: { layout: 'simple', boundary: 'work-area' },
+      appearance: { size: 'medium', aspectRatio: 'default', backgroundColor: '#ff0000', backgroundFit: 'fill', backgroundPadding: 0, borderRadius: 16, opacity: 0.96, borderWidth: 0, borderColor: '#ff0000', paintOverflow: 0 },
+      interaction: { dismissMode: 'closeButton', closeButtonPosition: 'top-right', timeoutMs: 30000, hoverHighlight: true }
+    },
+    parts: [
+      { id: 'root', kind: 'block', x: 0, y: 0, w: 320, h: 160, fill: '#0044aa', stroke: '#62d0a8', strokeWidth: 2 },
+      { id: 'title', kind: 'text', binding: 'title', x: 30, y: 24, w: 200, h: 34 },
+      { id: 'body', kind: 'text', binding: 'body', x: 30, y: 62, w: 260, h: 76 }
+    ]
+  }, { retryable: false, idempotencyKey: 'card-root-part-create' });
+  assert.equal(created.type, 'ack');
+  const createdCard = created.payload.result.sceneCards.find((card) => card.id === 'card-root-part');
+  assert.ok(createdCard);
+  assert.equal(createdCard.visual.appearance.backgroundColor, '#ff0000');
+});
+
+test('Runtime accepts root wallpaper keys on parts without treating them as unknown keys', async (t) => {
+  if (!runtimePath) {
+    t.skip('requires a Runtime executable path; CTest supplies it');
+    return;
+  }
+  const pipeName = `\\\\.\\pipe\\notification-hub-vnext-root-wallpaper-${process.pid}`;
+  const runtime = spawn(runtimePath, ['--pipe-server', pipeName], {
+    stdio: ['ignore', 'pipe', 'pipe'],
+    windowsHide: true
+  });
+  t.after(async () => {
+    if (!runtime.killed) runtime.kill();
+  });
+
+  let stdout = '';
+  let stderr = '';
+  runtime.stdout.setEncoding('utf8');
+  runtime.stderr.setEncoding('utf8');
+  runtime.stdout.on('data', (chunk) => { stdout += chunk; });
+  runtime.stderr.on('data', (chunk) => { stderr += chunk; });
+
+  await new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(`Runtime ready timeout; stderr=${stderr}`)), 3000);
+    const onData = () => {
+      if (!stdout.includes('named pipe ready:')) return;
+      clearTimeout(timer);
+      runtime.stdout.off('data', onData);
+      resolve();
+    };
+    runtime.stdout.on('data', onData);
+    runtime.once('error', (error) => {
+      clearTimeout(timer);
+      reject(error);
+    });
+  });
+
+  const client = new PipeClient({
+    pipeName,
+    connectTimeoutMs: 3000,
+    requestTimeoutMs: 3000,
+    reconnectDelayMs: 10
+  });
+  t.after(() => client.close());
+
+  await client.request('hello', { clientVersion: 'node-root-wallpaper' });
+  const created = await client.request('scene.create', {
+    id: 'card-root-wallpaper',
+    title: 'Root wallpaper',
+    body: 'Keys on root part',
+    x: 80,
+    y: 80,
+    width: 320,
+    height: 160,
+    visual: {
+      enabled: true,
+      preset: 'minimal',
+      intensity: 'balanced',
+      category: 'plugin',
+      cardType: 'minimal',
+      behavior: { layout: 'simple', boundary: 'work-area' },
+      appearance: { size: 'medium', aspectRatio: 'default', backgroundColor: '#0044aa', backgroundFit: 'fill', backgroundPadding: 0, borderRadius: 16, opacity: 0.96 },
+      interaction: { dismissMode: 'closeButton', closeButtonPosition: 'top-right', timeoutMs: 30000 }
+    },
+    parts: [
+      {
+        id: 'root',
+        kind: 'block',
+        x: 0,
+        y: 0,
+        w: 320,
+        h: 160,
+        fill: '#0044aa',
+        backgroundAssetId: 'wall-red',
+        backgroundFit: 'cover',
+        backgroundScale: 1.25,
+        backgroundX: 0.2,
+        backgroundY: 0.8
+      },
+      { id: 'title', kind: 'text', binding: 'title', x: 30, y: 24, w: 200, h: 34 }
+    ]
+  }, { retryable: false, idempotencyKey: 'card-root-wallpaper-create' });
+  assert.equal(created.type, 'ack');
+  const createdCard = created.payload.result.sceneCards.find((card) => card.id === 'card-root-wallpaper');
+  assert.ok(createdCard);
+});
+
+test('scene.update overflow keeps the hit-box origin after HWND sync', async (t) => {
+  if (!runtimePath) {
+    t.skip('requires a Runtime executable path; CTest supplies it');
+    return;
+  }
+  const pipeName = `\\\\.\\pipe\\notification-hub-vnext-overflow-origin-${process.pid}`;
+  const runtime = spawn(runtimePath, ['--pipe-server', pipeName], {
+    stdio: ['ignore', 'pipe', 'pipe'],
+    windowsHide: true
+  });
+  t.after(async () => {
+    if (!runtime.killed) runtime.kill();
+  });
+
+  let stdout = '';
+  let stderr = '';
+  runtime.stdout.setEncoding('utf8');
+  runtime.stderr.setEncoding('utf8');
+  runtime.stdout.on('data', (chunk) => { stdout += chunk; });
+  runtime.stderr.on('data', (chunk) => { stderr += chunk; });
+
+  await new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(`Runtime ready timeout; stderr=${stderr}`)), 3000);
+    const onData = () => {
+      if (!stdout.includes('named pipe ready:')) return;
+      clearTimeout(timer);
+      runtime.stdout.off('data', onData);
+      resolve();
+    };
+    runtime.stdout.on('data', onData);
+    runtime.once('error', (error) => {
+      clearTimeout(timer);
+      reject(error);
+    });
+  });
+
+  const client = new PipeClient({
+    pipeName,
+    connectTimeoutMs: 3000,
+    requestTimeoutMs: 3000,
+    reconnectDelayMs: 10
+  });
+  t.after(() => client.close());
+
+  const visual = (paintOverflow) => ({
+    enabled: true,
+    preset: 'minimal',
+    intensity: 'balanced',
+    category: 'plugin',
+    cardType: 'minimal',
+    behavior: { layout: 'simple', boundary: 'work-area' },
+    appearance: {
+      size: 'medium',
+      aspectRatio: 'default',
+      backgroundColor: '#0e1916',
+      backgroundFit: 'fill',
+      backgroundPadding: 0,
+      borderRadius: 16,
+      opacity: 0.96,
+      paintOverflow
+    },
+    interaction: { dismissMode: 'closeButton', closeButtonPosition: 'top-right', timeoutMs: 30000 }
+  });
+  const cardFrom = (response) => response.payload.result.sceneCards.find((card) => card.id === 'card-overflow-origin');
+
+  await client.request('hello', { clientVersion: 'node-overflow-origin' });
+  const created = await client.request('scene.create', {
+    id: 'card-overflow-origin',
+    title: 'Overflow origin',
+    body: 'Hit-box must stay put',
+    x: 100,
+    y: 200,
+    width: 320,
+    height: 160,
+    visual: visual(0)
+  }, { retryable: false, idempotencyKey: 'overflow-origin-create' });
+  assert.equal(created.type, 'ack');
+
+  const afterCreate = cardFrom(await client.request('health', {}, { retryable: false }));
+  assert.ok(afterCreate);
+  assert.equal(afterCreate.x, 100);
+  assert.equal(afterCreate.y, 200);
+
+  const updated12 = await client.request('scene.update', {
+    id: 'card-overflow-origin',
+    title: 'Overflow origin',
+    body: 'Hit-box must stay put',
+    x: afterCreate.x,
+    y: afterCreate.y,
+    width: 320,
+    height: 160,
+    visual: visual(12)
+  }, { retryable: false, idempotencyKey: 'overflow-origin-12' });
+  assert.equal(updated12.type, 'ack');
+
+  const after12 = cardFrom(await client.request('health', {}, { retryable: false }));
+  assert.ok(after12);
+  assert.equal(after12.x, 100);
+  assert.equal(after12.y, 200);
+  assert.equal(after12.visual.appearance.paintOverflow, 12);
+
+  const updated24 = await client.request('scene.update', {
+    id: 'card-overflow-origin',
+    title: 'Overflow origin',
+    body: 'Hit-box must stay put',
+    x: after12.x,
+    y: after12.y,
+    width: 320,
+    height: 160,
+    visual: visual(24)
+  }, { retryable: false, idempotencyKey: 'overflow-origin-24' });
+  assert.equal(updated24.type, 'ack');
+
+  const after24 = cardFrom(await client.request('health', {}, { retryable: false }));
+  assert.ok(after24);
+  assert.equal(after24.x, 100);
+  assert.equal(after24.y, 200);
+  assert.equal(after24.visual.appearance.paintOverflow, 24);
+
+  const updated120 = await client.request('scene.update', {
+    id: 'card-overflow-origin',
+    title: 'Overflow origin',
+    body: 'Hit-box must stay put',
+    x: after24.x,
+    y: after24.y,
+    width: 320,
+    height: 160,
+    visual: visual(120)
+  }, { retryable: false, idempotencyKey: 'overflow-origin-120' });
+  assert.equal(updated120.type, 'ack');
+  const after120 = cardFrom(await client.request('health', {}, { retryable: false }));
+  assert.equal(after120.visual.appearance.paintOverflow, 120);
+  assert.equal(after120.x, 100);
+  assert.equal(after120.y, 200);
+
+  const updated240 = await client.request('scene.update', {
+    id: 'card-overflow-origin',
+    title: 'Overflow origin',
+    body: 'Hit-box must stay put',
+    x: after120.x,
+    y: after120.y,
+    width: 320,
+    height: 160,
+    visual: visual(240)
+  }, { retryable: false, idempotencyKey: 'overflow-origin-240' });
+  assert.equal(updated240.type, 'ack');
+  const after240 = cardFrom(await client.request('health', {}, { retryable: false }));
+  assert.equal(after240.visual.appearance.paintOverflow, 240);
+  assert.equal(after240.x, 100);
+  assert.equal(after240.y, 200);
+
+  await assert.rejects(
+    client.request('scene.update', {
+      id: 'card-overflow-origin',
+      title: 'Overflow origin',
+      body: 'Hit-box must stay put',
+      x: after240.x,
+      y: after240.y,
+      width: 320,
+      height: 160,
+      visual: visual(241)
+    }, { retryable: false, idempotencyKey: 'overflow-origin-241' }),
+    (error) => error.code === 'RUNTIME_SCENE_CARD_INVALID'
+  );
+
+  const shutdown = await client.request('shutdown');
+  assert.equal(shutdown.type, 'ack');
+  const [exitCode] = await once(runtime, 'exit');
+  assert.equal(exitCode, 0, `Runtime exited with stderr: ${stderr}`);
+});
+
+test('Runtime ACKs autoDismiss and keeps channel-only create coordinates without set-mode', async (t) => {
+  if (!runtimePath) {
+    t.skip('requires a Runtime executable path; CTest supplies it');
+    return;
+  }
+  const pipeName = `\\\\.\\pipe\\notification-hub-vnext-autodismiss-${process.pid}`;
+  const runtime = spawn(runtimePath, ['--pipe-server', pipeName], {
+    stdio: ['ignore', 'pipe', 'pipe'],
+    windowsHide: true
+  });
+  t.after(async () => {
+    if (!runtime.killed) runtime.kill();
+  });
+  let stdout = '';
+  let stderr = '';
+  runtime.stdout.setEncoding('utf8');
+  runtime.stderr.setEncoding('utf8');
+  runtime.stdout.on('data', (chunk) => { stdout += chunk; });
+  runtime.stderr.on('data', (chunk) => { stderr += chunk; });
+  await new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(`Runtime ready timeout; stderr=${stderr}`)), 3000);
+    const onData = () => {
+      if (!stdout.includes('named pipe ready:')) return;
+      clearTimeout(timer);
+      runtime.stdout.off('data', onData);
+      resolve();
+    };
+    runtime.stdout.on('data', onData);
+    runtime.once('error', reject);
+  });
+  const client = new PipeClient({
+    pipeName,
+    connectTimeoutMs: 3000,
+    requestTimeoutMs: 3000,
+    reconnectDelayMs: 10
+  });
+  t.after(() => client.close());
+  await client.request('hello', { clientVersion: 'auto-dismiss-smoke' });
+  const created = await client.request('scene.create', {
+    id: 'card-auto-dismiss',
+    title: 'Auto dismiss',
+    body: 'ACK autoDismiss',
+    x: 88,
+    y: 144,
+    width: 320,
+    height: 160,
+    visual: {
+      enabled: true,
+      preset: 'minimal',
+      intensity: 'balanced',
+      category: 'plugin',
+      cardType: 'minimal',
+      behavior: { layout: 'simple', boundary: 'work-area' },
+      appearance: { size: 'medium', aspectRatio: 'default', backgroundColor: '#0e1916', backgroundFit: 'fill', backgroundPadding: 0, borderRadius: 16, opacity: 0.96 },
+      interaction: { dismissMode: 'closeButton', closeButtonPosition: 'top-right', timeoutMs: 120000, autoDismiss: true }
+    }
+  }, { retryable: false, idempotencyKey: 'card-auto-dismiss-create' });
+  assert.equal(created.type, 'ack');
+  const autoCard = created.payload.result.sceneCards.find((card) => card.id === 'card-auto-dismiss');
+  assert.equal(autoCard.visual.interaction.autoDismiss, true);
+  assert.equal(autoCard.visual.interaction.timeoutMs, 120000);
+  assert.equal(autoCard.x, 88);
+  assert.equal(autoCard.y, 144);
+
+  const channelCreated = await client.request('scene.create', {
+    id: 'card-channel-keep-xy',
+    title: 'Keep XY',
+    body: 'no set-mode',
+    x: 410,
+    y: 220,
+    width: 320,
+    height: 160,
+    behavior: { behaviorProfileId: 'stack', behaviorChannelId: 'stack.main' }
+  }, { retryable: false, idempotencyKey: 'card-channel-keep-xy-create' });
+  assert.equal(channelCreated.type, 'ack');
+  const channelCard = channelCreated.payload.result.sceneCards.find((card) => card.id === 'card-channel-keep-xy');
+  assert.equal(channelCard.x, 410);
+  assert.equal(channelCard.y, 220);
+
+  const shutdown = await client.request('shutdown');
+  assert.equal(shutdown.type, 'ack');
   const [exitCode] = await once(runtime, 'exit');
   assert.equal(exitCode, 0, `Runtime exited with stderr: ${stderr}`);
 });

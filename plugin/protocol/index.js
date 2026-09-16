@@ -21,6 +21,8 @@ export const COMMAND_TYPES = Object.freeze([
   'scene.set-mode',
   'config.update',
   'visual-assets.configure',
+  'font-assets.configure',
+  'agent-avatars.configure',
   'diagnostic.subscribe',
   'shutdown',
   'audio.health',

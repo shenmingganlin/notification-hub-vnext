@@ -4,7 +4,7 @@ import path from 'node:path';
 import { PipeClient } from './pipe-client.js';
 import { loadRecoveryPlan } from './recovery-plan.js';
 import { RuntimeProcessManager } from './process-manager.js';
-import { createSceneStatePersistenceFromHostContext } from './scene-state-config.js';
+import { createSceneStatePersistenceFromHostContext } from './scene-state-persistence.js';
 
 function hostError(code, message, details = {}) {
   return Object.assign(new Error(message), { code, details });
@@ -50,6 +50,19 @@ function isDiagnosticError(code) {
     code.startsWith('TRANSPORT_')
     || /(?:FAILED|ERROR|EXITED|DISCONNECTED|EXHAUSTED|TIMEOUT|INVALID|MISSING|ROLLBACK)/.test(code)
   );
+}
+
+const TRANSPORT_RECONNECTING_CODES = new Set([
+  'TRANSPORT_RECONNECT_RETRY',
+  'TRANSPORT_DISCONNECTED',
+  'TRANSPORT_CONNECT_TIMEOUT',
+  'TRANSPORT_PIPE_CONNECT_FAILED',
+  'TRANSPORT_PIPE_READ_FAILED',
+  'TRANSPORT_PIPE_WRITE_FAILED'
+]);
+
+function marksHostReconnecting(code) {
+  return code === 'RUNTIME_RESTART_SCHEDULED' || TRANSPORT_RECONNECTING_CODES.has(code);
 }
 
 export class RuntimeHostAdapter extends EventEmitter {
@@ -159,9 +172,7 @@ export class RuntimeHostAdapter extends EventEmitter {
     if (event === 'diagnostic') {
       const code = payload?.code;
       if (code === 'RUNTIME_RESTART_SCHEDULED') this.runtimeRestartInProgress = true;
-      if (code === 'RUNTIME_RESTART_SCHEDULED'
-        || code === 'TRANSPORT_RECONNECT_RETRY'
-        || (typeof code === 'string' && code.startsWith('TRANSPORT_') && code !== 'TRANSPORT_CLIENT_CLOSED')) {
+      if (marksHostReconnecting(code)) {
         this.setState('reconnecting');
       }
       if (isDiagnosticError(code)) {
