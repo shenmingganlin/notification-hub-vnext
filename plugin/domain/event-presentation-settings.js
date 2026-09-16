@@ -3,7 +3,7 @@ import { createImportanceSettings } from './notification-importance.js';
 import { createEffectRules } from './effect-rules.js';
 import { createPresentationBinding, createPresentationProfile } from './notification-presentation-profile.js';
 import { createCardChannelPolicies } from './card-runtime-policy.js';
-import { createBehaviorChannels } from './behavior-channel.js';
+import { createEventLanes as createBehaviorChannels } from './event-lane.js';
 
 export const EVENT_PRESENTATION_SETTINGS_VERSION = 1;
 

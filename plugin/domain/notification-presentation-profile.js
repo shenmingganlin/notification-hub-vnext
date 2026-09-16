@@ -1,6 +1,6 @@
 import { createEffectRules, resolveEffectRule } from './effect-rules.js';
 import { createCardChannelPolicies } from './card-runtime-policy.js';
-import { createBehaviorChannels, resolveBehaviorChannel } from './behavior-channel.js';
+import { createEventLanes as createBehaviorChannels, resolveEventLane as resolveBehaviorChannel } from './event-lane.js';
 
 export const BEHAVIOR_PROFILE_IDS = Object.freeze(['stack', 'danmaku', 'ticker', 'popup']);
 

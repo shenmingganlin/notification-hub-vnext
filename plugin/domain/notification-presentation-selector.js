@@ -2,7 +2,7 @@ import { getEventDefinition } from './notification-event-catalog.js';
 import { createCanonicalEvent, canonicalEventFromLegacy } from './notification-semantics.js';
 import { resolvePresentationBinding } from './notification-presentation-profile.js';
 import { resolveCardChannelPolicy } from './card-runtime-policy.js';
-import { resolveBehaviorChannel } from './behavior-channel.js';
+import { resolveEventLane as resolveBehaviorChannel } from './event-lane.js';
 
 function selectorError(code, message, field, details = {}) {
   const error = new Error(message);
