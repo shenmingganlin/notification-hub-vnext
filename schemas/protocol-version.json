@@ -10,6 +10,7 @@
     "scene.dismiss",
     "scene.drag",
     "scene.set-mode",
+    "scene.set-charter",
     "config.update",
     "diagnostic.subscribe",
     "shutdown",

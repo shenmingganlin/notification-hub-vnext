@@ -916,7 +916,7 @@ function assertStackSetModeBeforeCreate(calls, { anchor, direction, spacing, mar
   assert.equal('dpiScale' in payload, false);
 }
 
-test('stack try-one and preview send set-mode before create; ticker try-one does not', async () => {
+test('stack try-one and preview send set-mode before create; ticker try-one sends set-charter', async () => {
   const plugin = new NotificationHubVNextPlugin(context());
   const tryCalls = [];
   plugin.runtimeHost = { state: 'running', client: { async request(type, payload) { tryCalls.push([type, payload]); if (type === 'health') return { payload: { result: { workArea: { left: 0, top: 0, width: 1920, height: 1080 }, layout: { direction: 'right', anchor: 'bottom-left', spacing: 12 } } } }; return { payload: { result: { status: 'accepted' } } }; } } };
@@ -938,7 +938,13 @@ test('stack try-one and preview send set-mode before create; ticker try-one does
     }
   });
   assert.equal(tryCalls.some(([type]) => type === 'scene.set-mode'), false);
-  assert.ok(tryCalls.some(([type]) => type === 'scene.create'));
+  const charterIndex = tryCalls.findIndex(([type]) => type === 'scene.set-charter');
+  const createIndex = tryCalls.findIndex(([type]) => type === 'scene.create');
+  assert.ok(charterIndex >= 0 && createIndex > charterIndex);
+  assert.equal(tryCalls[charterIndex][1].flight, 'ticker');
+  assert.equal(tryCalls[charterIndex][1].charter.band, 'top');
+  assert.equal(tryCalls[charterIndex][1].charter.minGapPx, 64);
+  assert.equal('direction' in tryCalls[charterIndex][1].charter, false);
 
   const previewCalls = [];
   plugin.runtimeHost = previewRuntime(previewCalls);

@@ -38,12 +38,12 @@ void append_utf8(std::string& output, std::uint32_t code_point) {
 
 constexpr std::string_view kCommands[] = {
     "hello", "health", "capabilities", "scene.create", "scene.update",
-    "scene.dismiss", "scene.drag", "scene.set-mode", "config.update", "visual-assets.configure", "font-assets.configure", "agent-avatars.configure",
+    "scene.dismiss", "scene.drag", "scene.set-mode", "scene.set-charter", "config.update", "visual-assets.configure", "font-assets.configure", "agent-avatars.configure",
     "diagnostic.subscribe", "shutdown", "audio.health", "audio.cue", "audio.load", "audio.play", "audio.stop", "audio.stop_all", "audio.unload", "audio.shutdown"
 };
 constexpr std::string_view kMessageTypes[] = {
     "hello", "health", "capabilities", "scene.create", "scene.update",
-    "scene.dismiss", "scene.drag", "scene.set-mode", "config.update", "visual-assets.configure", "font-assets.configure", "agent-avatars.configure",
+    "scene.dismiss", "scene.drag", "scene.set-mode", "scene.set-charter", "config.update", "visual-assets.configure", "font-assets.configure", "agent-avatars.configure",
     "diagnostic.subscribe", "shutdown", "audio.health", "audio.cue", "audio.load", "audio.play", "audio.stop", "audio.stop_all", "audio.unload", "audio.shutdown", "ack", "error", "event"
 };
 constexpr std::string_view kEventTypes[] = { "scene.changed", "audio.voice_finished" };

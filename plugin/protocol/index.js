@@ -19,6 +19,7 @@ export const COMMAND_TYPES = Object.freeze([
   'scene.dismiss',
   'scene.drag',
   'scene.set-mode',
+  'scene.set-charter',
   'config.update',
   'visual-assets.configure',
   'font-assets.configure',

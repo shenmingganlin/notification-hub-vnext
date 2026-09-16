@@ -243,6 +243,9 @@ public:
         bool ticker_options_specified{};
     };
 
+    TickerChannelOptions explicit_ticker_charter{};
+    bool explicit_ticker_charter_specified{};
+
     static std::string channel_id_for(const SceneCardState& card) {
         return card.behavior_specified && !card.behavior_channel_id.empty()
             ? card.behavior_channel_id
@@ -343,9 +346,13 @@ public:
                 channel_it = behavior_channels.emplace(channel_id, std::move(channel)).first;
                 behavior_channel_order.push_back(channel_id);
             }
-            if (card_it->second.visual.ticker_specified && !channel_it->second.ticker_options_specified) {
-                // Seed TickerCharter once. Later cards must not rewrite band/tracks/gap.
-                // Direction and speed are TickerMotion on the card, applied at spawn.
+            const bool ticker_card = card_it->second.visual.ticker_specified
+                || is_ticker_profile(channel_it->second.profile_id);
+            if (explicit_ticker_charter_specified && ticker_card) {
+                channel_it->second.ticker_options = explicit_ticker_charter;
+                channel_it->second.ticker_options_specified = true;
+            } else if (card_it->second.visual.ticker_specified && !channel_it->second.ticker_options_specified) {
+                // Compat seed: first ticker card writes the highway if JS has not sent set-charter.
                 auto& options = channel_it->second.ticker_options;
                 options.band_top = card_it->second.visual.ticker_band != "bottom";
                 options.band_ratio = card_it->second.visual.ticker_band_ratio;
@@ -1241,6 +1248,19 @@ bool RuntimeSceneController::apply_stack_layout(
     std::string& error_code,
     std::string& error_message) {
     return apply_channel_layout(options, error_code, error_message);
+}
+
+bool RuntimeSceneController::apply_ticker_charter(
+    const TickerChannelOptions& options,
+    std::string& error_code,
+    std::string& error_message) {
+    if (impl_ == nullptr) impl_ = new Impl();
+    impl_->explicit_ticker_charter = options;
+    impl_->explicit_ticker_charter_specified = true;
+    impl_->rebuild_behavior_channels();
+    static_cast<void>(error_code);
+    static_cast<void>(error_message);
+    return true;
 }
 
 bool RuntimeSceneController::get_window_state(SceneWindowState& state) const noexcept {

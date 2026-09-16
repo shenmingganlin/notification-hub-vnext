@@ -1,6 +1,7 @@
 #pragma once
 
 #include "layout.hpp"
+#include "ticker.hpp"
 #include "visual.hpp"
 
 #include <string>
@@ -61,6 +62,7 @@ public:
         std::string& error_message,
         std::string_view reason = "scene.dismiss");
     bool apply_stack_layout(const StackLayoutOptions& options, std::string& error_code, std::string& error_message);
+    bool apply_ticker_charter(const TickerChannelOptions& options, std::string& error_code, std::string& error_message);
     void configure_visual_assets(const std::vector<VisualAssetRecord>& assets, std::string_view root_dir);
     void configure_font_assets(const std::vector<VisualAssetRecord>& assets, std::string_view root_dir);
     void configure_agent_avatars(const std::vector<VisualAssetRecord>& assets, std::string_view root_dir);

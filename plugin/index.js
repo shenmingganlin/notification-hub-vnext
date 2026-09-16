@@ -53,7 +53,7 @@ import {
 } from './domain/sidebar-display-settings.js';
 import { createSidebarDisplaySettingsPersistence } from './domain/sidebar-display-settings-persistence.js';
 import { VisualSettingsStore } from './domain/visual-settings-store.js';
-import { isTickerFlight } from './domain/channel-charter.js';
+import { isTickerFlight, splitLegacyTicker, toNativeTickerCharterPayload } from './domain/channel-charter.js';
 import { createVisualProfile, resolveTickerMotion } from './domain/visual-settings.js';
 import { CARD_ANCHORS, CARD_ASPECT_RATIOS, CARD_BOUNDARIES, CARD_LAYOUTS, CARD_SIZES, MINIMAL_CARD_DEFAULTS, PROPERTIES_DEFAULTS } from './domain/card-visual-settings.js';
 import { createBehaviorManager } from './domain/notification-behavior-manager.js';
@@ -125,7 +125,8 @@ import {
   resolveVisualEventCardIntent as resolveVisualEventCardIntentFromState,
   classifyVisualDiagnosticLevel,
   visualPreviewFingerprint,
-  TEST_EVENT_PRESENTATION_IDS
+  TEST_EVENT_PRESENTATION_IDS,
+  VISUAL_EVENT_TICKER_CHANNEL
 } from './domain/visual-event-native-behavior.js';
 import { createVisualAssetLibrary } from './domain/visual-asset-library.js';
 import { createVisualAssetStorage } from './domain/visual-asset-storage.js';
@@ -2655,17 +2656,29 @@ export default class NotificationHubVNextPlugin {
     );
   }
 
-  async ensureNativeStackLayout(host, visual) {
+  async ensureNativeFlightCharter(host, visual) {
     if (!host?.client?.request) return;
-    if (isTickerBehavior(visual?.behaviorId)) return;
+    if (isTickerBehavior(visual?.behaviorId)) {
+      await host.client.request(
+        'scene.set-charter',
+        toNativeTickerCharterPayload(splitLegacyTicker(visual?.ticker ?? {}).charter, VISUAL_EVENT_TICKER_CHANNEL),
+        { retryable: false }
+      );
+      return;
+    }
     await host.client.request('scene.set-mode', spaceToNativeStackLayout(visual?.space), { retryable: false });
+  }
+
+  async ensureNativeStackLayout(host, visual) {
+    return this.ensureNativeFlightCharter(host, visual);
   }
 
   async createNotificationSceneNative({ record, card, selector, behavior, visual } = {}) {
     const host = this.runtimeHost;
     await this.ensureNativeStackLayout(host, visual ?? {
       behaviorId: behavior?.behaviorProfileId ?? card?.behavior?.behaviorProfileId,
-      space: visual?.space
+      space: visual?.space,
+      ticker: visual?.ticker
     });
     await this.applyAgentAvatarManifestForRecord(record);
     try {
@@ -3632,7 +3645,8 @@ export default class NotificationHubVNextPlugin {
       : '当前工作室草稿，不写通知历史。';
     await this.ensureNativeStackLayout(host, {
       behaviorId: profile.behaviorId,
-      space: profile.card?.types?.[profile.card.activeType]?.properties?.space
+      space: profile.card?.types?.[profile.card.activeType]?.properties?.space,
+      ticker: profile.ticker
     });
     const response = await host.client.request('scene.create', card, sceneCreateOptions());
     this.recordVisualDiagnostic({ code: 'VISUAL_DRAFT_SAMPLE_CREATED', message: 'Visual draft sample created' }, 'DRAFT_SAMPLE', { cardId: id, behaviorId: profile.behaviorId });
@@ -3665,7 +3679,8 @@ export default class NotificationHubVNextPlugin {
       card.body = `使用已绑定配置包：${binding.visualProfileId}`;
       await this.ensureNativeStackLayout(host, {
         behaviorId: profile.profile?.behaviorId ?? card.behavior?.behaviorProfileId,
-        space: profile.profile?.card?.types?.[profile.profile.card?.activeType ?? 'minimal']?.properties?.space
+        space: profile.profile?.card?.types?.[profile.profile.card?.activeType ?? 'minimal']?.properties?.space,
+        ticker: profile.profile?.ticker
       });
       const response = await host.client.request('scene.create', card, sceneCreateOptions());
       results.push({ eventId, visualProfileId: binding.visualProfileId, cardId: id, response: response?.payload?.result ?? null });
@@ -3713,7 +3728,8 @@ export default class NotificationHubVNextPlugin {
     const source = draft ?? this.visualSettingsStore.getSnapshot().settings.profile;
     await this.ensureNativeStackLayout(host, {
       behaviorId: source?.behaviorId ?? card.behavior?.behaviorProfileId,
-      space: source?.card?.types?.[source.card?.activeType ?? 'minimal']?.properties?.space
+      space: source?.card?.types?.[source.card?.activeType ?? 'minimal']?.properties?.space,
+      ticker: source?.ticker
     });
     const response = await host.client.request('scene.create', card, sceneCreateOptions());
     this.visualWorkbenchCardId = card.id;
@@ -3805,7 +3821,8 @@ export default class NotificationHubVNextPlugin {
     const source = draft ?? this.visualSettingsStore.getSnapshot().settings.profile;
     await this.ensureNativeStackLayout(host, {
       behaviorId: source?.behaviorId ?? card.behavior?.behaviorProfileId,
-      space: source?.card?.types?.[source.card?.activeType ?? 'minimal']?.properties?.space
+      space: source?.card?.types?.[source.card?.activeType ?? 'minimal']?.properties?.space,
+      ticker: source?.ticker
     });
     const response = await host.client.request('scene.create', card, sceneCreateOptions());
     const responseResult = response?.payload?.result ?? null;

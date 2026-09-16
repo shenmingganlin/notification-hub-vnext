@@ -279,3 +279,49 @@ test('Native stack cards on a mixed channel do not fly', async (t) => {
     assert.equal(exitCode, 0, `Runtime exited with stderr: ${stderrOf()}`);
   });
 });
+
+test('Native ticker charter band beats the card visual seed', async (t) => {
+  await withRuntime(t, 'ticker-charter', async (client, runtime, stderrOf) => {
+    await client.request('scene.set-mode', {
+      layout: 'stack',
+      direction: 'down',
+      anchor: 'top-left',
+      spacing: 20,
+      workAreaWidth: 1200,
+      workAreaHeight: 800,
+      dpiScale: 1
+    }, { retryable: false });
+    await client.request('scene.set-charter', {
+      flight: 'ticker',
+      channelId: 'visual.event.ticker',
+      charter: {
+        band: 'bottom',
+        bandRatio: 0.28,
+        trackCount: 1,
+        trackGapPx: 8,
+        minGapPx: 80,
+        clickThrough: true,
+        overflow: 'avoid'
+      }
+    }, { retryable: false });
+    await client.request('scene.create', {
+      id: 'charter-bottom',
+      title: 'charter-bottom',
+      body: 'visual says top',
+      x: 0,
+      y: 0,
+      width: 320,
+      height: 76,
+      visual: tickerVisual(400, { band: 'top' }),
+      behavior: { behaviorProfileId: 'ticker', behaviorChannelId: 'visual.event.ticker' }
+    }, { retryable: false });
+    const snapshot = (await client.request('health', {}, { retryable: false })).payload.result.sceneStateSnapshot;
+    const card = snapshot.cards.find((item) => item.id === 'charter-bottom');
+    assert.ok(card, 'ticker card should be on scene');
+    assert.ok(card.y > 400, `charter bottom should place below mid-screen, got y=${card.y}`);
+    const shutdown = await client.request('shutdown');
+    assert.equal(shutdown.type, 'ack');
+    const [exitCode] = await once(runtime, 'exit');
+    assert.equal(exitCode, 0, `Runtime exited with stderr: ${stderrOf()}`);
+  });
+});

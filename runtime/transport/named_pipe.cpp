@@ -868,6 +868,110 @@ bool parse_scene_mode_payload(std::string_view payload, scene::StackLayoutOption
     return true;
 }
 
+bool parse_scene_charter_payload(std::string_view payload, scene::TickerChannelOptions& options) {
+    size_t position = 0;
+    const auto skip = [&]() {
+        while (position < payload.size() && std::isspace(static_cast<unsigned char>(payload[position]))) ++position;
+    };
+    const auto consume = [&](char expected) {
+        skip();
+        if (position >= payload.size() || payload[position] != expected) return false;
+        ++position;
+        return true;
+    };
+    const auto parse_number = [&](double& value) {
+        skip();
+        const auto start = position;
+        if (position < payload.size() && (payload[position] == '-' || payload[position] == '+')) ++position;
+        while (position < payload.size() && std::isdigit(static_cast<unsigned char>(payload[position]))) ++position;
+        if (position < payload.size() && payload[position] == '.') {
+            ++position;
+            while (position < payload.size() && std::isdigit(static_cast<unsigned char>(payload[position]))) ++position;
+        }
+        if (start == position) return false;
+        const std::string token(payload.substr(start, position - start));
+        char* end = nullptr;
+        value = std::strtod(token.c_str(), &end);
+        return end == token.c_str() + token.size();
+    };
+    if (!consume('{')) return false;
+    bool seen_flight = false;
+    bool seen_charter = false;
+    std::string flight;
+    while (true) {
+        skip();
+        if (position < payload.size() && payload[position] == '}') {
+            ++position;
+            break;
+        }
+        std::string key;
+        if (!parse_json_string_token(payload, position, key) || !consume(':')) return false;
+        if (key == "flight") {
+            if (seen_flight || !parse_json_string_token(payload, position, flight)) return false;
+            seen_flight = true;
+        } else if (key == "channelId") {
+            std::string channel_id;
+            if (!parse_json_string_token(payload, position, channel_id)) return false;
+        } else if (key == "charter") {
+            if (seen_charter) return false;
+            if (!consume('{')) return false;
+            bool seen_band = false;
+            while (true) {
+                skip();
+                if (position < payload.size() && payload[position] == '}') {
+                    ++position;
+                    break;
+                }
+                std::string nested;
+                if (!parse_json_string_token(payload, position, nested) || !consume(':')) return false;
+                double number{};
+                if (nested == "flight") {
+                    std::string nested_flight;
+                    if (!parse_json_string_token(payload, position, nested_flight)) return false;
+                } else if (nested == "band") {
+                    std::string band;
+                    if (!parse_json_string_token(payload, position, band)) return false;
+                    if (band != "top" && band != "bottom") return false;
+                    options.band_top = band != "bottom";
+                    seen_band = true;
+                } else if (nested == "bandRatio") {
+                    if (!parse_number(number) || number < 0.15 || number > 1.0) return false;
+                    options.band_ratio = number;
+                } else if (nested == "trackCount") {
+                    if (!parse_number(number) || std::floor(number) != number || number < 0) return false;
+                    options.track_count = static_cast<int>(number);
+                } else if (nested == "trackGapPx") {
+                    if (!parse_number(number) || std::floor(number) != number || number < 0 || number > 48) return false;
+                    options.track_gap_px = static_cast<int>(number);
+                } else if (nested == "minGapPx") {
+                    if (!parse_number(number) || std::floor(number) != number || number < 24 || number > 160) return false;
+                    options.min_gap_px = static_cast<int>(number);
+                } else if (nested == "clickThrough") {
+                    bool click_through{};
+                    if (!parse_json_bool_token(payload, position, click_through)) return false;
+                } else if (nested == "overflow") {
+                    std::string overflow;
+                    if (!parse_json_string_token(payload, position, overflow)) return false;
+                    if (overflow != "avoid" && overflow != "queue") return false;
+                } else return false;
+                skip();
+                if (position < payload.size() && payload[position] == ',') { ++position; continue; }
+                if (position < payload.size() && payload[position] == '}') { ++position; break; }
+                return false;
+            }
+            if (!seen_band) return false;
+            seen_charter = true;
+        } else return false;
+        skip();
+        if (position < payload.size() && payload[position] == ',') { ++position; continue; }
+        if (position < payload.size() && payload[position] == '}') { ++position; break; }
+        return false;
+    }
+    skip();
+    if (flight == "danmaku") flight = "ticker";
+    return position == payload.size() && seen_flight && seen_charter && flight == "ticker";
+}
+
 bool parse_scene_dismiss_payload(std::string_view payload, std::string& id) {
     size_t position = 0;
     while (position < payload.size() && std::isspace(static_cast<unsigned char>(payload[position]))) ++position;
@@ -1031,6 +1135,7 @@ int run_named_pipe_server(std::string_view pipe_name, bool drop_after_health, bo
                 scene::SceneWindowState requested_scene_state{};
                 scene::SceneCardState requested_card{};
                 scene::StackLayoutOptions requested_layout_options{};
+                scene::TickerChannelOptions requested_ticker_charter{};
                 std::string requested_dismiss_id;
                 const bool is_card_update = parsed.message.type == "scene.update"
                     && parsed.message.payload_json.find("\"id\"") != std::string::npos;
@@ -1038,6 +1143,7 @@ int run_named_pipe_server(std::string_view pipe_name, bool drop_after_health, bo
                     || is_card_update
                     || parsed.message.type == "scene.dismiss";
                 const bool is_layout_command = parsed.message.type == "scene.set-mode";
+                const bool is_charter_command = parsed.message.type == "scene.set-charter";
                 const bool is_config_command = parsed.message.type == "config.update";
                 const bool is_visual_assets_command = parsed.message.type == "visual-assets.configure";
                 const bool is_font_assets_command = parsed.message.type == "font-assets.configure";
@@ -1081,17 +1187,21 @@ int run_named_pipe_server(std::string_view pipe_name, bool drop_after_health, bo
                     payload_valid = parse_scene_dismiss_payload(parsed.message.payload_json, requested_dismiss_id);
                 } else if (is_layout_command) {
                     payload_valid = parse_scene_mode_payload(parsed.message.payload_json, requested_layout_options);
+                } else if (is_charter_command) {
+                    payload_valid = parse_scene_charter_payload(parsed.message.payload_json, requested_ticker_charter);
                 }
                 if (!payload_valid) {
                     protocol::ProtocolError error{
                         is_card_command
                             ? "RUNTIME_SCENE_CARD_INVALID"
-                            : (is_layout_command ? "LAYOUT_INVALID" : "RUNTIME_SCENE_STATE_INVALID"),
+                            : (is_layout_command ? "LAYOUT_INVALID" : (is_charter_command ? "CHARTER_INVALID" : "RUNTIME_SCENE_STATE_INVALID")),
                         is_card_command
                             ? "scene card payload is invalid"
                             : (is_layout_command
                                 ? "scene.set-mode requires a valid stack or shelf layout payload"
-                                : "scene.update requires integer x, y, width, and height"),
+                                : (is_charter_command
+                                    ? "scene.set-charter requires a ticker charter payload"
+                                    : "scene.update requires integer x, y, width, and height")),
                         parsed.message.request_id,
                         parsed.message.trace_id,
                         parsed.message.type
@@ -1148,6 +1258,26 @@ int run_named_pipe_server(std::string_view pipe_name, bool drop_after_health, bo
                     std::string apply_error_message;
                     if (!scene_controller.apply_stack_layout(
                             requested_layout_options,
+                            apply_error_code,
+                            apply_error_message)) {
+                        protocol::ProtocolError error{
+                            apply_error_code,
+                            apply_error_message,
+                            parsed.message.request_id,
+                            parsed.message.trace_id,
+                            parsed.message.type
+                        };
+                        if (!send_payload(pipe, protocol::serialize_error(error))) {
+                            close_pipe(pipe);
+                            return 11;
+                        }
+                        continue;
+                    }
+                } else if (!deduplicated && is_charter_command) {
+                    std::string apply_error_code;
+                    std::string apply_error_message;
+                    if (!scene_controller.apply_ticker_charter(
+                            requested_ticker_charter,
                             apply_error_code,
                             apply_error_message)) {
                         protocol::ProtocolError error{

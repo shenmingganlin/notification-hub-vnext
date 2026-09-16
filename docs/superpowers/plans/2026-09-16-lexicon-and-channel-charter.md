@@ -121,7 +121,7 @@ Native 新字段只垫结构体末尾。能改归属的就改归属，不靠加 
 - [x] `visual-settings` 增加本机 `channels.stack` / `channels.ticker`（规约）
 - [x] 方案去掉作为权威的停靠/带子；迁移：从现用方案抄一份规约（工作室只存 profile 时重抄）
 - [x] 配置包导入导出 **丢弃** 规约
-- [ ] `scene.set-mode` 只发堆叠规约；弹幕规约走通道写入，不再靠卡 visual 覆盖（Native 已改为首次播种，尚未独立 set-charter）
+- [x] `scene.set-mode` 只发堆叠规约；弹幕规约走 `scene.set-charter`；未发 charter 时仍可第一张卡播种
 - [x] Native：通道规约不从最后一张卡重建；出生方向读这张卡
 - [x] 同轨净空、点穿、满轨仍在 `TickerCharter`
 - [x] 错误：规约校验失败写 `CHARTER_*`，动态校验写 `MOTION_*`，带 field / expected / actual

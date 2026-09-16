@@ -6,9 +6,10 @@
 
 Git：`f389d29` 为 0.1.7 回滚点；分支 `reform/0.1.8-lexicon`。
 
-已落地：`channel-charter` 户口（stack/ticker 规约、ticker 动态、settle=snap）；视觉设置带 `channels` + `flight`；工作室只存 profile 时会重抄规约；配置包 strip 规约；Native 不再用后一张卡覆盖带子/净空，出生方向读这张卡。
+已落地：`channel-charter` 户口；视觉设置带 `channels` + `flight`；配置包 strip 规约；Native 不再用后一张卡覆盖带子/净空；出生方向读这张卡。
+弹幕规约走 `scene.set-charter`（试一条/预览/真卡发卡前写入）。堆叠仍走 `scene.set-mode`。未发 charter 时 Native 仍可用第一张卡播种。
 
-未做：工作室 A 排版、PID follow、路径飞法、淡入、VERSION 0.1.8、事件巷文件改名切换。
+未做：工作室 A 排版、PID follow、路径飞法、淡入、VERSION 0.1.8、C++ `BehaviorChannelState` 改名、事件巷文件物理切换。
 
 ## 2026-09-15 0.1.7 开线
 

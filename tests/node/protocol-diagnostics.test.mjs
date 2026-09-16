@@ -40,6 +40,7 @@ test('protocol exports the planned command set', () => {
     'scene.dismiss',
     'scene.drag',
     'scene.set-mode',
+    'scene.set-charter',
     'config.update',
     'visual-assets.configure',
     'font-assets.configure',

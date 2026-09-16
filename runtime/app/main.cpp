@@ -2397,9 +2397,12 @@ bool protocol_self_test() {
         R"({"protocolVersion":1,"requestId":"req-corpus-agent-avatars","traceId":"trace-corpus-agent-avatars","type":"agent-avatars.configure","timestamp":"2026-08-01T00:00:00.000Z","payload":{"version":1,"items":[]}})";
     constexpr std::string_view voice_event =
         R"({"protocolVersion":1,"requestId":"evt-corpus-voice","traceId":"trace-corpus-voice","type":"event","timestamp":"2026-08-01T00:00:00.000Z","payload":{"eventType":"audio.voice_finished","result":{}}})";
+    constexpr std::string_view set_charter =
+        R"({"protocolVersion":1,"requestId":"req-corpus-charter","traceId":"trace-corpus-charter","type":"scene.set-charter","timestamp":"2026-08-01T00:00:00.000Z","payload":{"flight":"ticker","charter":{"band":"top"}}})";
     if (!expect_valid(audio_play, "audio.play") || !expect_valid(visual_assets, "visual-assets.configure")
         || !expect_valid(font_assets, "font-assets.configure")
         || !expect_valid(agent_avatars, "agent-avatars.configure")
+        || !expect_valid(set_charter, "scene.set-charter")
         || !expect_valid(voice_event, "event")) return false;
     if (!expect_rejected(
             R"({"protocolVersion":1,"requestId":"req-invalid-time","traceId":"trace-invalid-time","type":"health","timestamp":"2026-08-01","payload":{}})",

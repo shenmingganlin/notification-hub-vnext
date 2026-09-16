@@ -283,6 +283,23 @@ export function createFlightChannels(input = {}, { profile = null } = {}) {
   return freeze({ stack, ticker });
 }
 
+export function toNativeTickerCharterPayload(charter, channelId = FLIGHT_CHANNEL_IDS.ticker) {
+  const next = createTickerCharter(charter);
+  return freeze({
+    flight: 'ticker',
+    channelId,
+    charter: {
+      band: next.band,
+      bandRatio: next.bandRatio,
+      trackCount: next.trackCount,
+      trackGapPx: next.trackGapPx,
+      minGapPx: next.minGapPx,
+      clickThrough: next.clickThrough,
+      overflow: next.overflow
+    }
+  });
+}
+
 export function mergeTickerPayload(charter, motion) {
   const nextCharter = createTickerCharter(charter);
   const nextMotion = createTickerMotion(motion);

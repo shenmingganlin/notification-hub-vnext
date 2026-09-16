@@ -8,7 +8,8 @@ import {
   createTickerMotion,
   resolveFlightId,
   splitLegacyTicker,
-  stripCharterFromExport
+  stripCharterFromExport,
+  toNativeTickerCharterPayload
 } from '../../plugin/domain/channel-charter.js';
 
 test('resolveFlightId aliases danmaku to ticker and defaults stack', () => {
@@ -77,4 +78,15 @@ test('export strip drops channels so packs do not ship highway law', () => {
   });
   assert.equal('channels' in packed, false);
   assert.equal(packed.profile.ticker.direction, 'left');
+});
+
+test('native ticker charter payload is flight plus highway only', () => {
+  const payload = toNativeTickerCharterPayload({ band: 'bottom', minGapPx: 80, trackCount: 5 });
+  assert.equal(payload.flight, 'ticker');
+  assert.equal(payload.channelId, 'visual.event.ticker');
+  assert.equal(payload.charter.band, 'bottom');
+  assert.equal(payload.charter.minGapPx, 80);
+  assert.equal(payload.charter.trackCount, 5);
+  assert.equal('direction' in payload.charter, false);
+  assert.equal('speedPxPerSec' in payload.charter, false);
 });

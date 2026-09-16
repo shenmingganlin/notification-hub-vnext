@@ -7,6 +7,7 @@ export const RECOVERY_SNAPSHOT_VERSION = 1;
 export const RECOVERABLE_COMMAND_TYPES = Object.freeze([
   'config.update',
   'scene.set-mode',
+  'scene.set-charter',
   'scene.create',
   'scene.update',
   'scene.dismiss'
@@ -104,6 +105,23 @@ function validateSceneModePayload(payload) {
   return payload;
 }
 
+function validateSceneCharterPayload(payload) {
+  if (!isRecord(payload) || payload.flight !== 'ticker' && payload.flight !== 'danmaku') {
+    throw recoveryError('RUNTIME_RECOVERY_INVALID_PAYLOAD', 'scene.set-charter requires flight ticker');
+  }
+  if (!isRecord(payload.charter)) {
+    throw recoveryError('RUNTIME_RECOVERY_INVALID_PAYLOAD', 'scene.set-charter requires a charter object');
+  }
+  const charter = payload.charter;
+  if (!['top', 'bottom'].includes(charter.band)
+    || typeof charter.bandRatio !== 'number' || !Number.isFinite(charter.bandRatio)
+    || !Number.isInteger(charter.trackCount) || charter.trackCount < 0
+    || !Number.isInteger(charter.minGapPx)) {
+    throw recoveryError('RUNTIME_RECOVERY_INVALID_PAYLOAD', 'scene.set-charter ticker charter is invalid');
+  }
+  return payload;
+}
+
 export function createRecoverySnapshot({ updatedAt = new Date().toISOString(), entries = [] } = {}) {
   const snapshot = {
     recoveryVersion: RECOVERY_SNAPSHOT_VERSION,
@@ -132,6 +150,7 @@ export function addRecoveryEntry(snapshot, { type, payload = {}, key = type } = 
   }
   if (type === 'scene.dismiss') validateSceneDismissPayload(payload);
   if (type === 'scene.set-mode') validateSceneModePayload(payload);
+  if (type === 'scene.set-charter') validateSceneCharterPayload(payload);
 
   const entry = Object.freeze({ key, type, payload: Object.freeze(cloneJson(payload)) });
   const existingIndex = snapshot.entries.findIndex((candidate) => candidate.key === key);
@@ -171,6 +190,7 @@ export function validateRecoverySnapshot(snapshot) {
     if (entry.type === 'scene.update') validateSceneUpdatePayload(entry.payload);
     if (entry.type === 'scene.dismiss') validateSceneDismissPayload(entry.payload);
     if (entry.type === 'scene.set-mode') validateSceneModePayload(entry.payload);
+    if (entry.type === 'scene.set-charter') validateSceneCharterPayload(entry.payload);
   }
   return snapshot;
 }
