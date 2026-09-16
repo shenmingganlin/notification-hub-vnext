@@ -132,7 +132,7 @@ Native 新字段只垫结构体末尾。能改归属的就改归属，不靠加 
 
 - [ ] JS：`flight`、`flightChannel`、`StackCharter`、`TickerCharter`、`TickerMotion`、`CardLife`（户口已有；业务层仍有 behavior 别名）
 - [x] C++：`BehaviorChannelState` → `FlightChannelState`（协议 JSON `behaviorChannels` / `behaviorChannelId` 仍解析）
-- [ ] `notification-behavior.js` 不再身兼飞法枚举 + 寿命 + 容量
+- [x] `notification-behavior.js`：`createFlightProfile` 组装 flight + `CardLife`；`maxVisible` 仍留兼容；旧函数名当别名
 - [x] `visual-event-native-flight.js` 正名；旧文件 re-export；协议旧键仍投影
 - [ ] 测试、诊断、scene-state、recovery-snapshot、protocol schema 同步
 - [ ] 薄兼容：读旧键，写新键，日志若仍收到旧键记 `LEXICON_ALIAS_USED`

@@ -1,5 +1,6 @@
-import { createBehaviorProfile, BEHAVIOR_MODES } from './notification-behavior.js';
+import { createFlightProfile } from './notification-behavior.js';
 import { createCardChannelPolicy } from './card-runtime-policy.js';
+import { resolveFlightId } from './channel-charter.js';
 
 const CHANNEL_FIELDS = Object.freeze(['channelId', 'behaviorProfileId', 'visualProfileId', 'policy']);
 
@@ -19,10 +20,15 @@ export function createBehaviorChannel(input = {}) {
   if (!plain(input)) throw channelError('BEHAVIOR_CHANNEL_INVALID', 'behavior channel must be a plain object', 'channel');
   const channelId = text('channelId', input.channelId);
   const behaviorProfileId = text('behaviorProfileId', input.behaviorProfileId ?? 'stack');
-  if (!BEHAVIOR_MODES.includes(behaviorProfileId)) throw channelError('BEHAVIOR_CHANNEL_PROFILE_INVALID', `Unsupported behavior profile: ${behaviorProfileId}`, 'behaviorProfileId');
+  let flight;
+  try {
+    flight = resolveFlightId(behaviorProfileId, 'behaviorProfileId');
+  } catch {
+    throw channelError('BEHAVIOR_CHANNEL_PROFILE_INVALID', `Unsupported behavior profile: ${behaviorProfileId}`, 'behaviorProfileId');
+  }
   const visualProfileId = text('visualProfileId', input.visualProfileId ?? 'visual.default');
   const policy = createCardChannelPolicy({ ...(input.policy ?? {}), policyId: input.policy?.policyId ?? channelId });
-  const profile = createBehaviorProfile({ mode: behaviorProfileId, profileId: behaviorProfileId, channelId });
+  const profile = createFlightProfile({ flight, profileId: behaviorProfileId, channelId });
   return freeze({ channelId, behaviorProfileId, visualProfileId, policy, profile });
 }
 
