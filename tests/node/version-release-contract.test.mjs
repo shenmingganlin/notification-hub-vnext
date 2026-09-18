@@ -43,6 +43,17 @@ test('CMake and protocol use the current release version without runtime workspa
   assert.equal(createHello({ requestId: 'req-version', traceId: 'trace-version' }).payload.clientVersion, canonicalVersion);
 });
 
+test('plugin host settings only point people to the page', () => {
+  const properties = manifest.contributes.configuration.properties;
+  assert.deepEqual(Object.keys(properties), ['settingsHint']);
+  assert.equal(properties.settingsHint.title, '详细设置请到页面配置');
+  assert.equal(properties.settingsHint.default, '详细设置请到页面配置');
+  assert.equal('runtimeEnabled' in properties, false);
+  assert.equal('sceneStatePersistenceEnabled' in properties, false);
+  assert.equal('sceneStatePersistencePath' in properties, false);
+  assert.equal('sceneStatePersistenceDebounceMs' in properties, false);
+});
+
 test('README documents the trial version and excludes historical diagnostics', () => {
   const readme = read('README.md');
   assert.match(readme, /试用版/);
