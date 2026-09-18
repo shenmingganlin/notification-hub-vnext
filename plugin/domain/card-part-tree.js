@@ -294,9 +294,8 @@ export function paintPartTree(parts, paintById = {}, glossary = {}) {
       }
       if (extra.textStroke === true) {
         next.textStroke = true;
-        if (typeof extra.textStrokeColor === 'string' && HEX_COLOR.test(extra.textStrokeColor)) {
-          next.textStrokeColor = extra.textStrokeColor;
-        }
+        const textStrokeColor = resolveGlossaryColor(extra.textStrokeColor, names);
+        if (textStrokeColor) next.textStrokeColor = textStrokeColor;
         if (Number.isInteger(extra.textStrokeWidth) && extra.textStrokeWidth >= 1 && extra.textStrokeWidth <= 16) {
           next.textStrokeWidth = extra.textStrokeWidth;
         }

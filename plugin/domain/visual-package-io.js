@@ -1,13 +1,11 @@
-import { basename } from 'node:path';
-import { createHash } from 'node:crypto';
 import AdmZip from 'adm-zip';
 import { stripCharterFromExport } from './channel-charter.js';
 import { createVisualPackageManifest, validateVisualPackageEntries, VISUAL_PACKAGE_FORMAT, VISUAL_PACKAGE_CAPABILITIES } from './visual-package-manifest.js';
 
 const PACKAGE_VERSION = '1.0.0';
-const ASSET_FORMATS = new Set(['png', 'webp', 'jpg']);
 const CONFLICT_STRATEGIES = Object.freeze(['copy', 'skip', 'overwrite']);
 const ID_PATTERN = /^[a-z0-9][a-z0-9._-]{0,79}$/i;
+const PROTECTED_PROFILE_ID = 'visual.default';
 
 function buildIssue({ scope, code, severity = 'error', id = null, message, details = {} } = {}) {
   return { scope, code, severity, ...(id ? { id } : {}), message, details };
@@ -40,35 +38,223 @@ function validateId(value, field) {
   if (!ID_PATTERN.test(id)) throw packageError('VISUAL_PACKAGE_IO_INVALID', `${field} contains unsupported characters`, { field });
   return id;
 }
+function readFlag(value, defaultValue) {
+  if (value === undefined || value === null || value === '') return defaultValue;
+  if (typeof value === 'boolean') return value;
+  if (typeof value === 'string') {
+    const normalized = value.trim().toLowerCase();
+    if (['true', '1', 'yes', 'on'].includes(normalized)) return true;
+    if (['false', '0', 'no', 'off'].includes(normalized)) return false;
+  }
+  return defaultValue;
+}
 
-/**
- * Collect profiles, bindings, and assets into a package data structure.
- * Returns an intermediate representation that can be serialized to ZIP.
- */
-async function collectPackageData({ profileRegistry, bindingRegistry, assetLibrary, profileIds, storage }) {
+function collectProfileAssetRefs(profile) {
+  const minimal = profile?.card?.types?.minimal;
+  if (!minimal || typeof minimal !== 'object') return [];
+  const references = [];
+  const add = (assetId, slot) => {
+    if (typeof assetId === 'string' && assetId.trim()) references.push({ assetId: assetId.trim(), slot });
+  };
+  add(minimal.appearance?.backgroundAssetId, 'card.minimal.appearance.background');
+  add(minimal.skin?.background?.assetId, 'card.minimal.skin.background');
+  for (const [partId, part] of Object.entries(minimal.parts ?? {})) {
+    if (!part || typeof part !== 'object') continue;
+    add(part.backgroundAssetId, `card.minimal.parts.${partId}.background`);
+    if (partId === 'icon') add(part.assetId, 'card.minimal.parts.icon.asset');
+  }
+  for (const [slot, value] of Object.entries(minimal.effects?.slots ?? {})) add(value?.assetId, `card.minimal.effects.${slot}`);
+  return references;
+}
+
+function collectProfileFontRefs(profile) {
+  const parts = profile?.card?.types?.minimal?.parts;
+  if (!parts || typeof parts !== 'object') return [];
+  const references = [];
+  const add = (assetId, slot) => {
+    if (typeof assetId === 'string' && assetId.trim()) references.push({ assetId: assetId.trim(), slot });
+  };
+  add(parts.title?.fontAssetId, 'card.minimal.parts.title.font');
+  add(parts.body?.fontAssetId, 'card.minimal.parts.body.font');
+  add(parts.assistantName?.fontAssetId, 'card.minimal.parts.assistantName.font');
+  return references;
+}
+
+function resolveLocalAsset(assetLibrary, fingerprint = {}) {
+  if (!assetLibrary) return null;
+  if (fingerprint.sha256 && typeof assetLibrary.findBySha256 === 'function') {
+    const byHash = assetLibrary.findBySha256(fingerprint.sha256);
+    if (byHash) return byHash;
+  }
+  if (fingerprint.assetId && typeof assetLibrary.get === 'function') return assetLibrary.get(fingerprint.assetId) ?? null;
+  return null;
+}
+
+function applyMissingAssetPolicy(profile, { missingIds, assetIdMapping, clearMissingAssets }) {
+  const minimal = profile?.card?.types?.minimal;
+  if (!minimal) return;
+  const resolve = (current) => {
+    if (typeof current !== 'string' || !current) return current;
+    if (assetIdMapping.has(current) && assetIdMapping.get(current)) return assetIdMapping.get(current);
+    if (missingIds.has(current) && clearMissingAssets) return null;
+    return current;
+  };
+  if (minimal.appearance && 'backgroundAssetId' in minimal.appearance) {
+    minimal.appearance.backgroundAssetId = resolve(minimal.appearance.backgroundAssetId);
+  }
+  if (minimal.skin?.background && 'assetId' in minimal.skin.background) {
+    minimal.skin.background.assetId = resolve(minimal.skin.background.assetId);
+  }
+  for (const part of Object.values(minimal.parts ?? {})) {
+    if (!part || typeof part !== 'object') continue;
+    if ('backgroundAssetId' in part) part.backgroundAssetId = resolve(part.backgroundAssetId) ?? null;
+    if ('assetId' in part) part.assetId = resolve(part.assetId) ?? null;
+  }
+  for (const value of Object.values(minimal.effects?.slots ?? {})) {
+    if (!value || typeof value !== 'object' || !('assetId' in value)) continue;
+    value.assetId = resolve(value.assetId);
+  }
+}
+
+function applyMissingFontPolicy(profile, { missingIds, assetIdMapping, clearMissingFonts }) {
+  const parts = profile?.card?.types?.minimal?.parts;
+  if (!parts || typeof parts !== 'object') return;
+  const resolve = (current) => {
+    if (typeof current !== 'string' || !current) return current;
+    if (assetIdMapping.has(current) && assetIdMapping.get(current)) return assetIdMapping.get(current);
+    if (missingIds.has(current) && clearMissingFonts) return null;
+    return current;
+  };
+  for (const part of Object.values(parts)) {
+    if (!part || typeof part !== 'object' || !('fontAssetId' in part)) continue;
+    part.fontAssetId = resolve(part.fontAssetId) ?? null;
+  }
+}
+
+function collectFingerprintsFromZip(zip, entries) {
+  const fingerprints = new Map();
+  const metadataEntry = zip.getEntry('settings/assets.json');
+  if (metadataEntry) {
+    try {
+      const metadata = JSON.parse(metadataEntry.getData().toString('utf-8'));
+      for (const asset of Array.isArray(metadata?.assets) ? metadata.assets : []) {
+        if (asset?.assetId) fingerprints.set(asset.assetId, { ...asset });
+      }
+    } catch { /* optional metadata */ }
+  }
+  const profileEntries = entries.filter((name) => name.startsWith('settings/profiles/') && name.endsWith('.json'));
+  for (const entryPath of profileEntries) {
+    const entry = zip.getEntry(entryPath);
+    if (!entry) continue;
+    let profileData;
+    try { profileData = JSON.parse(entry.getData().toString('utf-8')); } catch { continue; }
+    for (const reference of collectProfileAssetRefs(profileData?.profile)) {
+      const existing = fingerprints.get(reference.assetId);
+      if (existing) {
+        if (!existing.slot) existing.slot = reference.slot;
+        continue;
+      }
+      fingerprints.set(reference.assetId, { assetId: reference.assetId, slot: reference.slot });
+    }
+  }
+  return [...fingerprints.values()];
+}
+
+function collectFontFingerprintsFromZip(zip, entries) {
+  const fingerprints = new Map();
+  const metadataEntry = zip.getEntry('settings/fonts.json');
+  if (metadataEntry) {
+    try {
+      const metadata = JSON.parse(metadataEntry.getData().toString('utf-8'));
+      for (const asset of Array.isArray(metadata?.assets) ? metadata.assets : []) {
+        if (asset?.assetId) fingerprints.set(asset.assetId, { ...asset });
+      }
+    } catch { /* optional metadata */ }
+  }
+  const profileEntries = entries.filter((name) => name.startsWith('settings/profiles/') && name.endsWith('.json'));
+  for (const entryPath of profileEntries) {
+    const entry = zip.getEntry(entryPath);
+    if (!entry) continue;
+    let profileData;
+    try { profileData = JSON.parse(entry.getData().toString('utf-8')); } catch { continue; }
+    for (const reference of collectProfileFontRefs(profileData?.profile)) {
+      const existing = fingerprints.get(reference.assetId);
+      if (existing) {
+        if (!existing.slot) existing.slot = reference.slot;
+        continue;
+      }
+      fingerprints.set(reference.assetId, { assetId: reference.assetId, slot: reference.slot });
+    }
+  }
+  return [...fingerprints.values()];
+}
+
+function classifyPackageAssets(fingerprints, assetLibrary) {
+  const missingAssets = [];
+  const resolvedAssets = [];
+  const assetIdMapping = new Map();
+  for (const fingerprint of fingerprints) {
+    const local = resolveLocalAsset(assetLibrary, fingerprint);
+    if (local) {
+      resolvedAssets.push({ assetId: fingerprint.assetId, mappedAssetId: local.assetId, name: local.name });
+      assetIdMapping.set(fingerprint.assetId, local.assetId);
+    } else {
+      missingAssets.push({
+        assetId: fingerprint.assetId,
+        name: fingerprint.name ?? fingerprint.assetId,
+        sha256: fingerprint.sha256 ?? null,
+        slot: fingerprint.slot ?? null
+      });
+    }
+  }
+  return { missingAssets, resolvedAssets, assetIdMapping };
+}
+
+async function collectPackageData({ profileRegistry, bindingRegistry, assetLibrary, fontLibrary, profileIds }) {
   const profileIdsToExport = profileIds ?? profileRegistry.list();
   if (profileIdsToExport.length === 0) throw packageError('VISUAL_PACKAGE_IO_EMPTY', 'No profiles to export');
 
   const profiles = [];
   const bindings = [];
-  const assetIds = new Set();
+  const fingerprints = [];
+  const fontFingerprints = [];
+  const seen = new Set();
+  const fontSeen = new Set();
   const entries = ['manifest.json'];
 
   for (const profileId of profileIdsToExport) {
     const record = profileRegistry.get(profileId);
     if (!record) throw packageError('VISUAL_PACKAGE_IO_PROFILE_NOT_FOUND', `Unknown profile: ${profileId}`, { profileId });
-    profiles.push({ profileId: record.profileId, name: record.name, profile: stripCharterFromExport(clone(record.profile)) });
-    const entryPath = `settings/profiles/${profileId}.json`;
-    entries.push(entryPath);
-
-    // Collect asset IDs referenced by this profile's card appearance
-    const card = record.profile.card;
-    if (card?.types?.minimal?.appearance?.backgroundAssetId) {
-      assetIds.add(card.types.minimal.appearance.backgroundAssetId);
+    const profile = stripCharterFromExport(clone(record.profile));
+    profiles.push({ profileId: record.profileId, name: record.name, profile });
+    entries.push(`settings/profiles/${profileId}.json`);
+    for (const reference of collectProfileAssetRefs(profile)) {
+      if (seen.has(reference.assetId)) continue;
+      seen.add(reference.assetId);
+      const asset = assetLibrary?.get?.(reference.assetId);
+      fingerprints.push({
+        assetId: reference.assetId,
+        name: asset?.name ?? reference.assetId,
+        kind: asset?.kind ?? null,
+        format: asset?.format ?? null,
+        sha256: asset?.sha256 ?? null,
+        slot: reference.slot
+      });
+    }
+    for (const reference of collectProfileFontRefs(profile)) {
+      if (fontSeen.has(reference.assetId)) continue;
+      fontSeen.add(reference.assetId);
+      const font = fontLibrary?.get?.(reference.assetId);
+      fontFingerprints.push({
+        assetId: reference.assetId,
+        name: font?.name ?? reference.assetId,
+        format: font?.format ?? null,
+        sha256: font?.sha256 ?? null,
+        slot: reference.slot
+      });
     }
   }
 
-  // Collect bindings that reference the exported profiles
   const allBindings = bindingRegistry.list();
   for (const binding of allBindings) {
     if (profileIdsToExport.includes(binding.visualProfileId)) {
@@ -76,44 +262,21 @@ async function collectPackageData({ profileRegistry, bindingRegistry, assetLibra
     }
   }
   if (bindings.length > 0) entries.push('settings/event-bindings.json');
-  if (assetIds.size > 0) entries.push('settings/assets.json');
+  if (fingerprints.length > 0) entries.push('settings/assets.json');
+  if (fontFingerprints.length > 0) entries.push('settings/fonts.json');
 
-  // Collect asset files from storage
-  const assets = [];
-  for (const assetId of assetIds) {
-    const asset = assetLibrary?.get(assetId);
-    if (!asset) continue;
-    const format = asset.format.toLowerCase();
-    if (!ASSET_FORMATS.has(format)) continue;
-    const entryPath = `assets/${assetId}.${format}`;
-    entries.push(entryPath);
-    let buffer = null;
-    if (storage && typeof storage.read === 'function') {
-      try { buffer = await storage.read(assetId, format); } catch { /* skip missing assets */ }
-    }
-    assets.push({ assetId, name: asset.name, kind: asset.kind, format, width: asset.width, height: asset.height, byteSize: asset.byteSize, hasAlpha: asset.hasAlpha, sha256: asset.sha256, tags: [...asset.tags], buffer });
-  }
-
-  return { profiles, bindings, assets, entries, assetIds: [...assetIds] };
+  return { profiles, bindings, assets: fingerprints, fonts: fontFingerprints, entries, assetIds: fingerprints.map((item) => item.assetId) };
 }
 
 /**
  * Export one or more visual profiles to a visual package ZIP buffer.
- *
- * @param {object} options
- * @param {object}   options.profileRegistry - from createVisualProfileRegistry()
- * @param {object}   options.bindingRegistry - from createEventBindingRegistry()
- * @param {object}   [options.assetLibrary]  - from createVisualAssetLibrary()
- * @param {object}   [options.storage]       - from createVisualAssetStorage()
- * @param {string[]} [options.profileIds]    - specific profiles to export (default: all)
- * @param {object}   [options.meta]          - optional package metadata overrides
- * @returns {Promise<Buffer>} ZIP buffer
+ * Packages carry look + event bindings + asset fingerprints. They never embed library files.
  */
-export async function exportVisualPackage({ profileRegistry, bindingRegistry, assetLibrary, storage, profileIds = null, meta = {} } = {}) {
+export async function exportVisualPackage({ profileRegistry, bindingRegistry, assetLibrary, fontLibrary, storage, profileIds = null, meta = {} } = {}) {
   if (!profileRegistry || typeof profileRegistry.list !== 'function') throw packageError('VISUAL_PACKAGE_IO_INVALID', 'profileRegistry is required');
   if (!bindingRegistry || typeof bindingRegistry.list !== 'function') throw packageError('VISUAL_PACKAGE_IO_INVALID', 'bindingRegistry is required');
 
-  const data = await collectPackageData({ profileRegistry, bindingRegistry, assetLibrary, profileIds, storage });
+  const data = await collectPackageData({ profileRegistry, bindingRegistry, assetLibrary, fontLibrary, profileIds, storage });
   const packageId = validateId(meta.packageId ?? `visual-package-${Date.now()}`, 'packageId');
   const packageName = text(meta.packageName ?? data.profiles.map((p) => p.name).join(' + '), 'packageName');
   const capabilities = [...VISUAL_PACKAGE_CAPABILITIES];
@@ -128,48 +291,27 @@ export async function exportVisualPackage({ profileRegistry, bindingRegistry, as
   });
 
   const zip = new AdmZip();
-
-  // Write manifest
   zip.addFile('manifest.json', Buffer.from(JSON.stringify(manifest, null, 2), 'utf-8'));
-
-  // Write profile files
   for (const profile of data.profiles) {
-    const profileJson = JSON.stringify(profile, null, 2);
-    zip.addFile(`settings/profiles/${profile.profileId}.json`, Buffer.from(profileJson, 'utf-8'));
+    zip.addFile(`settings/profiles/${profile.profileId}.json`, Buffer.from(JSON.stringify(profile, null, 2), 'utf-8'));
   }
-
-  // Write bindings
   if (data.bindings.length > 0) {
-    const bindingsJson = JSON.stringify({ bindings: data.bindings, exportedAt: new Date().toISOString() }, null, 2);
-    zip.addFile('settings/event-bindings.json', Buffer.from(bindingsJson, 'utf-8'));
+    zip.addFile('settings/event-bindings.json', Buffer.from(JSON.stringify({ bindings: data.bindings, exportedAt: new Date().toISOString() }, null, 2), 'utf-8'));
   }
-
-  // Write asset metadata before the binary files so imports can preserve display names and tags.
   if (data.assets.length > 0) {
-    const assetsJson = JSON.stringify({ assets: data.assets.map(({ buffer, ...asset }) => asset) }, null, 2);
-    zip.addFile('settings/assets.json', Buffer.from(assetsJson, 'utf-8'));
+    zip.addFile('settings/assets.json', Buffer.from(JSON.stringify({ assets: data.assets }, null, 2), 'utf-8'));
   }
-
-  // Write asset files
-  for (const asset of data.assets) {
-    if (asset.buffer) {
-      zip.addFile(`assets/${asset.assetId}.${asset.format}`, asset.buffer);
-    }
+  if (data.fonts.length > 0) {
+    zip.addFile('settings/fonts.json', Buffer.from(JSON.stringify({ assets: data.fonts }, null, 2), 'utf-8'));
   }
-
   return zip.toBuffer();
 }
 
 /**
  * Preview what would happen when importing a visual package.
  * Does not modify any registries or storage.
- *
- * @param {object} options
- * @param {Buffer}  options.zipBuffer - ZIP file buffer
- * @param {object}  options.profileRegistry - current profile registry
- * @returns {Promise<object>} preview report
  */
-export async function previewImportVisualPackage({ zipBuffer, profileRegistry, assetLibrary } = {}) {
+export async function previewImportVisualPackage({ zipBuffer, profileRegistry, assetLibrary, fontLibrary } = {}) {
   if (!zipBuffer || !Buffer.isBuffer(zipBuffer)) throw packageError('VISUAL_PACKAGE_IO_INVALID', 'zipBuffer is required');
   if (!profileRegistry || typeof profileRegistry.has !== 'function') throw packageError('VISUAL_PACKAGE_IO_INVALID', 'profileRegistry is required');
 
@@ -195,7 +337,6 @@ export async function previewImportVisualPackage({ zipBuffer, profileRegistry, a
   const entryReport = validateVisualPackageEntries(entries);
   if (!entryReport.valid) throw packageError('VISUAL_PACKAGE_INVALID_ENTRY', 'Package contains unsupported entries', { errors: entryReport.errors });
 
-  // Parse profile entries
   const profileEntries = entries.filter((name) => name.startsWith('settings/profiles/') && name.endsWith('.json'));
   const importProfiles = [];
   for (const entryPath of profileEntries) {
@@ -207,12 +348,12 @@ export async function previewImportVisualPackage({ zipBuffer, profileRegistry, a
       importProfiles.push({
         profileId: profileData.profileId,
         name: profileData.name ?? profileData.profileId,
-        exists: profileRegistry.has(profileData.profileId)
+        exists: profileRegistry.has(profileData.profileId),
+        protected: profileData.profileId === PROTECTED_PROFILE_ID && profileRegistry.has(profileData.profileId)
       });
     }
   }
 
-  // Parse binding entries
   const bindingEntry = zip.getEntry('settings/event-bindings.json');
   let bindingCount = 0;
   if (bindingEntry) {
@@ -222,11 +363,11 @@ export async function previewImportVisualPackage({ zipBuffer, profileRegistry, a
     } catch { /* ignore */ }
   }
 
-  // Parse asset entries
-  const assetPaths = entries.filter((name) => name.startsWith('assets/'));
-  const assetIds = assetPaths.map((p) => basename(p).replace(/\.[^.]+$/, ''));
-  const existingAssets = new Set(assetIds.filter((id) => assetLibrary?.get?.(id)));
-
+  const fingerprints = collectFingerprintsFromZip(zip, entries);
+  const classified = classifyPackageAssets(fingerprints, assetLibrary);
+  const fontFingerprints = collectFontFingerprintsFromZip(zip, entries);
+  const classifiedFonts = classifyPackageAssets(fontFingerprints, fontLibrary);
+  const embeddedAssetCount = entries.filter((name) => name.startsWith('assets/')).length;
   const newProfiles = importProfiles.filter((p) => !p.exists).length;
   const conflictProfiles = importProfiles.filter((p) => p.exists).length;
 
@@ -240,31 +381,35 @@ export async function previewImportVisualPackage({ zipBuffer, profileRegistry, a
     newProfiles,
     conflictProfiles,
     bindingCount,
-    assetCount: assetPaths.length,
-    newAssetCount: assetPaths.length - existingAssets.size,
+    assetCount: fingerprints.length,
+    referencedAssetCount: fingerprints.length,
+    resolvedAssetCount: classified.resolvedAssets.length,
+    missingAssets: classified.missingAssets,
+    missingAssetCount: classified.missingAssets.length,
+    fontCount: fontFingerprints.length,
+    resolvedFontCount: classifiedFonts.resolvedAssets.length,
+    missingFonts: classifiedFonts.missingAssets,
+    missingFontCount: classifiedFonts.missingAssets.length,
+    embeddedAssetCount,
+    newAssetCount: classified.missingAssets.length,
     entries
   };
 }
 
 /**
- * Import a visual package ZIP into the current registries and storage.
- *
- * @param {object} options
- * @param {Buffer}  options.zipBuffer - ZIP file buffer
- * @param {object}  options.profileRegistry - from createVisualProfileRegistry()
- * @param {object}  options.bindingRegistry - from createEventBindingRegistry()
- * @param {object}  [options.assetLibrary]  - from createVisualAssetLibrary()
- * @param {object}  [options.storage]       - from createVisualAssetStorage()
- * @param {string}  [options.strategy='copy'] - conflict strategy: 'copy', 'overwrite', 'skip'
- * @returns {Promise<object>} import report
+ * Import a visual package ZIP into the current registries.
+ * Never copies library binaries out of the zip. Missing art/fonts fail unless cleared.
  */
-export async function importVisualPackage({ zipBuffer, profileRegistry, bindingRegistry, assetLibrary, storage, strategy = 'copy' } = {}) {
+export async function importVisualPackage({ zipBuffer, profileRegistry, bindingRegistry, assetLibrary, fontLibrary, storage, strategy = 'copy', applyBindings = true, clearMissingAssets = false, clearMissingFonts = false } = {}) {
   if (!zipBuffer || !Buffer.isBuffer(zipBuffer)) throw packageError('VISUAL_PACKAGE_IO_INVALID', 'zipBuffer is required');
   if (!profileRegistry || typeof profileRegistry.has !== 'function') throw packageError('VISUAL_PACKAGE_IO_INVALID', 'profileRegistry is required');
   if (!bindingRegistry || typeof bindingRegistry.apply !== 'function') throw packageError('VISUAL_PACKAGE_IO_INVALID', 'bindingRegistry is required');
   if (!CONFLICT_STRATEGIES.includes(strategy)) throw packageError('VISUAL_PACKAGE_IO_STRATEGY_INVALID', `Unsupported conflict strategy: ${strategy}`, { strategy });
+  const syncEvents = readFlag(applyBindings, true);
+  const clearMissing = readFlag(clearMissingAssets, false);
+  const clearFonts = readFlag(clearMissingFonts, false);
 
-  const preview = await previewImportVisualPackage({ zipBuffer, profileRegistry, assetLibrary });
+  const preview = await previewImportVisualPackage({ zipBuffer, profileRegistry, assetLibrary, fontLibrary });
   const zip = new AdmZip(zipBuffer);
 
   const registeredProfiles = [];
@@ -273,7 +418,6 @@ export async function importVisualPackage({ zipBuffer, profileRegistry, bindingR
   const skippedAssets = [];
   const importedBindings = [];
   const issues = [];
-  const assetIdMapping = new Map();
   const createdAssets = [];
   const addIssue = (issue) => { issues.push(issue); return issue; };
   const profileSnapshot = typeof profileRegistry.snapshot === 'function' ? profileRegistry.snapshot() : null;
@@ -321,227 +465,222 @@ export async function importVisualPackage({ zipBuffer, profileRegistry, bindingR
       packageName: preview.packageName,
       version: preview.version,
       strategy,
+      applyBindings: syncEvents,
+      clearMissingAssets: clearMissing,
+      clearMissingFonts: clearFonts,
       failed: true,
       rolledBack: true,
       failedStage,
       error: original,
       rollbackReason: 'import-failed-after-state-restore',
       profiles: { registered: registeredProfiles, skipped: skippedProfiles },
-      assets: { imported: importedAssets, skipped: skippedAssets },
+      assets: { imported: importedAssets, skipped: skippedAssets, missing: preview.missingAssets, resolved: [] },
+      fonts: { missing: preview.missingFonts, resolved: [] },
       bindings: { imported: importedBindings },
       bindingCount: importedBindings.length,
       issues,
       issueSummary: summarizeIssues(issues)
     };
   };
-  const assetMetadata = new Map();
-  const assetMetadataEntry = zip.getEntry('settings/assets.json');
-  if (assetMetadataEntry) {
-    try {
-      const metadata = JSON.parse(assetMetadataEntry.getData().toString('utf-8'));
-      for (const asset of Array.isArray(metadata?.assets) ? metadata.assets : []) {
-        if (asset?.assetId) assetMetadata.set(asset.assetId, asset);
-      }
-    } catch { /* malformed optional metadata is handled by binary validation */ }
-  }
 
   try {
-    // 1. Import assets first (register with asset library)
     failedStage = 'assets';
-    if (assetLibrary) {
-    const assetEntries = zip.getEntries().filter((entry) => entry.entryName.startsWith('assets/') && !entry.isDirectory);
-    for (const entry of assetEntries) {
-      const name = basename(entry.entryName);
-      const dot = name.lastIndexOf('.');
-      if (dot < 0) continue;
-      const assetId = name.slice(0, dot);
-      const format = name.slice(dot + 1).toLowerCase();
-      if (!ASSET_FORMATS.has(format)) continue;
-
-      let buffer;
-      try { buffer = entry.getData(); } catch (error) { throw packageError('VISUAL_PACKAGE_IMPORT_FAILED', `Asset read failed: ${assetId}`, { stage: 'assets', assetId, cause: error.message }); }
-      const metadata = assetMetadata.get(assetId) ?? {};
-      const incomingSha256 = createHash('sha256').update(buffer).digest('hex');
-      const existing = assetLibrary.get(assetId);
-      let effectiveAssetId = assetId;
-      if (existing) {
-        if (existing.sha256 === incomingSha256) {
-          assetIdMapping.set(assetId, existing.assetId);
-          skippedAssets.push({ assetId, format, reason: 'already_exists_same_hash' });
-          addIssue(buildIssue({ scope: 'asset', code: 'ASSET_DUPLICATE_REUSED', severity: 'warning', id: assetId, message: `Asset reused by SHA256: ${assetId}`, details: { mappedAssetId: existing.assetId } }));
-          continue;
-        }
-        if (strategy === 'overwrite') {
-          throw packageError('VISUAL_PACKAGE_ASSET_CONFLICT', `Asset conflict has different content: ${assetId}`, { stage: 'assets', assetId, existingSha256: existing.sha256, incomingSha256 });
-        }
-        if (strategy === 'skip') {
-          assetIdMapping.set(assetId, null);
-          skippedAssets.push({ assetId, format, reason: 'conflict_different_hash' });
-          addIssue(buildIssue({ scope: 'asset', code: 'ASSET_CONFLICT_DIFFERENT_HASH', severity: 'error', id: assetId, message: `Asset conflict has different content: ${assetId}`, details: { strategy, existingSha256: existing.sha256, incomingSha256 } }));
-          continue;
-        }
-        let counter = 1;
-        while (assetLibrary.get(`${assetId}-copy-${counter}`)) counter += 1;
-        effectiveAssetId = `${assetId}-copy-${counter}`;
-        addIssue(buildIssue({ scope: 'asset', code: 'ASSET_CONFLICT_COPIED', severity: 'warning', id: assetId, message: `Asset conflict copied under a new ID: ${assetId}`, details: { mappedAssetId: effectiveAssetId, existingSha256: existing.sha256, incomingSha256 } }));
-      }
-
-      try {
-        const imported = await assetLibrary.importBuffer({
-          assetId: effectiveAssetId,
-          name: metadata.name || name,
-          kind: metadata.kind || 'background',
-          buffer,
-          tags: Array.isArray(metadata.tags) ? metadata.tags : []
-        });
-        assetIdMapping.set(assetId, imported.assetId);
-        assetIdMapping.set(assetId, imported.assetId);
-        if (imported.assetId !== assetId) {
-          skippedAssets.push({ assetId, mappedAssetId: imported.assetId, format, reason: 'duplicate_sha256' });
-          addIssue(buildIssue({ scope: 'asset', code: 'ASSET_DUPLICATE_REUSED', severity: 'warning', id: assetId, message: `Asset reused by SHA256: ${assetId}`, details: { mappedAssetId: imported.assetId } }));
-        } else {
-          createdAssets.push({ assetId: imported.assetId, format: imported.format ?? format });
-          importedAssets.push({ assetId: imported.assetId, originalAssetId: assetId, format });
-        }
-      } catch (error) {
-        throw packageError('VISUAL_PACKAGE_IMPORT_FAILED', `Asset import failed: ${assetId}`, { stage: 'assets', assetId, cause: error.message });
+    const fingerprints = collectFingerprintsFromZip(zip, preview.entries);
+    const classified = classifyPackageAssets(fingerprints, assetLibrary);
+    const assetIdMapping = classified.assetIdMapping;
+    const missingIds = new Set(classified.missingAssets.map((item) => item.assetId));
+    const fontFingerprints = collectFontFingerprintsFromZip(zip, preview.entries);
+    const classifiedFonts = classifyPackageAssets(fontFingerprints, fontLibrary);
+    const fontIdMapping = classifiedFonts.assetIdMapping;
+    const missingFontIds = new Set(classifiedFonts.missingAssets.map((item) => item.assetId));
+    if (preview.embeddedAssetCount > 0) {
+      addIssue(buildIssue({
+        scope: 'asset',
+        code: 'ASSET_EMBEDDED_IGNORED',
+        severity: 'warning',
+        message: 'Package embedded asset files are ignored; only local library fingerprints are used',
+        details: { embeddedAssetCount: preview.embeddedAssetCount }
+      }));
+    }
+    if (classified.missingAssets.length && !clearMissing) {
+      const first = classified.missingAssets[0];
+      const issue = addIssue(buildIssue({
+        scope: 'asset',
+        code: 'ASSET_DEPENDENCY_MISSING',
+        id: first.assetId,
+        message: `Profile references missing asset: ${first.assetId}`,
+        details: { missingAssets: classified.missingAssets }
+      }));
+      throw packageError('VISUAL_PACKAGE_IMPORT_FAILED', `Missing asset dependency: ${first.assetId}`, { stage: 'dependencies', assetId: first.assetId, issue });
+    }
+    if (classifiedFonts.missingAssets.length && !clearFonts) {
+      const first = classifiedFonts.missingAssets[0];
+      const issue = addIssue(buildIssue({
+        scope: 'font',
+        code: 'FONT_DEPENDENCY_MISSING',
+        id: first.assetId,
+        message: `Profile references missing font: ${first.assetId}`,
+        details: { missingFonts: classifiedFonts.missingAssets }
+      }));
+      throw packageError('VISUAL_PACKAGE_IMPORT_FAILED', `Missing font dependency: ${first.assetId}`, { stage: 'dependencies', assetId: first.assetId, issue });
+    }
+    for (const missing of classified.missingAssets) {
+      skippedAssets.push({ assetId: missing.assetId, reason: 'missing_cleared' });
+      addIssue(buildIssue({
+        scope: 'asset',
+        code: 'ASSET_DEPENDENCY_CLEARED',
+        severity: 'warning',
+        id: missing.assetId,
+        message: `Missing asset cleared: ${missing.assetId}`,
+        details: { slot: missing.slot }
+      }));
+    }
+    for (const resolved of classified.resolvedAssets) {
+      if (resolved.mappedAssetId !== resolved.assetId) {
+        skippedAssets.push({ assetId: resolved.assetId, mappedAssetId: resolved.mappedAssetId, reason: 'duplicate_sha256' });
+        addIssue(buildIssue({
+          scope: 'asset',
+          code: 'ASSET_DUPLICATE_REUSED',
+          severity: 'warning',
+          id: resolved.assetId,
+          message: `Asset reused by SHA256: ${resolved.assetId}`,
+          details: { mappedAssetId: resolved.mappedAssetId }
+        }));
       }
     }
-  }
 
-    // 2. Import profiles
     failedStage = 'profiles';
     const profileEntries = zip.getEntries().filter((entry) => entry.entryName.startsWith('settings/profiles/') && entry.entryName.endsWith('.json'));
-  const profileIdMapping = new Map(); // original -> effective
+    const profileIdMapping = new Map();
 
-  for (const entry of profileEntries) {
-    let profileData;
-    try {
-      profileData = JSON.parse(entry.getData().toString('utf-8'));
-    } catch {
-      throw packageError('VISUAL_PACKAGE_IMPORT_FAILED', 'Profile entry is not valid JSON', { stage: 'profiles', entry: entry.entryName });
-    }
-    if (!profileData || !profileData.profileId) throw packageError('VISUAL_PACKAGE_IMPORT_FAILED', 'Profile entry is missing profileId', { stage: 'profiles', entry: entry.entryName });
-
-    const originalId = profileData.profileId;
-    const exists = profileRegistry.has(originalId);
-    const normalizedProfile = clone(profileData.profile ?? {});
-    const appearance = normalizedProfile.card?.types?.minimal?.appearance;
-    if (appearance?.backgroundAssetId && assetIdMapping.has(appearance.backgroundAssetId)) {
-      appearance.backgroundAssetId = assetIdMapping.get(appearance.backgroundAssetId);
-    }
-    if (exists && strategy === 'skip') {
-      skippedProfiles.push({ profileId: originalId, reason: 'strategy_skip' });
-      addIssue(buildIssue({ scope: 'profile', code: 'PROFILE_CONFLICT_SKIPPED', severity: 'warning', id: originalId, message: `Profile conflict skipped: ${originalId}`, details: { strategy } }));
-      profileIdMapping.set(originalId, null);
-      continue;
-    }
-    if (appearance?.backgroundAssetId) {
-      const referencedAssetId = appearance.backgroundAssetId;
-      const availableAsset = assetLibrary?.get?.(referencedAssetId);
-      if (!availableAsset) {
-        const issue = addIssue(buildIssue({ scope: 'asset', code: 'ASSET_DEPENDENCY_MISSING', id: referencedAssetId, message: `Profile references missing asset: ${referencedAssetId}`, details: { profileId: originalId } }));
-        throw packageError('VISUAL_PACKAGE_IMPORT_FAILED', `Missing asset dependency: ${referencedAssetId}`, { stage: 'dependencies', profileId: originalId, assetId: referencedAssetId, issue });
+    for (const entry of profileEntries) {
+      let profileData;
+      try {
+        profileData = JSON.parse(entry.getData().toString('utf-8'));
+      } catch {
+        throw packageError('VISUAL_PACKAGE_IMPORT_FAILED', 'Profile entry is not valid JSON', { stage: 'profiles', entry: entry.entryName });
       }
-    }
+      if (!profileData || !profileData.profileId) throw packageError('VISUAL_PACKAGE_IMPORT_FAILED', 'Profile entry is missing profileId', { stage: 'profiles', entry: entry.entryName });
 
-    if (exists) {
-      if (strategy === 'overwrite') {
-        // Remove existing profile and references before re-registering
+      const originalId = profileData.profileId;
+      const exists = profileRegistry.has(originalId);
+      const normalizedProfile = clone(profileData.profile ?? {});
+      applyMissingAssetPolicy(normalizedProfile, { missingIds, assetIdMapping, clearMissingAssets: clearMissing });
+      applyMissingFontPolicy(normalizedProfile, { missingIds: missingFontIds, assetIdMapping: fontIdMapping, clearMissingFonts: clearFonts });
+
+      if (exists && strategy === 'skip') {
+        skippedProfiles.push({ profileId: originalId, reason: 'strategy_skip' });
+        addIssue(buildIssue({ scope: 'profile', code: 'PROFILE_CONFLICT_SKIPPED', severity: 'warning', id: originalId, message: `Profile conflict skipped: ${originalId}`, details: { strategy } }));
+        profileIdMapping.set(originalId, syncEvents ? originalId : null);
+        continue;
+      }
+
+      if (exists && originalId === PROTECTED_PROFILE_ID && strategy === 'overwrite') {
+        throw packageError('VISUAL_PROFILE_REGISTRY_PROTECTED', '默认视觉方案不可覆盖', { stage: 'profiles', profileId: originalId });
+      }
+
+      if (exists && strategy === 'overwrite') {
         try {
-          profileRegistry.remove(originalId);
+          const registered = profileRegistry.replace(originalId, {
+            name: profileData.name ?? originalId,
+            profile: normalizedProfile,
+            source: 'imported'
+          });
+          registeredProfiles.push({ originalId, effectiveId: originalId, name: registered.name, profile: registered.profile });
+          profileIdMapping.set(originalId, originalId);
         } catch (error) {
           throw packageError('VISUAL_PACKAGE_IMPORT_FAILED', `Cannot overwrite profile: ${originalId}`, { stage: 'profiles', profileId: originalId, cause: error.message });
         }
-      }
-    }
-
-    let effectiveId = originalId;
-    if (exists && strategy === 'copy') {
-      // Generate a new ID by appending a suffix
-      let counter = 1;
-      while (profileRegistry.has(effectiveId)) {
-        effectiveId = `${originalId}-copy-${counter}`;
-        counter++;
-      }
-    }
-
-    try {
-      const registered = profileRegistry.register({
-        profileId: effectiveId,
-        name: profileData.name ?? originalId,
-        profile: normalizedProfile,
-        source: 'imported'
-      });
-      registeredProfiles.push({ originalId, effectiveId, name: registered.name });
-      profileIdMapping.set(originalId, effectiveId);
-    } catch (error) {
-      throw packageError('VISUAL_PACKAGE_IMPORT_FAILED', `Profile import failed: ${originalId}`, { stage: 'profiles', profileId: originalId, cause: error.message });
-    }
-  }
-
-    // 3. Import bindings
-    failedStage = 'bindings';
-    const bindingEntry = zip.getEntry('settings/event-bindings.json');
-  if (bindingEntry && profileIdMapping.size > 0) {
-    let bindingData;
-    try {
-      bindingData = JSON.parse(bindingEntry.getData().toString('utf-8'));
-    } catch {
-      const issue = addIssue(buildIssue({ scope: 'binding', code: 'BINDING_DATA_INVALID', id: bindingEntry.entryName, message: 'Binding entry is not valid JSON', details: {} }));
-      throw packageError('VISUAL_PACKAGE_IMPORT_FAILED', 'Binding entry is not valid JSON', { stage: 'bindings', entry: bindingEntry.entryName, issue });
-    }
-    if (!Array.isArray(bindingData?.bindings)) {
-      const issue = addIssue(buildIssue({ scope: 'binding', code: 'BINDING_DATA_INVALID', id: bindingEntry.entryName, message: 'Binding entry must contain an array', details: {} }));
-      throw packageError('VISUAL_PACKAGE_IMPORT_FAILED', 'Binding entry is invalid', { stage: 'bindings', entry: bindingEntry.entryName, issue });
-    }
-    const bindings = bindingData.bindings;
-    for (const binding of bindings) {
-      const bindingId = binding?.eventId ?? '(missing-event)';
-      if (!binding || typeof binding !== 'object' || Array.isArray(binding)) {
-        const issue = addIssue(buildIssue({ scope: 'binding', code: 'BINDING_DATA_INVALID', id: bindingId, message: `Binding record is invalid: ${bindingId}`, details: {} }));
-        throw packageError('VISUAL_PACKAGE_IMPORT_FAILED', `Binding record is invalid: ${bindingId}`, { stage: 'bindings', eventId: bindingId, issue });
-      }
-      const effectiveId = profileIdMapping.get(binding.visualProfileId);
-      if (effectiveId === null) {
-        addIssue(buildIssue({ scope: 'binding', code: 'BINDING_PROFILE_SKIPPED', severity: 'warning', id: bindingId, message: `Binding skipped because its Profile was skipped: ${bindingId}`, details: { visualProfileId: binding.visualProfileId } }));
         continue;
       }
-      if (effectiveId === undefined) {
-        const issue = addIssue(buildIssue({ scope: 'binding', code: 'BINDING_PROFILE_MISSING', id: bindingId, message: `Binding references an unknown Profile: ${binding.visualProfileId}`, details: { visualProfileId: binding.visualProfileId } }));
-        throw packageError('VISUAL_PACKAGE_IMPORT_FAILED', `Binding references missing profile: ${binding.visualProfileId}`, { stage: 'bindings', profileId: binding.visualProfileId, issue });
+
+      let effectiveId = originalId;
+      if (exists && strategy === 'copy') {
+        let counter = 1;
+        while (profileRegistry.has(effectiveId)) {
+          effectiveId = `${originalId}-copy-${counter}`;
+          counter++;
+        }
       }
-      if (!profileRegistry.has(effectiveId)) {
-        const issue = addIssue(buildIssue({ scope: 'binding', code: 'BINDING_PROFILE_MISSING', id: bindingId, message: `Binding references a missing Profile: ${effectiveId}`, details: { visualProfileId: effectiveId } }));
-        throw packageError('VISUAL_PACKAGE_IMPORT_FAILED', `Binding references missing profile: ${effectiveId}`, { stage: 'bindings', profileId: effectiveId, issue });
-      }
+
       try {
-        bindingRegistry.apply({
+        const registered = profileRegistry.register({
           profileId: effectiveId,
-          eventIds: [binding.eventId],
-          behaviorChannelId: binding.behaviorChannelId ?? null,
+          name: profileData.name ?? originalId,
+          profile: normalizedProfile,
           source: 'imported'
         });
-        importedBindings.push({ eventId: binding.eventId, visualProfileId: effectiveId });
+        registeredProfiles.push({ originalId, effectiveId, name: registered.name, profile: registered.profile });
+        profileIdMapping.set(originalId, effectiveId);
       } catch (error) {
-        const issueCode = error.code === 'VISUAL_EVENT_NOT_FOUND' ? 'BINDING_EVENT_INVALID' : error.code === 'VISUAL_EVENT_NOT_ELIGIBLE' ? 'BINDING_EVENT_INELIGIBLE' : 'BINDING_IMPORT_FAILED';
-        const issue = addIssue(buildIssue({ scope: 'binding', code: issueCode, id: binding.eventId, message: `Binding import failed: ${binding.eventId}`, details: { visualProfileId: binding.visualProfileId, causeCode: error.code ?? 'UNKNOWN', cause: error.message } }));
-        throw packageError('VISUAL_PACKAGE_IMPORT_FAILED', `Binding import failed: ${binding.eventId}`, { stage: 'bindings', eventId: binding.eventId, cause: error.message, issue });
+        throw packageError('VISUAL_PACKAGE_IMPORT_FAILED', `Profile import failed: ${originalId}`, { stage: 'profiles', profileId: originalId, cause: error.message });
       }
     }
-  }
+
+    failedStage = 'bindings';
+    const bindingEntry = zip.getEntry('settings/event-bindings.json');
+    if (syncEvents && bindingEntry && profileIdMapping.size > 0) {
+      let bindingData;
+      try {
+        bindingData = JSON.parse(bindingEntry.getData().toString('utf-8'));
+      } catch {
+        const issue = addIssue(buildIssue({ scope: 'binding', code: 'BINDING_DATA_INVALID', id: bindingEntry.entryName, message: 'Binding entry is not valid JSON', details: {} }));
+        throw packageError('VISUAL_PACKAGE_IMPORT_FAILED', 'Binding entry is not valid JSON', { stage: 'bindings', entry: bindingEntry.entryName, issue });
+      }
+      if (!Array.isArray(bindingData?.bindings)) {
+        const issue = addIssue(buildIssue({ scope: 'binding', code: 'BINDING_DATA_INVALID', id: bindingEntry.entryName, message: 'Binding entry must contain an array', details: {} }));
+        throw packageError('VISUAL_PACKAGE_IMPORT_FAILED', 'Binding entry is invalid', { stage: 'bindings', entry: bindingEntry.entryName, issue });
+      }
+      for (const binding of bindingData.bindings) {
+        const bindingId = binding?.eventId ?? '(missing-event)';
+        if (!binding || typeof binding !== 'object' || Array.isArray(binding)) {
+          const issue = addIssue(buildIssue({ scope: 'binding', code: 'BINDING_DATA_INVALID', id: bindingId, message: `Binding record is invalid: ${bindingId}`, details: {} }));
+          throw packageError('VISUAL_PACKAGE_IMPORT_FAILED', `Binding record is invalid: ${bindingId}`, { stage: 'bindings', eventId: bindingId, issue });
+        }
+        const effectiveId = profileIdMapping.get(binding.visualProfileId);
+        if (effectiveId === null) {
+          addIssue(buildIssue({ scope: 'binding', code: 'BINDING_PROFILE_SKIPPED', severity: 'warning', id: bindingId, message: `Binding skipped because its Profile was skipped: ${bindingId}`, details: { visualProfileId: binding.visualProfileId } }));
+          continue;
+        }
+        if (effectiveId === undefined) {
+          const issue = addIssue(buildIssue({ scope: 'binding', code: 'BINDING_PROFILE_MISSING', id: bindingId, message: `Binding references an unknown Profile: ${binding.visualProfileId}`, details: { visualProfileId: binding.visualProfileId } }));
+          throw packageError('VISUAL_PACKAGE_IMPORT_FAILED', `Binding references missing profile: ${binding.visualProfileId}`, { stage: 'bindings', profileId: binding.visualProfileId, issue });
+        }
+        if (!profileRegistry.has(effectiveId)) {
+          const issue = addIssue(buildIssue({ scope: 'binding', code: 'BINDING_PROFILE_MISSING', id: bindingId, message: `Binding references a missing Profile: ${effectiveId}`, details: { visualProfileId: effectiveId } }));
+          throw packageError('VISUAL_PACKAGE_IMPORT_FAILED', `Binding references missing profile: ${effectiveId}`, { stage: 'bindings', profileId: effectiveId, issue });
+        }
+        try {
+          bindingRegistry.apply({
+            profileId: effectiveId,
+            eventIds: [binding.eventId],
+            behaviorChannelId: binding.behaviorChannelId ?? null,
+            source: 'imported'
+          });
+          importedBindings.push({ eventId: binding.eventId, visualProfileId: effectiveId });
+        } catch (error) {
+          const issueCode = error.code === 'VISUAL_EVENT_NOT_FOUND' ? 'BINDING_EVENT_INVALID' : error.code === 'VISUAL_EVENT_NOT_ELIGIBLE' ? 'BINDING_EVENT_INELIGIBLE' : 'BINDING_IMPORT_FAILED';
+          const issue = addIssue(buildIssue({ scope: 'binding', code: issueCode, id: binding.eventId, message: `Binding import failed: ${binding.eventId}`, details: { visualProfileId: binding.visualProfileId, causeCode: error.code ?? 'UNKNOWN', cause: error.message } }));
+          throw packageError('VISUAL_PACKAGE_IMPORT_FAILED', `Binding import failed: ${binding.eventId}`, { stage: 'bindings', eventId: binding.eventId, cause: error.message, issue });
+        }
+      }
+    }
 
     return {
-    packageId: preview.packageId,
-    packageName: preview.packageName,
-    version: preview.version,
-    strategy,
-    profiles: { registered: registeredProfiles, skipped: skippedProfiles },
-    assets: { imported: importedAssets, skipped: skippedAssets },
-    bindings: { imported: importedBindings },
-    bindingCount: importedBindings.length,
-    issues,
-    issueSummary: summarizeIssues(issues)
+      packageId: preview.packageId,
+      packageName: preview.packageName,
+      version: preview.version,
+      strategy,
+      applyBindings: syncEvents,
+      clearMissingAssets: clearMissing,
+      clearMissingFonts: clearFonts,
+      profiles: { registered: registeredProfiles, skipped: skippedProfiles },
+      assets: { imported: importedAssets, skipped: skippedAssets, missing: classified.missingAssets, resolved: classified.resolvedAssets },
+      fonts: { missing: classifiedFonts.missingAssets, resolved: classifiedFonts.resolvedAssets },
+      bindings: { imported: importedBindings },
+      bindingCount: importedBindings.length,
+      issues,
+      issueSummary: summarizeIssues(issues)
     };
   } catch (error) {
     failedStage = error.details?.stage ?? failedStage;
@@ -549,9 +688,6 @@ export async function importVisualPackage({ zipBuffer, profileRegistry, bindingR
   }
 }
 
-/**
- * Generate a unique package ID from the current time.
- */
 export function generatePackageId() {
   return `visual-package-${Date.now()}`;
 }

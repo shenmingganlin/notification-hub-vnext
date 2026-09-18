@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { CARD_ASPECT_RATIOS, CARD_FITS, CARD_SIZES, CARD_TYPES, IMPLEMENTED_CARD_TYPES, createCardVisualSettings, PROPERTIES_DEFAULTS, SKIN_DEFAULTS, EFFECT_DEFAULTS } from '../../plugin/domain/card-visual-settings.js';
+import { BODY_CUSTOM_TEXT_MAX, CARD_ASPECT_RATIOS, CARD_FITS, CARD_SIZES, CARD_TYPES, IMPLEMENTED_CARD_TYPES, createCardVisualSettings, PROPERTIES_DEFAULTS, SKIN_DEFAULTS, EFFECT_DEFAULTS, resolvePartContent, TITLE_CUSTOM_TEXT_MAX } from '../../plugin/domain/card-visual-settings.js';
 
 test('card types are the content-structure axis; only minimal is implemented', () => {
   assert.deepEqual(CARD_TYPES, ['minimal', 'message', 'detail', 'progress', 'character', 'system']);
@@ -139,12 +139,12 @@ test('glossary names resolve on parts and stay off the type when empty', () => {
     types: {
       minimal: {
         glossary: { '标题色': '#f2fff9', '描边色': '#62d0a8' },
-        parts: { title: { fill: '标题色', stroke: '描边色', strokeWidth: 1 } }
+        parts: { title: { fill: '标题色', stroke: '描边色', strokeWidth: 1, textStroke: true, textStrokeColor: '描边色' } }
       }
     }
   });
   assert.deepEqual(settings.types.minimal.glossary, { '标题色': '#f2fff9', '描边色': '#62d0a8' });
-  assert.deepEqual(settings.types.minimal.parts, { title: { fill: '标题色', stroke: '描边色', strokeWidth: 1 } });
+  assert.deepEqual(settings.types.minimal.parts, { title: { fill: '标题色', stroke: '描边色', strokeWidth: 1, textStroke: true, textStrokeColor: '描边色' } });
   assert.throws(
     () => createCardVisualSettings({ types: { minimal: { parts: { title: { fill: '标题色' } } } } }),
     (error) => error.code === 'CARD_VISUAL_COLOR_INVALID'
@@ -303,4 +303,66 @@ test('visual settings persist gap without upper bound and new stroke/close field
     () => createCardVisualSettings({ types: { minimal: { parts: { close: { closeIcon: 'heart' } } } } }),
     (error) => error.code === 'CARD_VISUAL_FIELD_INVALID'
   );
+});
+
+test('title and body keep content source independent of event text', () => {
+  const settings = createCardVisualSettings({
+    types: {
+      minimal: {
+        parts: {
+          title: { contentSource: 'custom', customText: '写死标题' },
+          body: { contentSource: 'custom', customText: '写死正文' }
+        }
+      }
+    }
+  });
+  assert.equal(settings.types.minimal.parts.title.contentSource, 'custom');
+  assert.equal(settings.types.minimal.parts.title.customText, '写死标题');
+  assert.equal(settings.types.minimal.parts.body.contentSource, 'custom');
+  assert.equal(settings.types.minimal.parts.body.customText, '写死正文');
+  const eventOnly = createCardVisualSettings({
+    types: { minimal: { parts: { title: { contentSource: 'event', customText: '还留着' } } } }
+  });
+  assert.equal('contentSource' in eventOnly.types.minimal.parts.title, false);
+  assert.equal(eventOnly.types.minimal.parts.title.customText, '还留着');
+  const emptyBody = createCardVisualSettings({
+    types: { minimal: { parts: { body: { contentSource: 'custom', customText: '' } } } }
+  });
+  assert.equal(emptyBody.types.minimal.parts.body.contentSource, 'custom');
+  assert.equal('customText' in emptyBody.types.minimal.parts.body, false);
+  assert.throws(
+    () => createCardVisualSettings({ types: { minimal: { parts: { title: { contentSource: 'custom' } } } } }),
+    (error) => error.code === 'CARD_VISUAL_FIELD_INVALID'
+  );
+  assert.throws(
+    () => createCardVisualSettings({ types: { minimal: { parts: { assistantName: { contentSource: 'custom' } } } } }),
+    (error) => error.code === 'CARD_VISUAL_FIELD_UNKNOWN'
+  );
+  assert.equal(TITLE_CUSTOM_TEXT_MAX, 2000);
+  assert.equal(BODY_CUSTOM_TEXT_MAX, 4000);
+  const longTitle = '标'.repeat(TITLE_CUSTOM_TEXT_MAX);
+  const longBody = '正'.repeat(BODY_CUSTOM_TEXT_MAX);
+  const longCustom = createCardVisualSettings({
+    types: { minimal: { parts: { title: { contentSource: 'custom', customText: longTitle }, body: { contentSource: 'custom', customText: longBody } } } }
+  });
+  assert.equal(longCustom.types.minimal.parts.title.customText.length, TITLE_CUSTOM_TEXT_MAX);
+  assert.equal(longCustom.types.minimal.parts.body.customText.length, BODY_CUSTOM_TEXT_MAX);
+  assert.throws(
+    () => createCardVisualSettings({ types: { minimal: { parts: { title: { contentSource: 'custom', customText: longTitle + '溢' } } } } }),
+    (error) => error.code === 'CARD_VISUAL_FIELD_INVALID'
+  );
+  assert.throws(
+    () => createCardVisualSettings({ types: { minimal: { parts: { body: { customText: longBody + '溢' } } } } }),
+    (error) => error.code === 'CARD_VISUAL_FIELD_INVALID'
+  );
+});
+
+test('resolvePartContent uses custom text without keeping the card on screen', () => {
+  assert.equal(resolvePartContent({ contentSource: 'custom', customText: '写死' }, '事件标题', { fallback: '新通知', maxLength: 120 }), '写死');
+  assert.equal(resolvePartContent({ contentSource: 'event' }, '事件标题', { fallback: '新通知', maxLength: 120 }), '事件标题');
+  assert.equal(resolvePartContent({}, '事件标题', { fallback: '新通知', maxLength: 120 }), '事件标题');
+  assert.equal(resolvePartContent({ contentSource: 'custom' }, '事件正文', { fallback: '', maxLength: 2000 }), '');
+  assert.equal(resolvePartContent({ contentSource: 'custom', customText: '' }, '', { fallback: '新通知', maxLength: 120 }), '新通知');
+  const customTitle = '标'.repeat(500);
+  assert.equal(resolvePartContent({ contentSource: 'custom', customText: customTitle }, '事件标题', { fallback: '新通知', maxLength: TITLE_CUSTOM_TEXT_MAX }), customTitle);
 });

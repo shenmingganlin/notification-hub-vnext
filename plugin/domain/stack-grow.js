@@ -1,5 +1,5 @@
 export const STACK_GROWS = Object.freeze(['up', 'down', 'left', 'right']);
-export const STACK_WRAPS = Object.freeze(['off', 'parallel', 'snake']);
+export const STACK_WRAPS = Object.freeze(['off', 'parallel', 'snake', 'coil']);
 export const STACK_GROW_ANCHORS = Object.freeze(['top-left', 'top-right', 'bottom-left', 'bottom-right']);
 
 function normalizeAnchor(anchor) {
@@ -30,9 +30,13 @@ export function resolveStackWrap(wrap) {
   return STACK_WRAPS.includes(wrap) ? wrap : 'parallel';
 }
 
-export function stackGrowToNativeDirection(anchor, grow, wrap) {
+export function resolveStackNewest(newest) {
+  return newest === 'next' ? 'next' : 'dock';
+}
+
+export function stackGrowToNativeDirection(anchor, grow, wrap, newest) {
   const resolved = resolveStackGrow(anchor, grow);
-  if (resolveStackWrap(wrap) === 'snake') return resolved;
+  if (resolveStackNewest(newest) === 'next') return resolved;
   if (resolved === 'up') return 'down';
   if (resolved === 'down') return 'up';
   if (resolved === 'left') return 'right';

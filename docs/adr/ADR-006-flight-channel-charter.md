@@ -23,13 +23,15 @@ ADR-005 把通道定为一种飞法一个池，但把速度、方向和外层法
    | 寿命 | `life` | 关闭、停留 |
    | 卡面 | `face` | 零件树 |
    | 事件巷 | `eventLane` | 通知路由，不是飞法池 |
-   | 落点 | `settle` | 现仅 `snap`；`follow` 以后才是 PID |
+   | 落点 | `settle` | `snap` / `follow`，见 ADR-007 |
+   | 新位 | `newest` | `dock` / `next`，见 ADR-008 |
+   | 走线 | `wrap` | `off` / `parallel` / `snake` / `coil`，回字见 ADR-009 |
 
 2. **户口**：本机 `channels.stack` / `channels.ticker` 为规约权威。方案只保存飞法 + 动态 + 寿命 + 卡面。配置包不含规约。
 
 3. **弹幕**：现行 ticker = 平动。方向、速度是卡片动态。带、轨、同轨净空、满轨、点穿是规约。函数路径以后新飞法新池。
 
-4. **Native**：通道规约不得被后一张卡覆盖。出生方向、速度锁进该卡 `TickerMotion`。堆叠规约 `settle` 仅 `snap`。
+4. **Native**：通道规约不得被后一张卡覆盖。出生方向、速度锁进该卡 `TickerMotion`。堆叠规约 `settle` 见 ADR-007；`newest` 见 ADR-008；走线回字见 ADR-009。
 
 5. **错误**：`FLIGHT_` / `CHARTER_` / `MOTION_` / `LIFE_` / `LANE_` / `LEXICON_`，带 `field`、`expected`、`actual`。
 
@@ -37,4 +39,4 @@ ADR-005 把通道定为一种飞法一个池，但把速度、方向和外层法
 
 - ADR-005「外层含速度」作废；速度归动态。
 - 事件巷（原 `behavior-channel.js`）不得改名为飞法通道。
-- 不实现 PID、路径、淡入。工作室 DOM 另刀。
+- 路径、淡入不做。堆叠 `settle: follow` 见 ADR-007。堆叠 `newest: dock|next` 见 ADR-008。堆叠走线 `coil` 回字见 ADR-009。

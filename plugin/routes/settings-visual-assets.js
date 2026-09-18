@@ -6,17 +6,41 @@ const MESSAGES = Object.freeze({
 });
 function errorPayload(error) { return { code: error?.code ?? 'VISUAL_ASSET_ROUTE_FAILED', message: MESSAGES[error?.code] ?? error?.message ?? String(error), details: error?.details ?? {} }; }
 function getPlugin(ctx) { return ctx?._notificationHubVNextSettingsApi ?? ctx?._notificationHubVNextPlugin; }
+function readFlag(value, defaultValue) {
+  if (value === undefined || value === null || value === '') return defaultValue;
+  if (typeof value === 'boolean') return value;
+  if (typeof value === 'string') {
+    const normalized = value.trim().toLowerCase();
+    if (['true', '1', 'yes', 'on'].includes(normalized)) return true;
+    if (['false', '0', 'no', 'off'].includes(normalized)) return false;
+  }
+  return defaultValue;
+}
 async function readPackageInput(c) {
   const contentType = c.req.header?.('content-type') || '';
   if (contentType.includes('application/json')) {
     const body = await c.req.json().catch(() => ({}));
-    if (typeof body?.base64 === 'string' && body.base64.trim()) return { zipBuffer: Buffer.from(body.base64, 'base64'), strategy: body.strategy };
+    if (typeof body?.base64 === 'string' && body.base64.trim()) {
+      return {
+        zipBuffer: Buffer.from(body.base64, 'base64'),
+        strategy: body.strategy,
+        applyBindings: readFlag(body.applyBindings, true),
+        clearMissingAssets: readFlag(body.clearMissingAssets, false),
+        clearMissingFonts: readFlag(body.clearMissingFonts, false)
+      };
+    }
     throw Object.assign(new Error('package file is required'), { code: 'VISUAL_PACKAGE_FILE_INVALID' });
   }
   const form = await c.req.parseBody();
   const file = form?.package ?? form?.file;
   if (!file || typeof file.arrayBuffer !== 'function') throw Object.assign(new Error('package file is required'), { code: 'VISUAL_PACKAGE_FILE_INVALID' });
-  return { file, strategy: typeof form.strategy === 'string' ? form.strategy : undefined };
+  return {
+    file,
+    strategy: typeof form.strategy === 'string' ? form.strategy : undefined,
+    applyBindings: readFlag(form.applyBindings, true),
+    clearMissingAssets: readFlag(form.clearMissingAssets, false),
+    clearMissingFonts: readFlag(form.clearMissingFonts, false)
+  };
 }
 export default function registerVisualAssetRoute(app, ctx) {
   const pluginOf = () => getPlugin(ctx);

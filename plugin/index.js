@@ -56,7 +56,7 @@ import { createSidebarDisplaySettingsPersistence } from './domain/sidebar-displa
 import { VisualSettingsStore } from './domain/visual-settings-store.js';
 import { isTickerFlight, splitLegacyTicker, toNativeTickerCharterPayload } from './domain/channel-charter.js';
 import { createVisualProfile, resolveTickerMotion } from './domain/visual-settings.js';
-import { CARD_ANCHORS, CARD_ASPECT_RATIOS, CARD_BOUNDARIES, CARD_LAYOUTS, CARD_SIZES, MINIMAL_CARD_DEFAULTS, PROPERTIES_DEFAULTS } from './domain/card-visual-settings.js';
+import { BODY_CUSTOM_TEXT_MAX, CARD_ANCHORS, CARD_ASPECT_RATIOS, CARD_BOUNDARIES, CARD_LAYOUTS, CARD_SIZES, MINIMAL_CARD_DEFAULTS, PROPERTIES_DEFAULTS, resolvePartContent, TITLE_CUSTOM_TEXT_MAX } from './domain/card-visual-settings.js';
 import { createBehaviorManager } from './domain/notification-behavior-manager.js';
 import { createBehaviorProfile } from './domain/notification-behavior.js';
 import { createSceneDismissQueue } from './domain/scene-dismiss-queue.js';
@@ -235,6 +235,11 @@ function collectVisualProfileAssetReferences(profile) {
   };
   add(minimal.appearance?.backgroundAssetId, 'card.minimal.appearance.background');
   add(minimal.skin?.background?.assetId, 'card.minimal.skin.background');
+  for (const [partId, part] of Object.entries(minimal.parts ?? {})) {
+    if (!part || typeof part !== 'object') continue;
+    add(part.backgroundAssetId, `card.minimal.parts.${partId}.background`);
+    if (partId === 'icon') add(part.assetId, 'card.minimal.parts.icon.asset');
+  }
   for (const [slot, value] of Object.entries(minimal.effects?.slots ?? {})) add(value?.assetId, `card.minimal.effects.${slot}`);
   return references;
 }
@@ -248,7 +253,29 @@ function collectVisualProfileFontReferences(profile) {
   };
   add(parts.title?.fontAssetId, 'card.minimal.parts.title.font');
   add(parts.body?.fontAssetId, 'card.minimal.parts.body.font');
+  add(parts.assistantName?.fontAssetId, 'card.minimal.parts.assistantName.font');
   return references;
+}
+
+function dropMissingDependencies(profile, hasAsset, hasFont) {
+  if (!profile || typeof profile !== 'object') return profile;
+  const next = JSON.parse(JSON.stringify(profile));
+  const minimal = next.card?.types?.minimal;
+  if (!minimal || typeof minimal !== 'object') return next;
+  const drop = (owner, key, check) => {
+    if (!owner || typeof owner !== 'object' || typeof check !== 'function') return;
+    const id = owner[key];
+    if (typeof id === 'string' && id.trim() && !check(id)) owner[key] = null;
+  };
+  drop(minimal.appearance, 'backgroundAssetId', hasAsset);
+  drop(minimal.skin?.background, 'assetId', hasAsset);
+  for (const part of Object.values(minimal.parts ?? {})) {
+    drop(part, 'backgroundAssetId', hasAsset);
+    drop(part, 'assetId', hasAsset);
+    drop(part, 'fontAssetId', hasFont);
+  }
+  for (const slot of Object.values(minimal.effects?.slots ?? {})) drop(slot, 'assetId', hasAsset);
+  return next;
 }
 
 function normalizeSoundPreviewInput(input = {}) {
@@ -534,8 +561,8 @@ function notificationCardPayload(record, index, workArea, layout, visual, presen
   }
   return {
     id: notificationCardId(record.notificationId),
-    title: notificationCardText(record.title, '新通知', 120),
-    body: notificationCardText(record.content, record.summary || '', 2000),
+    title: resolvePartContent(visual?.parts?.title, record.title, { fallback: '新通知', maxLength: visual?.parts?.title?.contentSource === 'custom' ? TITLE_CUSTOM_TEXT_MAX : 120 }),
+    body: resolvePartContent(visual?.parts?.body, record.content, { fallback: record.summary || '', maxLength: visual?.parts?.body?.contentSource === 'custom' ? BODY_CUSTOM_TEXT_MAX : 2000 }),
     visual: projectNativeVisualPayload(visualForNative),
     parts,
     ...(identity?.name ? { assistantName: notificationCardText(identity.name, identity.id, 80) } : {}),
@@ -545,6 +572,13 @@ function notificationCardPayload(record, index, workArea, layout, visual, presen
     width: dimensions.width,
     height: dimensions.height
   };
+}
+
+function stampStudioCardText(card, parts, { title, body } = {}) {
+  if (!card) return card;
+  if (parts?.title?.contentSource !== 'custom' && typeof title === 'string') card.title = title;
+  if (parts?.body?.contentSource !== 'custom' && typeof body === 'string') card.body = body;
+  return card;
 }
 
 export default class NotificationHubVNextPlugin {
@@ -756,6 +790,7 @@ export default class NotificationHubVNextPlugin {
       clearVisualStudioCards: this.clearVisualStudioCards.bind(this),
       listVisualProfiles: this.listVisualProfiles.bind(this),
       saveVisualProfile: this.saveVisualProfile.bind(this),
+      renameVisualProfile: this.renameVisualProfile.bind(this),
       removeVisualProfile: this.removeVisualProfile.bind(this),
       listVisualAssets: this.listVisualAssets.bind(this),
       getVisualAsset: this.getVisualAsset.bind(this),
@@ -1280,17 +1315,16 @@ export default class NotificationHubVNextPlugin {
 
   async updateVisualSettings(patch = {}) {
     const previousProfile = this.visualSettingsStore.getSnapshot().settings.profile;
+    const hasAsset = (id) => !!this.visualAssetLibrary.get(id);
+    const hasFont = (id) => !!this.fontAssetLibrary.get(id);
+    const incomingProfile = patch?.profile ? dropMissingDependencies(patch.profile, hasAsset, hasFont) : previousProfile;
+    const nextPatch = patch?.profile ? { ...patch, profile: incomingProfile } : patch;
     const previous = previousProfile.card?.types?.minimal?.appearance?.backgroundAssetId ?? null;
-    const next = patch?.profile?.card?.types?.minimal?.appearance?.backgroundAssetId;
-    const nextAssetId = next === undefined ? previous : next;
-    if (nextAssetId && !this.visualAssetLibrary.get(nextAssetId)) throw Object.assign(new Error(`Unknown visual asset: ${nextAssetId}`), { code: 'VISUAL_ASSET_NOT_FOUND', details: { assetId: nextAssetId } });
-    const nextFontReferences = collectVisualProfileFontReferences(patch?.profile ?? previousProfile);
-    for (const reference of nextFontReferences) {
-      if (!this.fontAssetLibrary.get(reference.assetId)) throw Object.assign(new Error(`Unknown font asset: ${reference.assetId}`), { code: 'FONT_ASSET_NOT_FOUND', details: { assetId: reference.assetId } });
-    }
+    const rawNext = patch?.profile?.card?.types?.minimal?.appearance?.backgroundAssetId;
+    const nextAssetId = rawNext === undefined ? previous : (hasAsset(rawNext) ? rawNext : null);
     if (nextAssetId && nextAssetId !== previous) await this.visualAssetLibrary.addReference(nextAssetId, { ownerType: 'profile', ownerId: 'visual.default', slot: 'card.minimal.background' });
     try {
-      const snapshot = this.visualSettingsStore.updateVisualSettings(patch);
+      const snapshot = this.visualSettingsStore.updateVisualSettings(nextPatch);
       this.visualSettingsStore.markApplied(snapshot.revision);
       const defaultRecord = this.visualProfileRegistry.get('visual.default');
       if (defaultRecord) {
@@ -1393,6 +1427,7 @@ export default class NotificationHubVNextPlugin {
       profileRegistry: this.visualProfileRegistry,
       bindingRegistry: this.visualBindingRegistry,
       assetLibrary: this.visualAssetLibrary,
+      fontLibrary: this.fontAssetLibrary,
       storage: this.visualAssetStorage,
       profileIds,
       meta
@@ -1401,31 +1436,42 @@ export default class NotificationHubVNextPlugin {
     const saved = await this.soundFilePicker.save({
       suggestedName: packageName,
       content: zipBuffer,
-      extension: 'nhvisual',
+      extension: 'zip',
       title: '导出 Notification Hub 视觉配置包',
-      filter: 'Notification Hub visual package (*.nhvisual)|*.nhvisual|ZIP package (*.zip)|*.zip|All files (*.*)|*.*'
+      filter: 'ZIP package (*.zip)|*.zip|Notification Hub visual package (*.nhvisual)|*.nhvisual|All files (*.*)|*.*'
     });
     return { savedToFile: saved.cancelled !== true, cancelled: saved.cancelled === true, savedFilename: saved.path || null, bytes: zipBuffer.length, format: 'notification-hub-visual-package', version: 1 };
   }
 
   async previewVisualPackage(input = {}) {
     const zipBuffer = await this.readVisualPackageBuffer(input);
-    return previewImportVisualPackage({ zipBuffer, profileRegistry: this.visualProfileRegistry, assetLibrary: this.visualAssetLibrary });
+    return previewImportVisualPackage({ zipBuffer, profileRegistry: this.visualProfileRegistry, assetLibrary: this.visualAssetLibrary, fontLibrary: this.fontAssetLibrary });
   }
 
   async importVisualPackage(input = {}) {
     const zipBuffer = await this.readVisualPackageBuffer(input);
     const previousProfileAssetReferences = new Map(this.visualProfileRegistry.list().map((profileId) => [profileId, collectVisualProfileAssetReferences(this.visualProfileRegistry.get(profileId)?.profile)]));
+    const previousProfileFontReferences = new Map(this.visualProfileRegistry.list().map((profileId) => [profileId, collectVisualProfileFontReferences(this.visualProfileRegistry.get(profileId)?.profile)]));
     const report = await importVisualPackageData({
       zipBuffer,
       profileRegistry: this.visualProfileRegistry,
       bindingRegistry: this.visualBindingRegistry,
       assetLibrary: this.visualAssetLibrary,
+      fontLibrary: this.fontAssetLibrary,
       storage: this.visualAssetStorage,
-      strategy: input.strategy ?? 'copy'
+      strategy: input.strategy ?? 'copy',
+      applyBindings: input.applyBindings !== false && input.applyBindings !== 'false',
+      clearMissingAssets: input.clearMissingAssets === true || input.clearMissingAssets === 'true',
+      clearMissingFonts: input.clearMissingFonts === true || input.clearMissingFonts === 'true'
     });
+    if (report.failed) {
+      const failedReport = { ...report, visualRevision: this.visualRegistryRevision };
+      this.lastVisualPackageReport = failedReport;
+      return failedReport;
+    }
     const changed = report.profiles.registered.length > 0 || report.assets.imported.length > 0 || report.bindings.imported.length > 0;
     let profileAssetReferencesChanged = false;
+    let profileFontReferencesChanged = false;
     for (const imported of report.profiles.registered) {
       const record = this.visualProfileRegistry.get(imported.effectiveId);
       for (const reference of previousProfileAssetReferences.get(imported.effectiveId) ?? []) {
@@ -1435,11 +1481,19 @@ export default class NotificationHubVNextPlugin {
         this.visualAssetLibrary.addReference(reference.assetId, { ownerType: 'profile', ownerId: imported.effectiveId, slot: reference.slot });
         profileAssetReferencesChanged = true;
       }
+      for (const reference of previousProfileFontReferences.get(imported.effectiveId) ?? []) {
+        this.fontAssetLibrary.removeReference(reference.assetId, { ownerType: 'profile', ownerId: imported.effectiveId, slot: reference.slot });
+      }
+      for (const reference of collectVisualProfileFontReferences(record?.profile)) {
+        this.fontAssetLibrary.addReference(reference.assetId, { ownerType: 'profile', ownerId: imported.effectiveId, slot: reference.slot });
+        profileFontReferencesChanged = true;
+      }
     }
     if (report.assets.imported.length > 0 || profileAssetReferencesChanged) {
       await this.saveVisualAssets();
       await this.applyVisualAssetManifest();
     }
+    if (profileFontReferencesChanged) await this.saveFontAssets();
     if (report.bindings.imported.length > 0) {
       const projected = projectVisualRegistryToEventSettings({ settings: this.eventPresentationSettingsStore.getSnapshot().settings, bindingRegistry: this.visualBindingRegistry, profileRegistry: this.visualProfileRegistry });
       const snapshot = this.eventPresentationSettingsStore.updateSettings({ events: projected.events });
@@ -1527,21 +1581,45 @@ export default class NotificationHubVNextPlugin {
     });
   }
 
+  renameVisualProfile({ profileId, name } = {}) {
+    try {
+      const previous = this.visualProfileRegistry.get(profileId);
+      if (!previous) throw Object.assign(new Error(`Unknown profile: ${profileId}`), { code: 'VISUAL_PROFILE_REGISTRY_NOT_FOUND', details: { profileId } });
+      const trimmed = typeof name === 'string' ? name.trim() : '';
+      if (!trimmed) throw Object.assign(new Error('配置包名称不能为空'), { code: 'VISUAL_PROFILE_REGISTRY_FIELD_INVALID', details: { field: 'name' } });
+      const duplicate = this.visualProfileRegistry.list()
+        .map((id) => this.visualProfileRegistry.get(id))
+        .find((record) => record && record.profileId !== previous.profileId && record.name === trimmed);
+      if (duplicate) throw Object.assign(new Error('已有同名配置包'), { code: 'VISUAL_PROFILE_NAME_DUPLICATE', details: { profileId: duplicate.profileId, name: trimmed } });
+      const record = this.visualProfileRegistry.replace(previous.profileId, {
+        name: trimmed,
+        profile: previous.profile,
+        source: previous.source
+      });
+      this.visualRegistryRevision += 1;
+      this.queueVisualRegistryPersistence();
+      return {
+        profileId: record.profileId,
+        name: record.name,
+        source: record.source,
+        profile: record.profile,
+        references: this.visualProfileRegistry.references(record.profileId),
+        visualRevision: this.visualRegistryRevision
+      };
+    } catch (error) {
+      this.recordVisualDiagnostic(error, 'CONFIG_RESOLVE', { profileId: profileId ?? null });
+      throw error;
+    }
+  }
+
   saveVisualProfile({ profileId, name, profile = null, source = 'local' } = {}) {
     try {
-      const nextProfile = profile ?? this.visualSettingsStore.getSnapshot().settings.profile;
+      const rawProfile = profile ?? this.visualSettingsStore.getSnapshot().settings.profile;
+      const hasAsset = (id) => !!this.visualAssetLibrary.get(id);
+      const hasFont = (id) => !!this.fontAssetLibrary.get(id);
+      const nextProfile = dropMissingDependencies(rawProfile, hasAsset, hasFont);
       const nextAssetReferences = collectVisualProfileAssetReferences(nextProfile);
       const nextFontReferences = collectVisualProfileFontReferences(nextProfile);
-      for (const reference of nextAssetReferences) {
-        if (!this.visualAssetLibrary.get(reference.assetId)) {
-          throw Object.assign(new Error(`Unknown visual asset: ${reference.assetId}`), { code: 'VISUAL_ASSET_NOT_FOUND', details: { assetId: reference.assetId, profileId } });
-        }
-      }
-      for (const reference of nextFontReferences) {
-        if (!this.fontAssetLibrary.get(reference.assetId)) {
-          throw Object.assign(new Error(`Unknown font asset: ${reference.assetId}`), { code: 'FONT_ASSET_NOT_FOUND', details: { assetId: reference.assetId, profileId } });
-        }
-      }
       const previous = this.visualProfileRegistry.get(profileId);
       const record = previous
         ? this.visualProfileRegistry.replace(profileId, { name, profile: nextProfile, source })
@@ -1802,29 +1880,17 @@ export default class NotificationHubVNextPlugin {
   }
 
   async _importSoundPackage({ packageText, conflict = 'reject', conflictBySoundId = {} } = {}) {
-    const previousSettings = this.soundSettingsStore.getSnapshot();
     const result = await importSoundPackage({
       packageText,
       assetRoot: this.soundAssetRoot,
       registry: this.soundAssetRegistry,
       conflict,
       conflictBySoundId,
-      commit: async (profile) => {
-        this.soundSettingsStore.updateSoundSettings({ profile });
-        this.notificationApi.setSoundProfile(this.soundSettingsStore.getSnapshot().settings.profile);
+      commit: async () => {
         await this.saveSoundAssets();
-      },
-      rollbackCommit: async () => {
-        this.soundSettingsStore.restoreSnapshot({
-          version: previousSettings.version,
-          revision: previousSettings.revision,
-          updatedAt: new Date().toISOString(),
-          settings: previousSettings.settings
-        });
-        this.notificationApi.setSoundProfile(previousSettings.settings.profile);
       }
     });
-    return { ...result, assets: this.soundAssetRegistry.list(), assetStatus: this.getSoundAssetStatus() };
+    return { ...result, assets: this.soundAssetRegistry.list(), assetStatus: this.getSoundAssetStatus(), profile: this.soundSettingsStore.getSnapshot().settings.profile };
   }
 
   async importSoundAsset(input = {}) {
@@ -2020,10 +2086,8 @@ export default class NotificationHubVNextPlugin {
   }
 
   async exportSoundPackage({ name = 'Notification Hub sounds', destinationDirectory, chooseDestination = false } = {}) {
-    const snapshot = this.soundSettingsStore.getSnapshot();
     const result = await exportSoundPackage({
       name,
-      profile: snapshot.settings.profile,
       registry: this.soundAssetRegistry,
       assetRoot: this.soundAssetRoot
     });
@@ -3609,6 +3673,11 @@ export default class NotificationHubVNextPlugin {
     };
   }
 
+  assertStudioVisualEnabled(profile, action) {
+    if (profile?.global?.enabled !== false) return profile;
+    throw Object.assign(new Error(`全局视觉已关闭，${action}不会生成桌面卡`), { code: 'VISUAL_GLOBAL_DISABLED' });
+  }
+
   buildVisualDraftNativeCard({ health, cardId, draft = null, title, body, eventId, channelId, sampleAgent = null }) {
     const sourceProfile = draft ?? this.visualSettingsStore.getSnapshot().settings.profile;
     const profile = createVisualProfile(normalizeVisualPreviewProfile(sourceProfile));
@@ -3641,10 +3710,13 @@ export default class NotificationHubVNextPlugin {
       { behaviorProfileId: behaviorId, behaviorChannelId: channelId ?? `visual.try-one.${behaviorId}` },
       this.ctx
     );
-    return { profile, card: { ...card, id: cardId, title, body } };
+    stampStudioCardText(card, visual?.parts, { title, body });
+    return { profile, card: { ...card, id: cardId } };
   }
 
   async runVisualDraftSample({ draft = null, sampleAgent = null } = {}) {
+    const sourceProfile = draft ?? this.visualSettingsStore.getSnapshot().settings.profile;
+    this.assertStudioVisualEnabled(createVisualProfile(normalizeVisualPreviewProfile(sourceProfile)), '试一条');
     const host = this.requireRuntimeTestHost();
     const sample = sampleAgentFromInput(sampleAgent);
     await this.applyVisualAssetManifest();
@@ -3662,17 +3734,21 @@ export default class NotificationHubVNextPlugin {
       sampleAgent: sample
     });
     const label = profile.behaviorId === 'ticker' ? '弹幕' : '堆叠';
-    card.title = `试一条 · ${label}`;
-    card.body = profile.behaviorId === 'ticker'
-      ? (profile.ticker?.direction === 'right' ? '弹幕从左往右流过。' : '弹幕从右往左流过。')
-      : '当前工作室草稿，不写通知历史。';
+    const parts = profile.card?.types?.[profile.card.activeType]?.parts || {};
+    if (parts.title?.contentSource !== 'custom') card.title = `试一条 · ${label}`;
+    if (parts.body?.contentSource !== 'custom') {
+      card.body = profile.behaviorId === 'ticker'
+        ? (profile.ticker?.direction === 'right' ? '弹幕从左往右流过。' : '弹幕从右往左流过。')
+        : '当前工作室草稿，不写通知历史。';
+    }
     await this.ensureNativeStackLayout(host, {
       behaviorId: profile.behaviorId,
       space: profile.card?.types?.[profile.card.activeType]?.properties?.space,
       ticker: profile.ticker
     });
-    const response = await host.client.request('scene.create', card, sceneCreateOptions());
-    this.recordVisualDiagnostic({ code: 'VISUAL_DRAFT_SAMPLE_CREATED', message: 'Visual draft sample created' }, 'DRAFT_SAMPLE', { cardId: id, behaviorId: profile.behaviorId });
+    const { response, evicted } = await this.createStackCardWithEviction(host, card, { ticker: profile.behaviorId === 'ticker' });
+    const overflowHint = this.stackOverflowHint(evicted.length);
+    this.recordVisualDiagnostic({ code: 'VISUAL_DRAFT_SAMPLE_CREATED', message: overflowHint ? 'Visual draft sample created after evicting older stack cards' : 'Visual draft sample created' }, 'DRAFT_SAMPLE', { cardId: id, behaviorId: profile.behaviorId, evictedCount: evicted.length });
     return {
       generated: 1,
       receivedDraft: draft !== null,
@@ -3680,8 +3756,72 @@ export default class NotificationHubVNextPlugin {
       historyWritten: false,
       soundPlayed: false,
       cardId: id,
+      evicted,
+      evictedCount: evicted.length,
+      overflowHint,
       results: [{ cardId: id, response: response?.payload?.result ?? null }]
     };
+  }
+
+  isLayoutOutOfBounds(error) {
+    return error?.code === 'LAYOUT_BEHAVIOR_CHANNEL_OUT_OF_BOUNDS'
+      || error?.code === 'LAYOUT_CARD_OUT_OF_BOUNDS';
+  }
+
+  oldestEvictableStackCardId(sceneCards, exceptId) {
+    const cards = Array.isArray(sceneCards) ? sceneCards : [];
+    for (const card of cards) {
+      const id = card?.id;
+      if (typeof id !== 'string' || id === exceptId) continue;
+      if (id.startsWith(VISUAL_PREVIEW_CARD_PREFIX)) continue;
+      if (isTickerFlight(card?.behavior?.behaviorProfileId)) continue;
+      if (card?.visual?.ticker) continue;
+      return id;
+    }
+    return null;
+  }
+
+  async dismissSceneCardQuietly(host, id) {
+    try {
+      await host.client.request('scene.dismiss', { id }, { retryable: false });
+    } catch (error) {
+      if (!this.isVisualPreviewCardMissing(error)) throw error;
+    }
+  }
+
+  stackOverflowHint(evictedCount) {
+    if (!Number.isInteger(evictedCount) || evictedCount <= 0) return null;
+    return evictedCount === 1 ? '满了掀走 1 张旧卡' : `满了掀走 ${evictedCount} 张旧卡`;
+  }
+
+  async createStackCardWithEviction(host, card, { ticker = false } = {}) {
+    const evicted = [];
+    if (ticker) {
+      const response = await host.client.request('scene.create', card, sceneCreateOptions());
+      return { response, evicted };
+    }
+    for (let attempt = 0; attempt < 64; attempt += 1) {
+      try {
+        const response = await host.client.request('scene.create', card, sceneCreateOptions());
+        return { response, evicted };
+      } catch (error) {
+        if (!this.isLayoutOutOfBounds(error)) throw error;
+        const health = (await host.client.request('health', {}, { retryable: true, maxAttempts: 2 }))?.payload?.result ?? {};
+        const oldestId = this.oldestEvictableStackCardId(health.sceneCards, card.id);
+        if (!oldestId) {
+          throw Object.assign(new Error('堆叠已经满了，这张卡放不下。'), {
+            code: 'LAYOUT_BEHAVIOR_CHANNEL_OUT_OF_BOUNDS',
+            details: { ...(error.details ?? {}), evicted }
+          });
+        }
+        await this.dismissSceneCardQuietly(host, oldestId);
+        evicted.push(oldestId);
+      }
+    }
+    throw Object.assign(new Error('堆叠已经满了，掀走旧卡后仍放不下这张。'), {
+      code: 'LAYOUT_BEHAVIOR_CHANNEL_OUT_OF_BOUNDS',
+      details: { evicted }
+    });
   }
 
   async runVisualEventExperiment({ eventId, count = 1, intervalMs = 120 } = {}) {
@@ -3698,8 +3838,10 @@ export default class NotificationHubVNextPlugin {
     for (let index = 0; index < count; index += 1) {
       const id = `${VISUAL_EVENT_TEST_CARD_PREFIX}${Date.now().toString(36)}-${index + 1}`;
       const card = this.buildVisualWorkbenchCard('hold', health, id, profile.profile, binding);
-      card.title = `视觉实验台 · ${eventId}`;
-      card.body = `使用已绑定配置包：${binding.visualProfileId}`;
+      stampStudioCardText(card, profile.profile?.card?.types?.[profile.profile.card?.activeType ?? 'minimal']?.parts, {
+        title: `视觉实验台 · ${eventId}`,
+        body: `使用已绑定配置包：${binding.visualProfileId}`
+      });
       await this.ensureNativeStackLayout(host, {
         behaviorId: profile.profile?.behaviorId ?? card.behavior?.behaviorProfileId,
         space: profile.profile?.card?.types?.[profile.profile.card?.activeType ?? 'minimal']?.properties?.space,
@@ -3740,7 +3882,7 @@ export default class NotificationHubVNextPlugin {
     const id = cardId ?? `${VISUAL_WORKBENCH_CARD_PREFIX}${Date.now().toString(36)}-${Math.random().toString(16).slice(2, 8)}`;
     const phaseLabels = { enter: '入场测试', hold: '持续更新测试', exit: '消失测试' };
     const card = notificationCardPayload({ notificationId: id, title: `视觉实验台 · ${phaseLabels[phase]}`, content: '真实 Native 卡片。修改设置后点击持续 / 更新，验证当前视觉配置。' }, 0, health.workArea, health.layout ?? { direction: 'right', anchor: 'bottom-left', spacing: 12 }, visualPayload, { eventId: eventInput.eventId, categoryId: eventInput.categoryId ?? 'chat', eventTypeId: eventInput.eventTypeId ?? 'completed', visualProfileId: eventInput.visualProfileId ?? 'visual.default' }, { behaviorProfileId: nativeBehavior.behaviorProfileId, behaviorChannelId: eventInput.behaviorChannelId ?? nativeBehavior.behaviorChannelId }, this.ctx);
-    return { ...card, id, title: `视觉实验台 · ${phaseLabels[phase]}`, body: '真实 Native 卡片。修改设置后点击持续 / 更新，验证当前视觉配置。' };
+    return { ...card, id };
   }
 
   async openVisualWorkbenchCard({ phase = 'enter', draft = null } = {}) {
@@ -3827,6 +3969,8 @@ export default class NotificationHubVNextPlugin {
   }
 
   async openVisualPreviewCard({ draft = null, sampleAgent = null } = {}) {
+    const sourceProfile = draft ?? this.visualSettingsStore.getSnapshot().settings.profile;
+    this.assertStudioVisualEnabled(createVisualProfile(normalizeVisualPreviewProfile(sourceProfile)), '实时预览');
     this.visualPreviewClosedExplicitly = false;
     if (this.visualPreviewCardId) return this.updateVisualPreviewCard({ draft, sampleAgent });
     const sessionGeneration = ++this.visualPreviewSessionGeneration;
@@ -3867,6 +4011,8 @@ export default class NotificationHubVNextPlugin {
   }
 
   async updateVisualPreviewCard({ draft = null, sampleAgent = null } = {}) {
+    const sourceProfile = draft ?? this.visualSettingsStore.getSnapshot().settings.profile;
+    this.assertStudioVisualEnabled(createVisualProfile(normalizeVisualPreviewProfile(sourceProfile)), '实时预览');
     const host = this.requireRuntimeTestHost();
     const sample = sampleAgentFromInput(sampleAgent);
     if (!this.visualPreviewCardId) {
@@ -3901,7 +4047,6 @@ export default class NotificationHubVNextPlugin {
       ...this.buildVisualPreviewCard(health, this.visualPreviewCardId, draft, sample),
       ...(currentGeometry ? { x: currentGeometry.x, y: currentGeometry.y } : {})
     };
-    const sourceProfile = draft ?? this.visualSettingsStore.getSnapshot().settings.profile;
     const activeType = sourceProfile?.card?.types?.[sourceProfile?.card?.activeType ?? 'minimal'] ?? {};
     const explicitDimensions = Number.isInteger(activeType.appearance?.width) && Number.isInteger(activeType.appearance?.height);
     if (!explicitDimensions && currentGeometry) {

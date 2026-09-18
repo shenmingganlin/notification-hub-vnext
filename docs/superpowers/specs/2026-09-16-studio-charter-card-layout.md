@@ -63,6 +63,7 @@
 | 这张卡 | 速度 | `ticker-speed` / `ticker-speed-val` | TickerMotion |
 | 这张卡 | 速度随机 | `ticker-speed-random` | TickerMotion |
 | 这张卡 | 悬停加亮 | `ticker-hover-highlight` | 卡片；点穿开着时锁定 |
+| 这张卡 | 悬停暂停 | `ticker-hover-pause` | TickerMotion；点穿开着时锁定；与加亮独立 |
 
 满轨策略：现行工作室没有可见控件 → **不要新造**。`overflow` 继续藏在规约默认值里。
 
@@ -70,11 +71,13 @@
 
 不要放：淡入淡出、函数路径、停靠角、四边距、停留秒数。
 
-点穿开着：`ticker-hover-highlight` 加 `is-locked`，说明句 `#ticker-hover-why` 显示。点穿关掉后加亮才能点。
+点穿开着：`ticker-hover-highlight` 与 `ticker-hover-pause` 都加 `is-locked`，说明句 `#ticker-hover-why` 显示。点穿关掉后两颗才能点，可同时开。
 
 ### 3.3 卡面（两种飞法都在，权重更低）
 
 现有 `#appearance-section` 保留。可见标题改为「卡面」。零件芯片、根字段、底图、词表都留；不把通道法律塞进来。
+
+标题、正文零件有内容源芯片：跟事件 / 自定义。自定义只改字，事件来了照飞，不会一直挂着。助手名不接。户口在零件上（`contentSource` + `customText`），跟配置包走，不进通道法律。
 
 ### 3.4 次级
 
@@ -95,7 +98,7 @@
 | 通道 hint（堆叠） | 卡片从角落叠上来… | 全池一份法律。停靠、往哪长、走线、边距，改了所有堆叠卡都听。 |
 | 通道 hint（弹幕） | 卡片从右往左流过… | 全池一份法律。带子、轨道、净空、点穿，改了所有弹幕卡都听。 |
 | 这张卡 hint（堆叠） | （混在通道里） | 只改这张卡的关闭、停留、加亮。别的卡不受影响。 |
-| 这张卡 hint（弹幕） | （方向写在通道里） | 只改这张卡的方向和速度。点穿开着时加亮点不到。 |
+| 这张卡 hint（弹幕） | （方向写在通道里） | 只改这张卡的方向、速度、加亮和暂停。点穿开着时加亮和暂停点不到。 |
 | 外观 summary | 卡片外观 | 卡面 |
 | 弹幕带位置 | 弹幕带位置 | 带子 |
 | 同轨间距 | 同轨间距 | 同轨净空 |
@@ -167,7 +170,7 @@
 拆成两个可见 group（不要一个 summary「弹幕怎么流」）：
 
 1. **通道** `#ticker-charter`：带子、轨道数、同轨净空、异轨间距、`ticker-click-through`。删掉「指针」这个标签。
-2. **这张卡** `#ticker-card`：方向芯片 + `ticker-direction`、速度滑杆、`ticker-speed-random`、`ticker-hover-highlight`（点穿开着锁定 + `#ticker-hover-why`）。
+2. **这张卡** `#ticker-card`：方向芯片 + `ticker-direction`、速度滑杆、`ticker-speed-random`、`ticker-hover-highlight`、`ticker-hover-pause`（点穿开着锁定 + `#ticker-hover-why`）。两颗独立。
 
 方向、速度从通道挪到「这张卡」。`behaviorId !== 'ticker'` 时整组 `hidden`。
 

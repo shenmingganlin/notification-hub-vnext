@@ -17,6 +17,7 @@
 #include <array>
 #include <cctype>
 #include <cmath>
+#include <cstdio>
 #include <condition_variable>
 #include <cstdint>
 #include <cstdlib>
@@ -533,35 +534,55 @@ struct SharedGraphics {
 
 SharedGraphics g_graphics;
 std::mutex g_graphics_mutex;
+HRESULT g_graphics_last_hr = S_OK;
+const char* g_graphics_last_stage = "graphics";
+
+std::string format_stage_error(const char* stage, HRESULT hr, DWORD win32) {
+    char buf[192];
+    std::snprintf(
+        buf,
+        sizeof(buf),
+        "stage=%s win32=%lu hr=0x%08lX",
+        stage,
+        static_cast<unsigned long>(win32),
+        static_cast<unsigned long>(hr));
+    return buf;
+}
 
 bool acquire_shared_graphics() {
     std::lock_guard lock(g_graphics_mutex);
     if (g_graphics.refs > 0) {
         g_graphics.refs += 1;
+        g_graphics_last_hr = S_OK;
+        g_graphics_last_stage = "graphics.reuse";
         return true;
     }
-    auto result = D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, IID_PPV_ARGS(&g_graphics.factory));
-    if (FAILED(result)) return false;
-    result = DWriteCreateFactory(
+    g_graphics_last_stage = "d2d.factory";
+    g_graphics_last_hr = D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, IID_PPV_ARGS(&g_graphics.factory));
+    if (FAILED(g_graphics_last_hr)) return false;
+    g_graphics_last_stage = "dwrite.factory";
+    g_graphics_last_hr = DWriteCreateFactory(
         DWRITE_FACTORY_TYPE_SHARED,
         __uuidof(IDWriteFactory),
         reinterpret_cast<IUnknown**>(g_graphics.write.GetAddressOf()));
-    if (FAILED(result)) {
+    if (FAILED(g_graphics_last_hr)) {
         g_graphics.factory.Reset();
         return false;
     }
-    result = g_graphics.write->CreateTextFormat(
+    g_graphics_last_stage = "dwrite.title_format";
+    g_graphics_last_hr = g_graphics.write->CreateTextFormat(
         L"Segoe UI", nullptr, DWRITE_FONT_WEIGHT_SEMI_BOLD, DWRITE_FONT_STYLE_NORMAL,
         DWRITE_FONT_STRETCH_NORMAL, 20.0f, L"en-us", &g_graphics.title_format);
-    if (FAILED(result)) {
+    if (FAILED(g_graphics_last_hr)) {
         g_graphics.write.Reset();
         g_graphics.factory.Reset();
         return false;
     }
-    result = g_graphics.write->CreateTextFormat(
+    g_graphics_last_stage = "dwrite.body_format";
+    g_graphics_last_hr = g_graphics.write->CreateTextFormat(
         L"Segoe UI", nullptr, DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_STYLE_NORMAL,
         DWRITE_FONT_STRETCH_NORMAL, 13.0f, L"en-us", &g_graphics.body_format);
-    if (FAILED(result)) {
+    if (FAILED(g_graphics_last_hr)) {
         g_graphics.title_format.Reset();
         g_graphics.write.Reset();
         g_graphics.factory.Reset();
@@ -1043,15 +1064,15 @@ struct CardRenderer::Impl {
         layered_height = 0;
         present_valid = false;
     }
-    bool ensure_layered(int next_width, int next_height) noexcept {
+    bool ensure_layered(int next_width, int next_height, DWORD* win32_error = nullptr, const char** stage = nullptr) noexcept {
         if (layered_dib != nullptr && layered_memory_dc != nullptr && layered_bits != nullptr
             && layered_width == next_width && layered_height == next_height) return true;
         release_layered();
-        const auto screen_dc = GetDC(nullptr);
-        if (screen_dc == nullptr) return false;
-        layered_memory_dc = CreateCompatibleDC(screen_dc);
+        SetLastError(0);
+        layered_memory_dc = CreateCompatibleDC(nullptr);
         if (layered_memory_dc == nullptr) {
-            ReleaseDC(nullptr, screen_dc);
+            if (win32_error != nullptr) *win32_error = GetLastError();
+            if (stage != nullptr) *stage = "layered.dc";
             return false;
         }
         BITMAPINFO bitmap_info{};
@@ -1061,9 +1082,11 @@ struct CardRenderer::Impl {
         bitmap_info.bmiHeader.biPlanes = 1;
         bitmap_info.bmiHeader.biBitCount = 32;
         bitmap_info.bmiHeader.biCompression = BI_RGB;
-        layered_dib = CreateDIBSection(screen_dc, &bitmap_info, DIB_RGB_COLORS, &layered_bits, nullptr, 0);
-        ReleaseDC(nullptr, screen_dc);
+        SetLastError(0);
+        layered_dib = CreateDIBSection(nullptr, &bitmap_info, DIB_RGB_COLORS, &layered_bits, nullptr, 0);
         if (layered_dib == nullptr || layered_bits == nullptr) {
+            if (win32_error != nullptr) *win32_error = GetLastError();
+            if (stage != nullptr) *stage = "layered.dib";
             release_layered();
             return false;
         }
@@ -1082,56 +1105,80 @@ CardRenderer::~CardRenderer() { reset(); }
 
 bool CardRenderer::initialize(void* native_window, int width, int height) {
 #ifdef _WIN32
+    last_error_.clear();
     reset();
-    if (native_window == nullptr || width <= 0 || height <= 0) return false;
+    auto fail = [this](const char* stage, HRESULT hr, DWORD win32) {
+        last_error_ = format_stage_error(stage, hr, win32);
+        reset();
+        return false;
+    };
+    if (native_window == nullptr || width <= 0 || height <= 0) {
+        return fail("args", S_OK, 0);
+    }
 
     const auto com_result = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
-    if (FAILED(com_result) && com_result != RPC_E_CHANGED_MODE) return false;
+    if (FAILED(com_result) && com_result != RPC_E_CHANGED_MODE) {
+        return fail("com_init", com_result, 0);
+    }
     impl_->com_initialized = SUCCEEDED(com_result);
     impl_->hwnd = static_cast<HWND>(native_window);
     impl_->width = width;
     impl_->height = height;
 
-    if (!acquire_shared_graphics()) return false;
+    if (!acquire_shared_graphics()) {
+        return fail(g_graphics_last_stage, g_graphics_last_hr, 0);
+    }
     impl_->graphics_held = true;
     impl_->title_format = g_graphics.title_format;
     impl_->body_format = g_graphics.body_format;
 
-    const auto properties = D2D1::RenderTargetProperties(
-        D2D1_RENDER_TARGET_TYPE_SOFTWARE,
+    // DC targets already draw to a GDI DC. GDI_COMPATIBLE is documented as
+    // incompatible with B8G8R8A8 + PREMULTIPLIED and made CreateDCRenderTarget
+    // fail on some machines; BindDC does not need that usage flag.
+    auto properties = D2D1::RenderTargetProperties(
+        D2D1_RENDER_TARGET_TYPE_DEFAULT,
         D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_PREMULTIPLIED),
         96.0f,
         96.0f,
-        D2D1_RENDER_TARGET_USAGE_GDI_COMPATIBLE,
+        D2D1_RENDER_TARGET_USAGE_NONE,
         D2D1_FEATURE_LEVEL_DEFAULT);
     auto result = g_graphics.factory->CreateDCRenderTarget(&properties, &impl_->rt);
-    if (FAILED(result)) return false;
-    if (!impl_->ensure_layered(width, height)) return false;
+    HRESULT dc_target_hr = result;
+    if (FAILED(result)) {
+        properties.type = D2D1_RENDER_TARGET_TYPE_SOFTWARE;
+        result = g_graphics.factory->CreateDCRenderTarget(&properties, &impl_->rt);
+        if (FAILED(result)) return fail("d2d.dc_target", result != S_OK ? result : dc_target_hr, 0);
+    }
+    DWORD layered_win32 = 0;
+    const char* layered_stage = "layered";
+    if (!impl_->ensure_layered(width, height, &layered_win32, &layered_stage)) {
+        return fail(layered_stage, S_OK, layered_win32);
+    }
     RECT bind{0, 0, width, height};
     result = impl_->rt->BindDC(impl_->layered_memory_dc, &bind);
-    if (FAILED(result)) return false;
+    if (FAILED(result)) return fail("d2d.bind_dc", result, 0);
 
     result = impl_->rt->CreateSolidColorBrush(
         color(0.08f, 0.10f, 0.12f, 0.96f), &impl_->surface_brush);
-    if (FAILED(result)) return false;
+    if (FAILED(result)) return fail("d2d.brush.surface", result, 0);
     result = impl_->rt->CreateSolidColorBrush(
         color(0.30f, 0.85f, 0.70f, 1.0f), &impl_->accent_brush);
-    if (FAILED(result)) return false;
+    if (FAILED(result)) return fail("d2d.brush.accent", result, 0);
     result = impl_->rt->CreateSolidColorBrush(
         color(0.96f, 0.98f, 0.98f, 1.0f), &impl_->title_brush);
-    if (FAILED(result)) return false;
+    if (FAILED(result)) return fail("d2d.brush.title", result, 0);
     result = impl_->rt->CreateSolidColorBrush(
         color(0.70f, 0.76f, 0.78f, 1.0f), &impl_->body_brush);
-    if (FAILED(result)) return false;
+    if (FAILED(result)) return fail("d2d.brush.body", result, 0);
     result = impl_->rt->CreateSolidColorBrush(
         color(0.18f, 0.22f, 0.24f, 0.92f), &impl_->close_background_brush);
-    if (FAILED(result)) return false;
+    if (FAILED(result)) return fail("d2d.brush.close_bg", result, 0);
     result = impl_->rt->CreateSolidColorBrush(
         color(0.82f, 0.88f, 0.88f, 1.0f), &impl_->close_icon_brush);
-    if (FAILED(result)) return false;
+    if (FAILED(result)) return fail("d2d.brush.close_icon", result, 0);
     result = impl_->rt->CreateSolidColorBrush(
         color(0.04f, 0.05f, 0.05f, 0.92f), &impl_->text_stroke_brush);
-    if (FAILED(result)) return false;
+    if (FAILED(result)) return fail("d2d.brush.text_stroke", result, 0);
 
     impl_->ready = true;
     return true;
@@ -1139,6 +1186,7 @@ bool CardRenderer::initialize(void* native_window, int width, int height) {
     static_cast<void>(native_window);
     static_cast<void>(width);
     static_cast<void>(height);
+    last_error_ = "stage=unsupported win32=0 hr=0x00000000";
     return false;
 #endif
 }
@@ -1180,6 +1228,41 @@ bool CardRenderer::draw(std::wstring_view title, std::wstring_view body, const V
 #endif
 }
 
+bool CardRenderer::draw_buffer(std::wstring_view title, std::wstring_view body, const VisualStyle& visual, bool capture_output, const std::vector<CardPart>& parts, bool hovered, std::wstring_view assistant_name) {
+#ifdef _WIN32
+    if (!impl_->ready || !capture_offscreen(title, body, visual, parts, hovered, capture_output, assistant_name)) return false;
+    return impl_->layered_bits != nullptr && impl_->layered_width > 0 && impl_->layered_height > 0;
+#else
+    static_cast<void>(title);
+    static_cast<void>(body);
+    static_cast<void>(visual);
+    static_cast<void>(capture_output);
+    static_cast<void>(parts);
+    static_cast<void>(hovered);
+    static_cast<void>(assistant_name);
+    return false;
+#endif
+}
+
+bool CardRenderer::buffer_bits(const void*& bits, int& pitch, int& width, int& height) const noexcept {
+#ifdef _WIN32
+    if (impl_ == nullptr || impl_->layered_bits == nullptr || impl_->layered_width <= 0 || impl_->layered_height <= 0) {
+        return false;
+    }
+    bits = impl_->layered_bits;
+    width = impl_->layered_width;
+    height = impl_->layered_height;
+    pitch = impl_->layered_width * 4;
+    return true;
+#else
+    static_cast<void>(bits);
+    static_cast<void>(pitch);
+    static_cast<void>(width);
+    static_cast<void>(height);
+    return false;
+#endif
+}
+
 bool CardRenderer::update_layered_window() {
 #ifdef _WIN32
     if (!impl_->ready || impl_->hwnd == nullptr || impl_->layered_memory_dc == nullptr
@@ -1187,13 +1270,8 @@ bool CardRenderer::update_layered_window() {
         return false;
     }
 
-    const auto screen_dc = GetDC(nullptr);
-    if (screen_dc == nullptr) return false;
     RECT bounds{};
-    if (GetWindowRect(impl_->hwnd, &bounds) == FALSE) {
-        ReleaseDC(nullptr, screen_dc);
-        return false;
-    }
+    if (GetWindowRect(impl_->hwnd, &bounds) == FALSE) return false;
     POINT destination_point{bounds.left, bounds.top};
     POINT source_point{0, 0};
     SIZE size{impl_->width, impl_->height};
@@ -1203,7 +1281,7 @@ bool CardRenderer::update_layered_window() {
     blend.AlphaFormat = AC_SRC_ALPHA;
     const auto updated = UpdateLayeredWindow(
         impl_->hwnd,
-        screen_dc,
+        nullptr,
         &destination_point,
         &size,
         impl_->layered_memory_dc,
@@ -1211,7 +1289,6 @@ bool CardRenderer::update_layered_window() {
         0,
         &blend,
         ULW_ALPHA);
-    ReleaseDC(nullptr, screen_dc);
     if (updated == FALSE) return false;
     impl_->present_x = destination_point.x;
     impl_->present_y = destination_point.y;

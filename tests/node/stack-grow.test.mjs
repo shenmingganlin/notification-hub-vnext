@@ -7,7 +7,8 @@ import {
   resolveStackGrow,
   resolveStackWrap,
   stackGrowToNativeDirection,
-  stackWrapGrow
+  stackWrapGrow,
+  resolveStackNewest
 } from '../../plugin/domain/stack-grow.js';
 
 test('each corner allows the two directions away from the walls', () => {
@@ -40,13 +41,22 @@ test('wrap axis is the other allowed direction from the corner', () => {
   assert.equal(stackWrapGrow('top-left', 'right'), 'down');
 });
 
-test('missing wrap is parallel; snake keeps native direction equal to grow', () => {
+test('missing wrap is parallel; newest next keeps native direction equal to grow', () => {
   assert.equal(resolveStackWrap(), 'parallel');
   assert.equal(resolveStackWrap('nope'), 'parallel');
   assert.equal(resolveStackWrap('off'), 'off');
   assert.equal(resolveStackWrap('snake'), 'snake');
-  assert.equal(stackGrowToNativeDirection('top-left', 'right', 'snake'), 'right');
-  assert.equal(stackGrowToNativeDirection('bottom-right', 'up', 'snake'), 'up');
+  assert.equal(resolveStackWrap('coil'), 'coil');
+  assert.equal(resolveStackNewest(), 'dock');
+  assert.equal(resolveStackNewest('next'), 'next');
+  assert.equal(stackGrowToNativeDirection('top-left', 'right', 'snake', 'next'), 'right');
+  assert.equal(stackGrowToNativeDirection('bottom-right', 'up', 'snake', 'next'), 'up');
+  assert.equal(stackGrowToNativeDirection('top-left', 'right', 'snake'), 'left');
   assert.equal(stackGrowToNativeDirection('top-left', 'right', 'parallel'), 'left');
   assert.equal(stackGrowToNativeDirection('bottom-right', 'up', 'off'), 'down');
+  assert.equal(stackGrowToNativeDirection('bottom-right', 'up', 'off', 'next'), 'up');
+  assert.equal(stackGrowToNativeDirection('top-left', 'down', 'coil'), 'up');
+  assert.equal(stackGrowToNativeDirection('top-left', 'down', 'coil', 'next'), 'down');
+  assert.equal(stackGrowToNativeDirection('top-left', 'right', 'coil', 'next'), 'right');
+  assert.equal(stackGrowToNativeDirection('top-left', 'right', 'coil'), 'left');
 });

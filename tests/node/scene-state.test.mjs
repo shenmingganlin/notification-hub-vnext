@@ -345,3 +345,46 @@ test('SceneState accepts optional autoDismiss and timeoutMs 120000', () => {
   assert.equal(state.cards[0].visual.interaction.autoDismiss, true);
   assert.equal(state.cards[0].visual.interaction.timeoutMs, 120000);
 });
+
+test('SceneState accepts optional holdDrag false and rejects true', () => {
+  const state = createSceneState({
+    sceneWindow: { x: 0, y: 0, width: 420, height: 220 },
+    cardOrder: ['card-hold'],
+    cards: [{
+      id: 'card-hold', title: 'Hold', body: '', x: 0, y: 0, width: 420, height: 220,
+      visual: {
+        enabled: true,
+        preset: 'minimal',
+        intensity: 'balanced',
+        category: null,
+        cardType: 'minimal',
+        behavior: { layout: 'simple', boundary: 'work-area' },
+        appearance: { size: 'medium', aspectRatio: 'default', backgroundColor: '#0e1916', backgroundFit: 'fill', backgroundPadding: 0, borderRadius: 16, opacity: 0.96 },
+        interaction: { dismissMode: 'closeButton', closeButtonPosition: 'top-right', timeoutMs: 30000, holdDrag: false }
+      }
+    }],
+    layout: null
+  });
+  assert.equal(state.cards[0].visual.interaction.holdDrag, false);
+  assert.throws(
+    () => createSceneState({
+      sceneWindow: { x: 0, y: 0, width: 420, height: 220 },
+      cardOrder: ['card-hold-true'],
+      cards: [{
+        id: 'card-hold-true', title: 'Hold', body: '', x: 0, y: 0, width: 420, height: 220,
+        visual: {
+          enabled: true,
+          preset: 'minimal',
+          intensity: 'balanced',
+          category: null,
+          cardType: 'minimal',
+          behavior: { layout: 'simple', boundary: 'work-area' },
+          appearance: { size: 'medium', aspectRatio: 'default', backgroundColor: '#0e1916', backgroundFit: 'fill', backgroundPadding: 0, borderRadius: 16, opacity: 0.96 },
+          interaction: { dismissMode: 'closeButton', closeButtonPosition: 'top-right', timeoutMs: 30000, holdDrag: true }
+        }
+      }],
+      layout: null
+    }),
+    (error) => error.code === 'RUNTIME_SCENE_STATE_CARD_INVALID'
+  );
+});

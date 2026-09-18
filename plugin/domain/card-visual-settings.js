@@ -7,7 +7,7 @@ export const CARD_LAYOUTS = Object.freeze(['simple']);
 export const CARD_BOUNDARIES = Object.freeze(['work-area']);
 export const CARD_ANCHORS = Object.freeze(['top-left', 'top-right', 'bottom-left', 'bottom-right']);
 export const CARD_GROWS = Object.freeze(['up', 'down', 'left', 'right']);
-export const CARD_WRAPS = Object.freeze(['off', 'parallel', 'snake']);
+export const CARD_WRAPS = Object.freeze(['off', 'parallel', 'snake', 'coil']);
 export const CARD_SIZES = Object.freeze(['small', 'medium', 'large']);
 export const CARD_ASPECT_RATIOS = Object.freeze(['default', 'square', 'wide']);
 export const CARD_FITS = Object.freeze(['fill', 'contain', 'cover']);
@@ -26,9 +26,14 @@ const TYPE_FIELDS = Object.freeze(['appearance', 'properties', 'skin', 'effects'
 const PART_IDS = Object.freeze(['title', 'body', 'close', 'icon', 'assistantName']);
 const PART_PAINT_FIELDS = Object.freeze(['fill', 'stroke', 'strokeWidth', 'strokePaint', 'x', 'y', 'w', 'h', 'show', 'radius', 'background', 'opacity', 'backgroundAssetId', 'backgroundFit', 'backgroundScale', 'backgroundX', 'backgroundY']);
 const TEXT_PART_PAINT_FIELDS = Object.freeze(['fontSize', 'fontFamily', 'fontAssetId', 'textPaint', 'fontBold', 'fontItalic', 'fontUnderline', 'fontStrike', 'textStroke', 'textStrokeColor', 'textStrokeWidth', 'textStrokePaint']);
+const CONTENT_SOURCE_FIELDS = Object.freeze(['contentSource', 'customText']);
 const ICON_PART_PAINT_FIELDS = Object.freeze(['source', 'assetId', 'backgroundScale', 'backgroundX', 'backgroundY']);
 const CLOSE_PART_PAINT_FIELDS = Object.freeze(['closeIcon', 'closeIconColor']);
 const TEXT_PART_IDS = Object.freeze(['title', 'body', 'assistantName']);
+export const CONTENT_SOURCES = Object.freeze(['event', 'custom']);
+export const CONTENT_SOURCE_PART_IDS = Object.freeze(['title', 'body']);
+export const TITLE_CUSTOM_TEXT_MAX = 2000;
+export const BODY_CUSTOM_TEXT_MAX = 4000;
 const ICON_SOURCES = Object.freeze(['assistant', 'custom']);
 const FONT_FAMILIES = Object.freeze(['yahei', 'heiti', 'songti', 'segoe']);
 const TEXT_PAINTS = Object.freeze(['solid', 'rainbow']);
@@ -37,11 +42,11 @@ const TEXT_STROKE_PAINTS = Object.freeze(['solid', 'rainbow']);
 const CLOSE_ICONS = Object.freeze(['x', 'none', 'circle', 'minus', 'star', 'plus', 'disc']);
 const APPEARANCE_FIELDS = Object.freeze(['size', 'aspectRatio', 'width', 'height', 'backgroundColor', 'backgroundAssetId', 'backgroundFit', 'backgroundPadding', 'backgroundScale', 'backgroundX', 'backgroundY', 'borderRadius', 'opacity', 'borderWidth', 'borderColor', 'borderPaint', 'paintOverflow']);
 const PROPERTIES_FIELDS = Object.freeze(['space', 'shape', 'typography', 'lifecycle', 'interaction', 'resource']);
-const SPACE_FIELDS = Object.freeze(['size', 'anchor', 'aspectRatio', 'gap', 'grow', 'wrap', 'margin', 'marginLeft', 'marginRight', 'marginTop', 'marginBottom', 'layout', 'offset', 'screenPadding', 'zIndex']);
+const SPACE_FIELDS = Object.freeze(['size', 'anchor', 'aspectRatio', 'gap', 'grow', 'wrap', 'settle', 'newest', 'margin', 'marginLeft', 'marginRight', 'marginTop', 'marginBottom', 'layout', 'offset', 'screenPadding', 'zIndex']);
 const SHAPE_FIELDS = Object.freeze(['borderRadius', 'opacity', 'blur', 'shadow', 'borderWidth', 'borderColor']);
 const TYPOGRAPHY_FIELDS = Object.freeze(['titleLines', 'bodyLines', 'fontScale', 'lineHeight', 'textOverflow']);
 const LIFECYCLE_FIELDS = Object.freeze(['durationMs', 'enterDurationMs', 'holdDurationMs', 'exitDurationMs']);
-const INTERACTION_FIELDS = Object.freeze(['dismissMode', 'closeButtonPosition', 'timeoutMs', 'hoverPause', 'hoverHighlight', 'autoDismiss', 'pauseOnFocus', 'expandable', 'clickable']);
+const INTERACTION_FIELDS = Object.freeze(['dismissMode', 'closeButtonPosition', 'timeoutMs', 'hoverPause', 'hoverHighlight', 'autoDismiss', 'holdDrag', 'pauseOnFocus', 'expandable', 'clickable']);
 const RESOURCE_FIELDS = Object.freeze(['maxVisible', 'maxActive', 'maxParticles', 'maxAnimationInstances', 'overflow']);
 const SKIN_FIELDS = Object.freeze(['skinId', 'skinName', 'semanticColors', 'background', 'decoration']);
 const SEMANTIC_COLOR_FIELDS = Object.freeze(['title', 'body', 'assistantName', 'metadata', 'status']);
@@ -75,7 +80,7 @@ export const PROPERTIES_DEFAULTS = Object.freeze({
   shape: Object.freeze({ borderRadius: 16, opacity: 0.96, blur: 0, shadow: 'none', borderWidth: 0, borderColor: '#0e1916' }),
   typography: Object.freeze({ titleLines: 1, bodyLines: 4, fontScale: 1.0, lineHeight: 1.55, textOverflow: 'ellipsis' }),
   lifecycle: Object.freeze({ durationMs: 30000, enterDurationMs: 260, holdDurationMs: 30000, exitDurationMs: 200 }),
-  interaction: Object.freeze({ dismissMode: 'closeButton', closeButtonPosition: 'top-right', timeoutMs: 30000, hoverPause: 'off', hoverHighlight: 'off', autoDismiss: 'off', pauseOnFocus: 'off', expandable: 'off', clickable: 'off' }),
+  interaction: Object.freeze({ dismissMode: 'closeButton', closeButtonPosition: 'top-right', timeoutMs: 30000, hoverPause: 'off', hoverHighlight: 'off', autoDismiss: 'off', holdDrag: 'on', pauseOnFocus: 'off', expandable: 'off', clickable: 'off' }),
   resource: Object.freeze({ maxVisible: 0, maxActive: 0, maxParticles: 0, maxAnimationInstances: 0, overflow: 'allow' })
 });
 
@@ -179,6 +184,12 @@ function validateSpace(value, field) {
   if ('anchor' in value && !CARD_ANCHORS.includes(value.anchor)) throw fail('CARD_VISUAL_PROPERTY_INVALID', `${field}.anchor is unsupported`, { field: `${field}.anchor` });
   if ('grow' in value && !CARD_GROWS.includes(value.grow)) throw fail('CARD_VISUAL_PROPERTY_INVALID', `${field}.grow is unsupported`, { field: `${field}.grow` });
   if ('wrap' in value && !CARD_WRAPS.includes(value.wrap)) throw fail('CARD_VISUAL_PROPERTY_INVALID', `${field}.wrap is unsupported`, { field: `${field}.wrap` });
+  if ('settle' in value && value.settle !== 'snap' && value.settle !== 'follow') {
+    throw fail('CARD_VISUAL_PROPERTY_INVALID', `${field}.settle is unsupported`, { field: `${field}.settle` });
+  }
+  if ('newest' in value && value.newest !== 'dock' && value.newest !== 'next') {
+    throw fail('CARD_VISUAL_PROPERTY_INVALID', `${field}.newest is unsupported`, { field: `${field}.newest` });
+  }
   if ('aspectRatio' in value && !CARD_ASPECT_RATIOS.includes(value.aspectRatio)) throw fail('CARD_VISUAL_PROPERTY_INVALID', `${field}.aspectRatio is unsupported`, { field: `${field}.aspectRatio` });
   if ('layout' in value && !CARD_LAYOUTS.includes(value.layout)) throw fail('CARD_VISUAL_PROPERTY_INVALID', `${field}.layout is unsupported`, { field: `${field}.layout` });
   if ('gap' in value) validateInt(value.gap, `${field}.gap`, 0);
@@ -220,7 +231,7 @@ function validateInteraction(value, field) {
   if ('dismissMode' in value && !CARD_DISMISS_MODES.includes(value.dismissMode)) throw fail('CARD_VISUAL_PROPERTY_INVALID', `${field}.dismissMode is unsupported`, { field: `${field}.dismissMode` });
   if ('closeButtonPosition' in value && !CARD_CLOSE_POSITIONS.includes(value.closeButtonPosition)) throw fail('CARD_VISUAL_PROPERTY_INVALID', `${field}.closeButtonPosition is unsupported`, { field: `${field}.closeButtonPosition` });
   if ('timeoutMs' in value) validateInt(value.timeoutMs, `${field}.timeoutMs`, 1000, 120000);
-  for (const key of ['hoverPause', 'hoverHighlight', 'autoDismiss', 'pauseOnFocus', 'expandable', 'clickable']) if (key in value && value[key] !== 'off' && value[key] !== 'on') throw fail('CARD_VISUAL_PROPERTY_INVALID', `${field}.${key} must be "off" or "on"`, { field: `${field}.${key}` });
+  for (const key of ['hoverPause', 'hoverHighlight', 'autoDismiss', 'holdDrag', 'pauseOnFocus', 'expandable', 'clickable']) if (key in value && value[key] !== 'off' && value[key] !== 'on') throw fail('CARD_VISUAL_PROPERTY_INVALID', `${field}.${key} must be "off" or "on"`, { field: `${field}.${key}` });
 }
 
 function validateResource(value, field) {
@@ -309,10 +320,31 @@ function validatePaintColor(value, field, glossary) {
   if (isGlossaryName(value) && Object.prototype.hasOwnProperty.call(glossary, value) && HEX_COLOR.test(glossary[value])) return;
   throw fail('CARD_VISUAL_COLOR_INVALID', `${field} must be a #RRGGBB color`, { field });
 }
+export function partCustomTextMax(id) {
+  return id === 'title' ? TITLE_CUSTOM_TEXT_MAX : BODY_CUSTOM_TEXT_MAX;
+}
+
+export function resolvePartContent(part, eventText, { fallback = '', maxLength } = {}) {
+  const max = Number.isInteger(maxLength) && maxLength > 0 ? maxLength : 2000;
+  const clip = (value) => {
+    const text = typeof value === 'string' ? value : '';
+    return text.length > max ? text.slice(0, max) : text;
+  };
+  if (part && part.contentSource === 'custom') {
+    const custom = clip(part.customText);
+    if (custom.length > 0) return custom;
+    return clip(fallback);
+  }
+  const event = clip(eventText);
+  if (event.length > 0) return event;
+  return clip(fallback);
+}
+
 function validatePartPaint(value, field, glossary, id) {
   const fitWidthAllowed = id === 'title' || id === 'assistantName';
+  const contentSourceAllowed = id === 'title' || id === 'body';
   const known = TEXT_PART_IDS.includes(id)
-    ? [...PART_PAINT_FIELDS, ...TEXT_PART_PAINT_FIELDS, ...(fitWidthAllowed ? ['fitWidth', 'fitCompensate'] : [])]
+    ? [...PART_PAINT_FIELDS, ...TEXT_PART_PAINT_FIELDS, ...(fitWidthAllowed ? ['fitWidth', 'fitCompensate'] : []), ...(contentSourceAllowed ? CONTENT_SOURCE_FIELDS : [])]
     : (id === 'icon'
       ? [...PART_PAINT_FIELDS, ...ICON_PART_PAINT_FIELDS]
       : (id === 'close' ? [...PART_PAINT_FIELDS, ...CLOSE_PART_PAINT_FIELDS] : PART_PAINT_FIELDS));
@@ -345,6 +377,28 @@ function validatePartPaint(value, field, glossary, id) {
     if ('backgroundX' in value) validateFloat(value.backgroundX, `${field}.backgroundX`, 0, 1);
     if ('backgroundY' in value) validateFloat(value.backgroundY, `${field}.backgroundY`, 0, 1);
   }
+  if (contentSourceAllowed) {
+    if ('contentSource' in value) {
+      if (typeof value.contentSource !== 'string' || !CONTENT_SOURCES.includes(value.contentSource)) {
+        throw fail('CARD_VISUAL_FIELD_INVALID', `${field}.contentSource is invalid`, { field: `${field}.contentSource` });
+      }
+    }
+    if ('customText' in value) {
+      if (typeof value.customText !== 'string') {
+        throw fail('CARD_VISUAL_FIELD_INVALID', `${field}.customText must be a string`, { field: `${field}.customText` });
+      }
+      const max = partCustomTextMax(id);
+      if (value.customText.length > max) {
+        throw fail('CARD_VISUAL_FIELD_INVALID', `${field}.customText must be at most ${max} characters`, { field: `${field}.customText` });
+      }
+    }
+    if (value.contentSource === 'custom' && id === 'title') {
+      const text = typeof value.customText === 'string' ? value.customText : '';
+      if (text.length < 1) {
+        throw fail('CARD_VISUAL_FIELD_INVALID', `${field}.customText must be 1-${TITLE_CUSTOM_TEXT_MAX} characters when contentSource is custom`, { field: `${field}.customText` });
+      }
+    }
+  }
   if ('fontSize' in value) validateInt(value.fontSize, `${field}.fontSize`, 8, 72);
   if ('fontFamily' in value) {
     if (typeof value.fontFamily !== 'string' || !FONT_FAMILIES.includes(value.fontFamily)) {
@@ -361,7 +415,7 @@ function validatePartPaint(value, field, glossary, id) {
     if (key in value) validateBoolean(value[key], `${field}.${key}`);
   }
   if ('textStroke' in value) validateBoolean(value.textStroke, `${field}.textStroke`);
-  if ('textStrokeColor' in value) validateColor(value.textStrokeColor, `${field}.textStrokeColor`);
+  if ('textStrokeColor' in value) validatePaintColor(value.textStrokeColor, `${field}.textStrokeColor`, glossary);
   if ('textStrokeWidth' in value) validateInt(value.textStrokeWidth, `${field}.textStrokeWidth`, 1, 16);
   if ('textStrokePaint' in value) {
     if (typeof value.textStrokePaint !== 'string' || !TEXT_STROKE_PAINTS.includes(value.textStrokePaint)) {
@@ -456,13 +510,19 @@ function normalizeParts(value, field, glossary = {}) {
       }
       if (value[id].textStroke === true) {
         paint.textStroke = true;
-        if (typeof value[id].textStrokeColor === 'string' && HEX_COLOR.test(value[id].textStrokeColor)) {
+        if (typeof value[id].textStrokeColor === 'string' && value[id].textStrokeColor.length > 0) {
           paint.textStrokeColor = value[id].textStrokeColor;
         }
         if (Number.isInteger(value[id].textStrokeWidth) && value[id].textStrokeWidth >= 1) {
           paint.textStrokeWidth = value[id].textStrokeWidth;
         }
         if (value[id].textStrokePaint === 'rainbow') paint.textStrokePaint = 'rainbow';
+      }
+    }
+    if (id === 'title' || id === 'body') {
+      if (value[id].contentSource === 'custom') paint.contentSource = 'custom';
+      if (typeof value[id].customText === 'string' && value[id].customText.length > 0) {
+        paint.customText = value[id].customText;
       }
     }
     if (id === 'close') {

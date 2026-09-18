@@ -75,7 +75,9 @@ public:
     std::string cards_json() const;
     std::string layout_json() const;
     std::string work_area_json() const;
+    std::string perf_json() const;
     std::string scene_state_snapshot_json() const;
+    std::string scene_state_snapshot_json(const std::string& cards) const;
     std::string consume_change_metadata_json();
     std::string change_metadata_json() const;
     std::string state_result_json(bool deduplicated) const;
@@ -83,6 +85,8 @@ public:
     std::string dismiss_result_json(bool deduplicated, std::string_view card_id) const;
     bool tick_animation();
     bool pump_messages();
+    bool has_ticker_motion() const noexcept;
+    unsigned pump_idle_ms() const noexcept;
     bool has_window() const noexcept;
 
 private:

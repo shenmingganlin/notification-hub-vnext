@@ -418,6 +418,18 @@ test('paintPartTree writes fitWidth only for title and assistantName', () => {
   validatePartTree(painted);
 });
 
+test('paintPartTree resolves glossary names on textStrokeColor', () => {
+  const painted = paintPartTree(
+    createDefaultTextPartTree({ width: 420, height: 220 }),
+    { title: { textStroke: true, textStrokeColor: '描边色' } },
+    { '描边色': '#112233' }
+  );
+  const title = painted.find((part) => part.id === 'title');
+  assert.equal(title.textStroke, true);
+  assert.equal(title.textStrokeColor, '#112233');
+  validatePartTree(painted);
+});
+
 test('paintPartTree writes textStroke onto text parts and skips close', () => {
   const painted = paintPartTree(
     createDefaultTextPartTree({ width: 420, height: 220, assistantName: true }),

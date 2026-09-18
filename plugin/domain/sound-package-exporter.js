@@ -18,20 +18,11 @@ function resolveAssetPath(assetRoot, relativePath) {
   return filePath;
 }
 
-export async function exportSoundPackage({ name, profile = {}, registry, assetRoot } = {}) {
+export async function exportSoundPackage({ name, registry, assetRoot } = {}) {
   if (!registry || typeof registry.list !== 'function') throw exporterError('SOUND_PACKAGE_REGISTRY_INVALID', 'registry is required');
-  const referencedIds = new Set();
-  function collect(value) {
-    if (Array.isArray(value)) return value.forEach(collect);
-    if (!value || typeof value !== 'object') return;
-    if (typeof value.soundId === 'string') referencedIds.add(value.soundId);
-    Object.values(value).forEach(collect);
-  }
-  collect(profile);
   const assets = [];
   for (const asset of registry.list()) {
     if (asset.kind !== 'custom') continue;
-    if (referencedIds.size > 0 && !referencedIds.has(asset.soundId)) continue;
     const filePath = resolveAssetPath(assetRoot, asset.relativePath);
     let info;
     try { info = await stat(filePath); } catch { throw exporterError('SOUND_PACKAGE_ASSET_MISSING', `Sound asset file is missing: ${asset.soundId}`, { soundId: asset.soundId, path: filePath }); }
@@ -39,12 +30,13 @@ export async function exportSoundPackage({ name, profile = {}, registry, assetRo
     const data = await readFile(filePath);
     assets.push({ asset, data });
   }
-  const packageValue = createSoundPackage({ name, profile, assets });
+  if (!assets.length) throw exporterError('SOUND_PACKAGE_EMPTY', 'Audio library has no custom sounds to export');
+  const packageValue = createSoundPackage({ name, profile: {}, assets });
   return Object.freeze({
     extension: '.nhsound',
     name: packageValue.name,
     packageText: serializeSoundPackage(packageValue),
     assetCount: packageValue.assets.length,
-    profileBindingCount: packageValue.profile.soundOverrides.length
+    profileBindingCount: 0
   });
 }

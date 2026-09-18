@@ -459,8 +459,32 @@ test('sceneStateFingerprint ignores updatedAt without cloning the snapshot', () 
   );
 });
 
+test('sceneStateFingerprint ignores ticker card x/y because they are a time function', () => {
+  const left = {
+    ...nativeChangedSnapshot,
+    cards: [{
+      id: 'ticker-a',
+      title: 'A',
+      body: 'fly',
+      x: 12,
+      y: 40,
+      behavior: { behaviorProfileId: 'ticker', behaviorChannelId: 'visual.event.ticker' }
+    }]
+  };
+  assert.equal(
+    sceneStateFingerprint(left),
+    sceneStateFingerprint({ ...left, cards: [{ ...left.cards[0], x: 480, y: 40 }] })
+  );
+  assert.notEqual(
+    sceneStateFingerprint(left),
+    sceneStateFingerprint({ ...left, cards: [{ ...left.cards[0], title: 'B' }] })
+  );
+});
+
 test('sceneStateSyncDelayMs backs off only for production idle polling', () => {
   assert.equal(sceneStateSyncDelayMs({ intervalMs: 500, cardCount: 0 }), 2000);
   assert.equal(sceneStateSyncDelayMs({ intervalMs: 500, cardCount: 2 }), 500);
+  assert.equal(sceneStateSyncDelayMs({ intervalMs: 500, cardCount: 2, needsPositionRecovery: true }), 500);
+  assert.equal(sceneStateSyncDelayMs({ intervalMs: 500, cardCount: 2, needsPositionRecovery: false }), 2000);
   assert.equal(sceneStateSyncDelayMs({ intervalMs: 5, cardCount: 0 }), 5);
 });

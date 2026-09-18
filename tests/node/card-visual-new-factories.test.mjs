@@ -44,6 +44,9 @@ test('createCardProperties rejects invalid values', () => {
   assert.equal(createCardProperties({ interaction: { autoDismiss: 'on', timeoutMs: 120000 } }).interaction.autoDismiss, 'on');
   assert.equal(createCardProperties({ lifecycle: { holdDurationMs: 120000 } }).lifecycle.holdDurationMs, 120000);
   assert.equal(createCardProperties().interaction.autoDismiss, 'off');
+  assert.equal(createCardProperties().interaction.holdDrag, 'on');
+  assert.equal(createCardProperties({ interaction: { holdDrag: 'off' } }).interaction.holdDrag, 'off');
+  assert.throws(() => createCardProperties({ interaction: { holdDrag: 'maybe' } }), (e) => e.code === 'CARD_VISUAL_PROPERTY_INVALID');
   assert.throws(() => createCardProperties({ unknown: {} }), (e) => e.code === 'CARD_VISUAL_FIELD_UNKNOWN');
 });
 

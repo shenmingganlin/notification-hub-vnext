@@ -292,6 +292,80 @@ test('Node client completes hello, health, and shutdown over Named Pipe', async 
   assert.equal(stackedSnapshot.layout.mode, 'stack');
   assert.equal(stackedSnapshot.layout.workArea.resolution, 'explicit');
   assert.equal(stackedSnapshot.layout.workArea.source, 'explicit-override');
+  assert.equal(stackedCard.payload.result.layout.newest, 'dock');
+
+  const newestNext = await client.request('scene.set-mode', {
+    layout: 'stack',
+    direction: 'down',
+    anchor: 'top-right',
+    spacing: 12,
+    workAreaWidth: 800,
+    workAreaHeight: 600,
+    dpiScale: 1,
+    newest: 'next'
+  }, { retryable: false, idempotencyKey: 'scene-stack-newest-next' });
+  assert.equal(newestNext.type, 'ack');
+  assert.equal(newestNext.payload.result.layout.newest, 'next');
+  assert.deepEqual(newestNext.payload.result.sceneCards.map((card) => ({
+    id: card.id,
+    x: card.x,
+    y: card.y
+  })), stackedCard.payload.result.sceneCards.map((card) => ({
+    id: card.id,
+    x: card.x,
+    y: card.y
+  })));
+
+  const coilMode = await client.request('scene.set-mode', {
+    layout: 'stack',
+    direction: 'down',
+    anchor: 'top-left',
+    spacing: 0,
+    workAreaWidth: 800,
+    workAreaHeight: 600,
+    dpiScale: 1,
+    wrap: 'coil',
+    newest: 'next'
+  }, { retryable: false, idempotencyKey: 'scene-stack-wrap-coil' });
+  assert.equal(coilMode.type, 'ack');
+  assert.equal(coilMode.payload.result.layout.wrap, 'coil');
+  assert.equal(coilMode.payload.result.layout.newest, 'next');
+
+  await assert.rejects(
+    client.request('scene.set-mode', {
+      layout: 'stack',
+      direction: 'down',
+      anchor: 'top-right',
+      spacing: 12,
+      wrap: 'helix'
+    }, { retryable: false }),
+    (error) => error.code === 'LAYOUT_INVALID'
+  );
+
+  const restoreStacked = await client.request('scene.set-mode', {
+    layout: 'stack',
+    direction: 'down',
+    anchor: 'top-right',
+    spacing: 12,
+    workAreaWidth: 800,
+    workAreaHeight: 600,
+    dpiScale: 1,
+    newest: 'next'
+  }, { retryable: false, idempotencyKey: 'scene-stack-restore-after-coil' });
+  assert.equal(restoreStacked.type, 'ack');
+  assert.equal(restoreStacked.payload.result.layout.anchor, 'top-right');
+  assert.equal(restoreStacked.payload.result.layout.wrap, 'parallel');
+
+  await assert.rejects(
+    client.request('scene.set-mode', {
+      layout: 'stack',
+      direction: 'down',
+      anchor: 'top-right',
+      spacing: 12,
+      newest: 'orbit'
+    }, { retryable: false }),
+    (error) => error.code === 'CHARTER_NEWEST_UNSUPPORTED'
+  );
 
   await assert.rejects(
     client.request('scene.set-mode', {
@@ -892,6 +966,190 @@ test('Runtime ACKs autoDismiss and keeps channel-only create coordinates without
   assert.equal(channelCard.x, 410);
   assert.equal(channelCard.y, 220);
 
+  const shutdown = await client.request('shutdown');
+  assert.equal(shutdown.type, 'ack');
+  const [exitCode] = await once(runtime, 'exit');
+  assert.equal(exitCode, 0, `Runtime exited with stderr: ${stderr}`);
+});
+
+test('Runtime ACKs holdDrag false and omits default on from cards_json', async (t) => {
+  if (!runtimePath) {
+    t.skip('requires a Runtime executable path; CTest supplies it');
+    return;
+  }
+  const pipeName = `\\\\.\\pipe\\notification-hub-vnext-hold-drag-${process.pid}`;
+  const runtime = spawn(runtimePath, ['--pipe-server', pipeName], {
+    stdio: ['ignore', 'pipe', 'pipe'],
+    windowsHide: true
+  });
+  t.after(async () => {
+    if (!runtime.killed) runtime.kill();
+  });
+  let stdout = '';
+  let stderr = '';
+  runtime.stdout.setEncoding('utf8');
+  runtime.stderr.setEncoding('utf8');
+  runtime.stdout.on('data', (chunk) => { stdout += chunk; });
+  runtime.stderr.on('data', (chunk) => { stderr += chunk; });
+  await new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(`Runtime ready timeout; stderr=${stderr}`)), 3000);
+    const onData = () => {
+      if (!stdout.includes('named pipe ready:')) return;
+      clearTimeout(timer);
+      runtime.stdout.off('data', onData);
+      resolve();
+    };
+    runtime.stdout.on('data', onData);
+    runtime.once('error', reject);
+  });
+  const client = new PipeClient({
+    pipeName,
+    connectTimeoutMs: 3000,
+    requestTimeoutMs: 3000,
+    reconnectDelayMs: 10
+  });
+  t.after(() => client.close());
+  await client.request('hello', { clientVersion: 'hold-drag-smoke' });
+  const createdOff = await client.request('scene.create', {
+    id: 'card-hold-off',
+    title: 'Hold off',
+    body: 'no drag',
+    x: 40,
+    y: 40,
+    width: 320,
+    height: 160,
+    visual: {
+      enabled: true,
+      preset: 'minimal',
+      intensity: 'balanced',
+      category: 'plugin',
+      cardType: 'minimal',
+      behavior: { layout: 'simple', boundary: 'work-area' },
+      appearance: { size: 'medium', aspectRatio: 'default', backgroundColor: '#0e1916', backgroundFit: 'fill', backgroundPadding: 0, borderRadius: 16, opacity: 0.96 },
+      interaction: { dismissMode: 'closeButton', closeButtonPosition: 'top-right', timeoutMs: 30000, holdDrag: false }
+    }
+  }, { retryable: false, idempotencyKey: 'card-hold-off-create' });
+  assert.equal(createdOff.type, 'ack');
+  const offCard = createdOff.payload.result.sceneCards.find((card) => card.id === 'card-hold-off');
+  assert.equal(offCard.visual.interaction.holdDrag, false);
+  const createdOn = await client.request('scene.create', {
+    id: 'card-hold-on',
+    title: 'Hold on',
+    body: 'default drag',
+    x: 40,
+    y: 220,
+    width: 320,
+    height: 160,
+    visual: {
+      enabled: true,
+      preset: 'minimal',
+      intensity: 'balanced',
+      category: 'plugin',
+      cardType: 'minimal',
+      behavior: { layout: 'simple', boundary: 'work-area' },
+      appearance: { size: 'medium', aspectRatio: 'default', backgroundColor: '#0e1916', backgroundFit: 'fill', backgroundPadding: 0, borderRadius: 16, opacity: 0.96 },
+      interaction: { dismissMode: 'closeButton', closeButtonPosition: 'top-right', timeoutMs: 30000 }
+    }
+  }, { retryable: false, idempotencyKey: 'card-hold-on-create' });
+  assert.equal(createdOn.type, 'ack');
+  const onCard = createdOn.payload.result.sceneCards.find((card) => card.id === 'card-hold-on');
+  assert.equal('holdDrag' in onCard.visual.interaction, false);
+  const shutdown = await client.request('shutdown');
+  assert.equal(shutdown.type, 'ack');
+  const [exitCode] = await once(runtime, 'exit');
+  assert.equal(exitCode, 0, `Runtime exited with stderr: ${stderr}`);
+});
+
+test('Runtime ticker overlay create keeps health x,y without a card HWND', async (t) => {
+  if (!runtimePath) {
+    t.skip('requires a Runtime executable path; CTest supplies it');
+    return;
+  }
+  const pipeName = String.raw`\\.\pipe\notification-hub-vnext-overlay-smoke-${process.pid}`;
+  const runtime = spawn(runtimePath, ['--pipe-server', pipeName], {
+    stdio: ['ignore', 'pipe', 'pipe'],
+    windowsHide: true
+  });
+  t.after(async () => {
+    if (!runtime.killed) runtime.kill();
+  });
+  let stdout = '';
+  let stderr = '';
+  runtime.stdout.setEncoding('utf8');
+  runtime.stderr.setEncoding('utf8');
+  runtime.stdout.on('data', (chunk) => { stdout += chunk; });
+  runtime.stderr.on('data', (chunk) => { stderr += chunk; });
+  await new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(`Runtime ready timeout; stderr=${stderr}`)), 3000);
+    const onData = () => {
+      if (!stdout.includes('named pipe ready:')) return;
+      clearTimeout(timer);
+      runtime.stdout.off('data', onData);
+      resolve();
+    };
+    runtime.stdout.on('data', onData);
+    runtime.once('error', reject);
+  });
+  const client = new PipeClient({
+    pipeName,
+    connectTimeoutMs: 3000,
+    requestTimeoutMs: 3000,
+    reconnectDelayMs: 10
+  });
+  t.after(() => client.close());
+  await client.request('hello', { clientVersion: 'overlay-smoke' });
+  await client.request('scene.set-mode', {
+    layout: 'stack',
+    direction: 'down',
+    anchor: 'bottom-right',
+    spacing: 12,
+    workAreaWidth: 1200,
+    workAreaHeight: 800,
+    dpiScale: 1
+  }, { retryable: false });
+  const created = await client.request('scene.create', {
+    id: 'overlay-ticker',
+    title: 'overlay-ticker',
+    body: 'sprite',
+    x: 0,
+    y: 0,
+    width: 320,
+    height: 76,
+    visual: {
+      enabled: true,
+      preset: 'minimal',
+      intensity: 'balanced',
+      category: null,
+      cardType: 'minimal',
+      behavior: { layout: 'simple', boundary: 'work-area' },
+      appearance: {
+        size: 'medium',
+        aspectRatio: 'wide',
+        backgroundColor: '#0e1916',
+        backgroundFit: 'fill',
+        backgroundPadding: 0,
+        borderRadius: 12,
+        opacity: 0.96
+      },
+      ticker: {
+        speedPxPerSec: 400,
+        band: 'top',
+        bandRatio: 0.28,
+        trackCount: 3,
+        minGapPx: 64,
+        clickThrough: true,
+        hoverPause: false,
+        overflow: 'avoid'
+      }
+    },
+    behavior: { behaviorProfileId: 'ticker', behaviorChannelId: 'visual.try-one' }
+  }, { retryable: false });
+  assert.equal(created.type, 'ack', `overlay ticker create failed: ${JSON.stringify(created)}`);
+  const card = created.payload.result.sceneCards.find((item) => item.id === 'overlay-ticker');
+  assert.ok(card, 'health must still list the ticker card');
+  assert.equal(typeof card.x, 'number');
+  assert.equal(typeof card.y, 'number');
+  assert.ok(card.x > 900, `ticker spawn x should be near the right edge, got ${card.x}`);
   const shutdown = await client.request('shutdown');
   assert.equal(shutdown.type, 'ack');
   const [exitCode] = await once(runtime, 'exit');

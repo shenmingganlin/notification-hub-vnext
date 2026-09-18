@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <memory>
+#include <string>
 #include <string_view>
 #include <vector>
 
@@ -25,8 +26,11 @@ public:
     CardRenderer& operator=(const CardRenderer&) = delete;
 
     bool initialize(void* native_window, int width, int height);
+    const std::string& last_error() const noexcept { return last_error_; }
     bool resize(int width, int height);
     bool draw(std::wstring_view title, std::wstring_view body, const VisualStyle& visual = {}, bool capture_output = false, const std::vector<CardPart>& parts = {}, bool hovered = false, std::wstring_view assistant_name = {});
+    bool draw_buffer(std::wstring_view title, std::wstring_view body, const VisualStyle& visual = {}, bool capture_output = false, const std::vector<CardPart>& parts = {}, bool hovered = false, std::wstring_view assistant_name = {});
+    bool buffer_bits(const void*& bits, int& pitch, int& width, int& height) const noexcept;
     bool capture_pixels() const noexcept;
     bool sample_pixel(int x, int y, Pixel& pixel) const noexcept;
     void reset() noexcept;
@@ -40,6 +44,7 @@ private:
     bool ensure_background_bitmap(const VisualStyle& visual, float dest_left, float dest_top, float dest_right, float dest_bottom, bool wait_for_wallpaper);
     bool update_layered_window();
     std::unique_ptr<Impl> impl_;
+    std::string last_error_;
 };
 
 }  // namespace notification_hub::scene

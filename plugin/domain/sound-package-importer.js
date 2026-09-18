@@ -78,7 +78,7 @@ export async function importSoundPackage({ packageValue, packageText, assetRoot,
       }
     }
 
-    if (typeof commit === 'function') await commit(normalized.profile);
+    if (typeof commit === 'function') await commit();
     await rm(tempRoot, { recursive: true, force: true });
     return Object.freeze({
       name: normalized.name,

@@ -7,12 +7,16 @@ import {
   TICKER_TRACK_GAP_BOUNDS
 } from '../domain/visual-settings.js';
 import { allowedStackGrows, resolveStackGrow, resolveStackWrap } from '../domain/stack-grow.js';
+import { BODY_CUSTOM_TEXT_MAX, partCustomTextMax, TITLE_CUSTOM_TEXT_MAX } from '../domain/card-visual-settings.js';
 import { STUDIO_CLIENT } from './settings-visual-client.js';
 
 const ROUTE_ERRORS = Object.freeze({
   VISUAL_SETTINGS_API_UNAVAILABLE: '视觉设置暂不可用。',
   VISUAL_PROFILE_API_UNAVAILABLE: '视觉方案 API 暂不可用。',
-  VISUAL_TEST_API_UNAVAILABLE: '视觉测试功能暂不可用。'
+  VISUAL_PROFILE_DEPENDENCY_MISSING: '配置包用到的底图或字体在库里找不到。',
+  VISUAL_TEST_API_UNAVAILABLE: '视觉测试功能暂不可用。',
+  LAYOUT_BEHAVIOR_CHANNEL_OUT_OF_BOUNDS: '堆叠已经满了，这张卡放不下。',
+  LAYOUT_CARD_OUT_OF_BOUNDS: '堆叠已经满了，这张卡放不下。'
 });
 const CARD_SIZES = Object.freeze({ small: '小', medium: '中', large: '大' });
 const CARD_DISMISS_CLICK_MODES = Object.freeze({ closeButton: '关闭按钮', anywhere: '任意点击' });
@@ -59,6 +63,14 @@ function initialModel(value) {
     visualDiagnostics: Array.isArray(value.visualDiagnostics) ? value.visualDiagnostics : []
   };
 }
+function assetOptionList(assets, selectedId) {
+  const items = Array.isArray(assets) ? assets : [];
+  const selected = selectedId || '';
+  return '<option value="">没有图 · 纯色</option>' + items.map((asset) => {
+    const id = String(asset.assetId || '');
+    return '<option value="' + escapeHtml(id) + '"' + (selected && selected === asset.assetId ? ' selected' : '') + '>' + escapeHtml(asset.name) + ' · ' + escapeHtml(String(asset.format).toUpperCase()) + '</option>';
+  }).join('');
+}
 function optionList(values, selected) {
   return Object.entries(values).map(([value, label]) => `<option value="${escapeHtml(value)}"${value === selected ? ' selected' : ''}>${escapeHtml(label)}</option>`).join('');
 }
@@ -91,13 +103,15 @@ function growPad(anchor, grow) {
 function wrapPad(wrap, grow) {
   const resolved = resolveStackWrap(wrap);
   const open = resolved !== 'off';
-  const path = resolved === 'snake' ? 'snake' : 'parallel';
+  const path = resolved === 'snake' || resolved === 'coil' ? resolved : 'parallel';
   const axisLabel = (grow === 'left' || grow === 'right') ? '开新行' : '开新列';
   const note = resolved === 'off'
     ? '满了掀最旧'
     : resolved === 'snake'
-      ? '折返，二维满了掀最旧。停靠是最先来的那张。'
-      : '满了沿另一边开列';
+      ? '折返，二维满了掀最旧。'
+      : resolved === 'coil'
+        ? '越绕越小，满了掀最旧。'
+        : '满了沿另一边开列';
   const openChip = (id, on, label) => '<button type="button" class="chip' + (on ? ' is-on' : '') + '" data-wrap-open="' + id + '" aria-pressed="' + (on ? 'true' : 'false') + '">' + label + '</button>';
   const pathChip = (id, on, label) => '<button type="button" class="chip' + (on ? ' is-on' : '') + (open ? '' : ' is-off') + '" data-wrap-path="' + id + '" aria-pressed="' + (on && open ? 'true' : 'false') + '" aria-disabled="' + (open ? 'false' : 'true') + '">' + label + '</button>';
   return '<div class="field stack-wrap"><span class="label" id="prop-wrap-open-label">' + axisLabel + '</span>'
@@ -109,29 +123,67 @@ function wrapPad(wrap, grow) {
     + '<div class="chip-row" role="group" aria-label="走线">'
     + pathChip('parallel', path === 'parallel', '平行')
     + pathChip('snake', path === 'snake', '蛇形')
+    + pathChip('coil', path === 'coil', '回字')
     + '</div>'
     + '<p class="field-note" id="prop-wrap-note">' + note + '</p>'
     + '<select id="prop-wrap" class="mode-contract-select" aria-label="走线" tabindex="-1" aria-hidden="true">'
     + '<option value="off"' + (resolved === 'off' ? ' selected' : '') + '>off</option>'
     + '<option value="parallel"' + (resolved === 'parallel' ? ' selected' : '') + '>parallel</option>'
     + '<option value="snake"' + (resolved === 'snake' ? ' selected' : '') + '>snake</option>'
+    + '<option value="coil"' + (resolved === 'coil' ? ' selected' : '') + '>coil</option>'
     + '</select></div>';
 }
-function fieldNumber(label, id, value, min, max, step, disabled) {
-  return '<div class="field"><label for="' + id + '">' + escapeHtml(label) + '</label><input id="' + id + '" type="number" min="' + min + '"' + (max != null ? ' max="' + max + '"' : '') + (step != null ? ' step="' + step + '"' : '') + (disabled ? ' disabled' : '') + ' value="' + escapeHtml(String(value)) + '"></div>';
+function newestPad(newest) {
+  const dock = newest !== 'next';
+  const chip = (id, on, label) => '<button type="button" id="prop-newest-' + id + '" class="chip' + (on ? ' is-on' : '') + '" data-newest="' + id + '" aria-pressed="' + (on ? 'true' : 'false') + '">' + label + '</button>';
+  return '<div class="field stack-newest"><span class="label">新卡</span>'
+    + '<div class="chip-row" role="group" aria-label="新卡">'
+    + chip('dock', dock, '占角')
+    + chip('next', !dock, '新位')
+    + '</div>'
+    + '<p class="field-note" id="prop-newest-note">占角=新卡占停靠角，旧卡让位。新位=旧卡不动，新卡开一格。</p>'
+    + '<select id="prop-newest" class="mode-contract-select" aria-label="新卡" tabindex="-1" aria-hidden="true">'
+    + '<option value="dock"' + (dock ? ' selected' : '') + '>dock</option>'
+    + '<option value="next"' + (!dock ? ' selected' : '') + '>next</option>'
+    + '</select></div>';
+}
+function settlePad(settle) {
+  const follow = settle !== 'snap';
+  const chip = (id, on, label) => '<button type="button" id="prop-settle-' + id + '" class="chip' + (on ? ' is-on' : '') + '" data-settle="' + id + '" aria-pressed="' + (on ? 'true' : 'false') + '">' + label + '</button>';
+  return '<div class="field stack-settle"><span class="label">落点</span>'
+    + '<div class="chip-row" role="group" aria-label="落点">'
+    + chip('follow', follow, '跟随')
+    + chip('snap', !follow, '瞬移')
+    + '</div>'
+    + '<p class="field-note" id="prop-settle-note">跟随=槽动了卡追过去。瞬移=立刻跳到槽。</p>'
+    + '<select id="prop-settle" class="mode-contract-select" aria-label="落点" tabindex="-1" aria-hidden="true">'
+    + '<option value="follow"' + (follow ? ' selected' : '') + '>follow</option>'
+    + '<option value="snap"' + (!follow ? ' selected' : '') + '>snap</option>'
+    + '</select></div>';
+}
+function fieldNumber(label, id, value, min, max, step, disabled, accent) {
+  return '<div class="field' + (accent ? ' is-accent' : '') + '"><label for="' + id + '">' + escapeHtml(label) + '</label><input id="' + id + '" type="number" min="' + min + '"' + (max != null ? ' max="' + max + '"' : '') + (step != null ? ' step="' + step + '"' : '') + (disabled ? ' disabled' : '') + ' value="' + escapeHtml(String(value)) + '"></div>';
 }
 function closeIconChip(id, label, current) {
   const on = current === id;
   return '<button type="button" class="chip' + (on ? ' is-on' : '') + '" data-close-icon="' + escapeHtml(id) + '" aria-pressed="' + (on ? 'true' : 'false') + '">' + escapeHtml(label) + '</button>';
 }
-function hoverHighlightChip(id, on, locked) {
+function hoverChip(id, label, on, locked) {
   const pressed = on && !locked;
-  return '<button type="button" id="' + id + '" class="chip' + (pressed ? ' is-on' : '') + (locked ? ' is-locked' : '') + '" aria-pressed="' + (pressed ? 'true' : 'false') + '" aria-disabled="' + (locked ? 'true' : 'false') + '"' + (locked ? ' title="不挡点击开着时，弹幕吃不到鼠标，没法加亮。" aria-describedby="ticker-hover-why"' : '') + '>悬停加亮</button>';
+  return '<button type="button" id="' + id + '" class="chip' + (pressed ? ' is-on' : '') + (locked ? ' is-locked' : '') + '" aria-pressed="' + (pressed ? 'true' : 'false') + '" aria-disabled="' + (locked ? 'true' : 'false') + '"' + (locked ? ' title="不挡点击开着时，弹幕吃不到鼠标。" aria-describedby="ticker-hover-why"' : '') + '>' + escapeHtml(label) + '</button>';
+}
+function hoverHighlightChip(id, on, locked) {
+  return hoverChip(id, '悬停加亮', on, locked);
+}
+function holdDragChip(on, locked) {
+  const intent = on ? 'on' : 'off';
+  const pressed = on && !locked;
+  return '<button type="button" id="prop-hold-drag" class="chip' + (pressed ? ' is-on' : '') + (locked ? ' is-locked' : '') + '" data-intent="' + intent + '" aria-pressed="' + (pressed ? 'true' : 'false') + '" aria-disabled="' + (locked ? 'true' : 'false') + '"' + (locked ? ' title="任意点击关卡时，按住会当成点击，没法拖。" aria-describedby="hold-drag-why"' : '') + '>按住拖动</button>';
 }
 
 const SYNC_ELEMENT_IDS = Object.freeze([
   'global-visual-enabled', 'global-visual-default-mode',
-  'prop-size', 'prop-anchor', 'prop-grow', 'prop-wrap', 'prop-margin-left', 'prop-margin-right', 'prop-margin-top', 'prop-margin-bottom', 'prop-gap', 'prop-layout', 'prop-width', 'prop-height',
+  'prop-size', 'prop-anchor', 'prop-grow', 'prop-wrap', 'prop-newest', 'prop-settle', 'prop-margin-left', 'prop-margin-right', 'prop-margin-top', 'prop-margin-bottom', 'prop-gap', 'prop-layout', 'prop-width', 'prop-height',
   'prop-border-radius', 'prop-opacity', 'prop-border-width', 'prop-border-color', 'prop-paint-overflow',
   'part-paint-fill', 'part-paint-fill-box', 'part-paint-background', 'part-paint-opacity', 'part-paint-bg-asset',
   'part-paint-stroke', 'part-paint-stroke-width', 'part-paint-x', 'part-paint-y', 'part-paint-w', 'part-paint-h', 'part-paint-radius',
@@ -167,28 +219,30 @@ function stackSection(props, behaviorId) {
   return '<div id="stack-section"' + (behaviorId === 'ticker' ? ' hidden' : '') + '>'
     + '<section class="group group-charter panel" id="stack-charter" aria-label="通道">'
     + '<h2 class="group-name">通道</h2>'
-    + '<p class="group-hint">全池一份法律。停靠、往哪长、走线、边距，改了所有堆叠卡都听。</p>'
+    + '<p class="group-hint">全池一份法律。停靠、往哪长、走线、新卡、落点、边距，改了所有堆叠卡都听。</p>'
     + '<div class="stack-layout">'
     + '<div class="field"><span class="label">停靠</span><div class="dock" role="group" aria-label="停靠在屏幕哪个角">' + dock + '</div>'
     + '<select id="prop-anchor" class="mode-contract-select" aria-label="停靠" tabindex="-1" aria-hidden="true">' + anchorOptions + '</select></div>'
     + '<div class="field"><span class="label">往哪长</span>' + growPad(anchor, props.grow) + '<p class="field-note">对着墙的两边是灰的。</p></div>'
     + wrapPad(props.wrap, resolveStackGrow(anchor, props.grow))
+    + newestPad(props.newest)
+    + settlePad(props.settle)
     + '</div>'
     + '<div class="fields" style="margin-top:20px">'
-    + fieldNumber('距左（≥0）', 'prop-margin-left', props.marginLeft ?? props.margin ?? 18, 0, null, 1, !dockMarginOn(anchor, 'left'))
-    + fieldNumber('距右（≥0）', 'prop-margin-right', props.marginRight ?? props.margin ?? 18, 0, null, 1, !dockMarginOn(anchor, 'right'))
-    + fieldNumber('距上（≥0）', 'prop-margin-top', props.marginTop ?? props.margin ?? 18, 0, null, 1, !dockMarginOn(anchor, 'top'))
-    + fieldNumber('距下（≥0）', 'prop-margin-bottom', props.marginBottom ?? props.margin ?? 18, 0, null, 1, !dockMarginOn(anchor, 'bottom'))
+    + fieldNumber('距左（≥0）', 'prop-margin-left', props.marginLeft ?? props.margin ?? 18, 0, null, 1, false, dockMarginOn(anchor, 'left'))
+    + fieldNumber('距右（≥0）', 'prop-margin-right', props.marginRight ?? props.margin ?? 18, 0, null, 1, false, dockMarginOn(anchor, 'right'))
+    + fieldNumber('距上（≥0）', 'prop-margin-top', props.marginTop ?? props.margin ?? 18, 0, null, 1, false, dockMarginOn(anchor, 'top'))
+    + fieldNumber('距下（≥0）', 'prop-margin-bottom', props.marginBottom ?? props.margin ?? 18, 0, null, 1, false, dockMarginOn(anchor, 'bottom'))
     + fieldNumber('卡片间距', 'prop-gap', props.gap ?? 8, 0, null, 1)
     + '</div>'
-    + '<p class="field-note">只改停靠那两面。另外两面灰色，不挤空间。</p>'
+    + '<p class="field-note">四面都挤工作区。强调色是停靠那两面。</p>'
     + '<select id="prop-layout" class="mode-contract-select" aria-label="排列方式" tabindex="-1" aria-hidden="true">' + optionList(LAYOUT_OPTIONS, props.layout ?? 'simple') + '</select>'
     + '<input id="prop-duration" type="hidden" value="' + escapeHtml(String(props.durationMs ?? 30000)) + '">'
     + '<input id="prop-hold-duration" type="hidden" value="' + escapeHtml(String(holdMs)) + '">'
     + '</section>'
     + '<section class="group group-card panel" id="stack-card" aria-label="这张卡">'
     + '<h2 class="group-name">这张卡</h2>'
-    + '<p class="group-hint">只改这张卡的关闭、停留、加亮。别的卡不受影响。</p>'
+    + '<p class="group-hint">只改这张卡的关闭、停留、加亮、拖动。别的卡不受影响。</p>'
     + '<div class="stack-life">'
     + '<div class="field"><span class="label">关闭方式</span><div class="chip-row" role="group" aria-label="关闭方式">'
     + dismissChip('prop-dismiss-close', 'closeButton', '关闭按钮', clickMode === 'closeButton')
@@ -198,8 +252,10 @@ function stackSection(props, behaviorId) {
     + '<div class="stack-life-row">'
     + '<div class="field"><label for="hold-seconds">停留（秒）</label><input id="hold-seconds" type="number" min="1" max="120" step="1" value="' + holdSeconds + '"></div>'
     + '<div class="field"><span class="label">悬停加亮</span>' + hoverHighlightChip('prop-hover-highlight', props.hoverHighlight === 'on', false) + '</div>'
+    + '<div class="field"><span class="label">按住拖动</span>' + holdDragChip(props.holdDrag !== 'off' && props.holdDrag !== false, clickMode === 'anywhere') + '</div>'
     + '</div>'
-    + '<p class="field-note">停留 1–120 秒。悬停加亮默认关，打开后鼠标放上去卡片会亮一点。</p>'
+    + '<p class="field-note">停留 1–120 秒。悬停加亮默认关。按住拖动默认开，关掉后按住卡片不会挪。任意点击关卡时拖动变灰。</p>'
+    + '<p class="field-note" id="hold-drag-why"' + (clickMode === 'anywhere' ? '' : ' hidden') + '>任意点击关卡时，按住会当成点击，没法拖。</p>'
     + '</div></section></div>';
 }
 
@@ -254,7 +310,7 @@ function tickerSection(ticker, behaviorId, hoverHighlight) {
     + '</div></section>'
     + '<section class="group group-card panel" id="ticker-card" aria-label="这张卡">'
     + '<h2 class="group-name">这张卡</h2>'
-    + '<p class="group-hint">只改这张卡的方向和速度。点穿开着时加亮点不到。</p>'
+    + '<p class="group-hint">只改这张卡的方向、速度、加亮和暂停。点穿开着时加亮和暂停点不到。</p>'
     + '<div class="field"><span class="label">方向</span>'
     + '<div class="chip-row" role="group" aria-label="方向">'
     + '<button type="button" class="chip' + (!flyRight ? ' is-on' : '') + '" data-ticker-direction="left" aria-pressed="' + (!flyRight ? 'true' : 'false') + '">右 → 左</button>'
@@ -272,9 +328,12 @@ function tickerSection(ticker, behaviorId, hoverHighlight) {
     + '<button type="button" id="ticker-speed-random" class="chip' + (config.speedRandom ? ' is-on' : '') + '" aria-pressed="' + (config.speedRandom ? 'true' : 'false') + '">随机</button>'
     + '<p class="field-note">点随机：每条弹幕自己抽一个速度。滑杆是固定速度。</p>'
     + '</div></div></div>'
-    + '<div class="field"><span class="label">悬停加亮</span>'
-    + hoverHighlightChip('ticker-hover-highlight', hoverHighlight === 'on', config.clickThrough !== false)
-    + '<p class="field-note" id="ticker-hover-why"' + (config.clickThrough !== false ? '' : ' hidden') + '>不挡点击开着时，弹幕吃不到鼠标，没法加亮。</p></div>'
+    + '<div class="field"><span class="label">悬停</span>'
+    + '<div class="chip-row" role="group" aria-label="悬停">'
+    + hoverChip('ticker-hover-highlight', '悬停加亮', hoverHighlight === 'on', config.clickThrough !== false)
+    + hoverChip('ticker-hover-pause', '悬停暂停', config.hoverPause === true, config.clickThrough !== false)
+    + '</div>'
+    + '<p class="field-note" id="ticker-hover-why"' + (config.clickThrough !== false ? '' : ' hidden') + '>不挡点击开着时，弹幕吃不到鼠标。</p></div>'
     + '</section></div>';
 }
 
@@ -323,9 +382,12 @@ function resolveSsrPaintColor(value, glossary, fallback) {
   return fallback;
 }
 
-function partChip(id, label, selectedId = 'root', off = false) {
-  const selected = id === selectedId;
-  return '<button type="button" class="chip' + (selected ? ' is-on is-selected' : '') + (off ? ' is-off' : '') + '" data-part="' + id + '" aria-pressed="' + (selected ? 'true' : 'false') + '">' + label + '</button>';
+function partChip(id, label, selectedId = 'root', off = false, hidden = false) {
+  const selected = !hidden && id === selectedId;
+  return '<button type="button" class="chip' + (selected ? ' is-on is-selected' : '') + (off ? ' is-off' : '') + '" data-part="' + id + '" aria-pressed="' + (selected ? 'true' : 'false') + '"' + (hidden ? ' hidden' : '') + '>' + label + '</button>';
+}
+function closePartVisible(behaviorId, dismissMode) {
+  return behaviorId !== 'ticker' && dismissMode !== 'anywhere';
 }
 
 function partHidden(id, paint = {}) {
@@ -344,9 +406,9 @@ function partHidden(id, paint = {}) {
   const iconExtra = id === 'icon'
     ? '<input id="part-icon-source" type="hidden" value="' + escapeHtml(paint.source === 'custom' ? 'custom' : 'assistant') + '">'
       + '<input id="part-icon-asset-id" type="hidden" value="' + escapeHtml(paint.assetId ?? '') + '">'
-      + '<input id="part-icon-scale" type="hidden" value="' + escapeHtml(String(iconScale)) + '">'
-      + '<input id="part-icon-x" type="hidden" value="' + escapeHtml(String(iconX)) + '">'
-      + '<input id="part-icon-y" type="hidden" value="' + escapeHtml(String(iconY)) + '">'
+      + '<input id="part-icon-bg-scale" type="hidden" value="' + escapeHtml(String(iconScale)) + '">'
+      + '<input id="part-icon-bg-x" type="hidden" value="' + escapeHtml(String(iconX)) + '">'
+      + '<input id="part-icon-bg-y" type="hidden" value="' + escapeHtml(String(iconY)) + '">'
     : '';
   const bgAsset = id === 'icon'
     ? ''
@@ -370,6 +432,10 @@ function partHidden(id, paint = {}) {
       ? '<input id="part-' + id + '-fit-width" type="hidden" value="' + escapeHtml(paint.fitWidth === true ? 'true' : '') + '">'
         + '<input id="part-' + id + '-fit-compensate" type="hidden" value="' + escapeHtml(paint.fitCompensate === true ? 'true' : '') + '">'
       : '')
+    + ((id === 'title' || id === 'body')
+      ? '<input id="part-' + id + '-content-source" type="hidden" value="' + escapeHtml(paint.contentSource === 'custom' ? 'custom' : '') + '">'
+        + '<input id="part-' + id + '-custom-text" type="hidden" value="' + escapeHtml(typeof paint.customText === 'string' ? paint.customText : '') + '">'
+      : '')
     + (textIds
       ? '<input id="part-' + id + '-font-size" type="hidden" value="' + escapeHtml(Number.isInteger(paint.fontSize) ? String(paint.fontSize) : '') + '">'
         + '<input id="part-' + id + '-font-family" type="hidden" value="' + escapeHtml(paint.fontAssetId ? ('font:' + paint.fontAssetId) : (paint.fontFamily ?? '')) + '">'
@@ -391,7 +457,7 @@ function partHidden(id, paint = {}) {
     + bgAsset;
 }
 
-function appearanceSection(props, appearance, skin, assetOptions, parts = {}, glossary = {}, fonts = [], studioAgents = []) {
+function appearanceSection(props, appearance, skin, assets = [], parts = {}, glossary = {}, fonts = [], studioAgents = [], closeVisible = true) {
   const size = props.size ?? appearance.size ?? 'medium';
   const radius = props.borderRadius ?? appearance.borderRadius ?? 16;
   const opacity = props.opacity ?? appearance.opacity ?? 0.96;
@@ -406,7 +472,8 @@ function appearanceSection(props, appearance, skin, assetOptions, parts = {}, gl
   const bgScale = typeof appearance.backgroundScale === 'number' ? appearance.backgroundScale : 1;
   const bgX = typeof appearance.backgroundX === 'number' ? appearance.backgroundX : 0.5;
   const bgY = typeof appearance.backgroundY === 'number' ? appearance.backgroundY : 0.5;
-  const selectedPart = initialSelectedPart(parts);
+  const selectedPartRaw = initialSelectedPart(parts);
+  const selectedPart = (!closeVisible && selectedPartRaw === 'close') ? 'root' : selectedPartRaw;
   const selectedPaint = selectedPart === 'root' ? {} : (parts[selectedPart] || {});
   const selectedDefaults = PART_PAINT_DEFAULTS[selectedPart] || PART_PAINT_DEFAULTS.title;
   const visibleFill = resolveSsrPaintColor(selectedPaint.fill, glossary, selectedDefaults.fill);
@@ -453,6 +520,9 @@ function appearanceSection(props, appearance, skin, assetOptions, parts = {}, gl
   const visiblePartOpacity = typeof selectedPaint.opacity === 'number' ? selectedPaint.opacity : 1;
   const backgroundOn = typeof selectedPaint.background === 'string' && selectedPaint.background.length > 0;
   const visiblePartBgAsset = selectedPaint.backgroundAssetId ?? '';
+  const rootAssetId = skin.background?.assetId ?? appearance.backgroundAssetId ?? '';
+  const rootAssetOptions = assetOptionList(assets, rootAssetId);
+  const partAssetOptions = assetOptionList(assets, visiblePartBgAsset);
   const visibleFontFamily = selectedPaint.fontAssetId
     ? ('font:' + selectedPaint.fontAssetId)
     : (fontFamilies[selectedPaint.fontFamily] ? selectedPaint.fontFamily : 'yahei');
@@ -462,9 +532,7 @@ function appearanceSection(props, appearance, skin, assetOptions, parts = {}, gl
   const underlineOn = textPartSelected && selectedPaint.fontUnderline === true;
   const strikeOn = textPartSelected && selectedPaint.fontStrike === true;
   const textStrokeOn = textPartSelected && selectedPaint.textStroke === true;
-  const visibleTextStrokeColor = typeof selectedPaint.textStrokeColor === 'string' && /^#[0-9a-fA-F]{6}$/.test(selectedPaint.textStrokeColor)
-    ? selectedPaint.textStrokeColor
-    : '#0a0d0d';
+  const visibleTextStrokeColor = resolveSsrPaintColor(selectedPaint.textStrokeColor, glossary, '#0a0d0d');
   const textStrokeRainbowOn = textStrokeOn && selectedPaint.textStrokePaint === 'rainbow';
   const visibleTextStrokeWidth = Number.isInteger(selectedPaint.textStrokeWidth) ? selectedPaint.textStrokeWidth : 2;
   const borderPaintOn = appearance.borderPaint === 'gradient';
@@ -474,12 +542,12 @@ function appearanceSection(props, appearance, skin, assetOptions, parts = {}, gl
     ? selectedPaint.closeIconColor
     : '#d1e0e0';
   return '<details class="fold panel is-quiet" id="appearance-section" open aria-label="卡面">'
-    + '<summary>卡面 <small>根或一件零件</small></summary><div class="fold-body"><p class="group-hint">没选中孩子就是在编根。点标题、正文、关闭、图标或助手名，只出那一件的位置、文字、背景和描边。</p>'
+    + '<summary>卡面 <small>根或一件零件</small></summary><div class="fold-body"><p class="group-hint">没选中孩子就是在编根。点标题、正文、图标或助手名，只出那一件。关闭只在堆叠且用关闭按钮时出现。</p>'
     + '<div class="field"><span class="label">零件</span><div class="chip-row" id="part-chip-row">'
     + partChip('root', '根', selectedPart)
     + partChip('title', '标题', selectedPart, titleOff)
     + partChip('body', '正文', selectedPart, bodyOff)
-    + partChip('close', '关闭', selectedPart)
+    + partChip('close', '关闭', selectedPart, false, !closeVisible)
     + partChip('icon', '图标', selectedPart, iconOff)
     + partChip('assistantName', '助手名', selectedPart, nameOff)
     + '</div></div>'
@@ -494,7 +562,7 @@ function appearanceSection(props, appearance, skin, assetOptions, parts = {}, gl
     + '<div class="field"><label for="prop-border-color">描边颜色</label><input id="prop-border-color" type="color" value="' + escapeHtml(borderColor) + '"></div>'
     + '<div class="field span-2"><span class="label">描边</span><div class="chip-row"><button type="button" class="chip' + (borderPaintOn ? ' is-on' : '') + '" id="prop-border-paint" aria-pressed="' + (borderPaintOn ? 'true' : 'false') + '">彩色描边</button></div></div>'
     + fieldNumber('绘制溢出（0–240）', 'prop-paint-overflow', paintOverflow, 0, 240)
-    + '<div class="field span-2" id="bg-asset-field"><span class="label">底图</span><select id="skin-bg-asset" aria-label="底图"><option value="">没有图 · 纯色</option>' + assetOptions + '</select><div class="chip-row"><button type="button" id="bg-adjust-open" class="chip">调整底图</button></div><p class="field-note">没选图就是纯色。选了图再调整大小和位置。素材从顶栏素材库进。</p></div>'
+    + '<div class="field span-2" id="bg-asset-field"><span class="label">底图</span><select id="skin-bg-asset" aria-label="底图">' + rootAssetOptions + '</select><div class="chip-row"><button type="button" id="bg-adjust-open" class="chip">调整底图</button></div><p class="field-note">没选图就是纯色。选了图再调整大小和位置。素材从顶栏素材库进。</p></div>'
     + '<div class="field span-2" id="glossary-block"><span class="label">词表</span><p class="field-note" id="glossary-empty">没有词表。零件自己调色。</p><div id="glossary-rows"></div><button type="button" id="glossary-add" class="chip">加一个名字</button></div>'
     + '</div>'
     + '<div id="part-fields"' + (selectedPart === 'root' ? ' hidden' : '') + '>'
@@ -507,7 +575,7 @@ function appearanceSection(props, appearance, skin, assetOptions, parts = {}, gl
     + '<button type="button" class="chip' + (iconSource === 'assistant' ? ' is-on' : '') + '" id="part-icon-source-assistant" aria-pressed="' + (iconSource === 'assistant' ? 'true' : 'false') + '">助手头像</button>'
     + '<button type="button" class="chip' + (iconSource === 'custom' ? ' is-on' : '') + '" id="part-icon-source-custom" aria-pressed="' + (iconSource === 'custom' ? 'true' : 'false') + '">自定义</button>'
     + '</div><p class="field-note" id="part-icon-assistant-note">真通知跟人走。预览用样例助手。</p></div>'
-    + '<div class="field span-2" id="part-icon-custom-field"' + (iconSource === 'custom' ? '' : ' hidden') + '><span class="label">自定义图</span><select id="part-icon-asset" aria-label="自定义图"><option value="">没有图 · 纯色</option>' + assetOptions + '</select><div class="chip-row"><button type="button" id="icon-asset-import" class="chip">导入</button><button type="button" id="icon-asset-library" class="chip">素材库</button></div></div>'
+    + '<div class="field span-2" id="part-icon-custom-field"' + (iconSource === 'custom' ? '' : ' hidden') + '><span class="label">自定义图</span><select id="part-icon-asset" aria-label="自定义图">' + assetOptionList(assets, iconAssetId) + '</select><div class="chip-row"><button type="button" id="icon-asset-import" class="chip">导入</button><button type="button" id="icon-asset-library" class="chip">素材库</button></div></div>'
     + '<div class="field span-2"><div class="chip-row"><button type="button" id="icon-adjust-open" class="chip">调整底图</button></div><p class="field-note">图标也能调大小和位置，跟根的底图同一套。</p></div>'
     + '</div>'
     + '<div class="field span-2" id="studio-sample-field"' + ((selectedPart === 'assistantName' || (selectedPart === 'icon' && iconSource === 'assistant')) ? '' : ' hidden') + '><label for="studio-sample-agent">样例助手</label><select id="studio-sample-agent"><option value="">没有样例</option>' + sampleAgentOptions + '</select><p class="field-note">样例只用来预览 Hanako、butter、ming 三张默认脸。真通知跟人走，任何助手都能出图标，不写进配置包。</p></div>'
@@ -519,6 +587,13 @@ function appearanceSection(props, appearance, skin, assetOptions, parts = {}, gl
     + fieldNumber('区域高（1–1080）', 'part-paint-h', visibleH, 1, 1080)
     + fieldNumber('区域圆角（0–240）', 'part-paint-radius', visibleRadius, 0, 240)
     + '</div></div>'
+    + '<div class="field span-2" id="part-content-source-row"' + ((selectedPart === 'title' || selectedPart === 'body') ? '' : ' hidden') + '><span class="label">内容源</span><div class="chip-row">'
+    + '<button type="button" class="chip' + ((selectedPart === 'title' || selectedPart === 'body') && selectedPaint.contentSource !== 'custom' ? ' is-on' : '') + '" id="part-content-source-event" aria-pressed="' + ((selectedPart === 'title' || selectedPart === 'body') && selectedPaint.contentSource !== 'custom' ? 'true' : 'false') + '">跟事件</button>'
+    + '<button type="button" class="chip' + (selectedPaint.contentSource === 'custom' ? ' is-on' : '') + '" id="part-content-source-custom" aria-pressed="' + (selectedPaint.contentSource === 'custom' ? 'true' : 'false') + '">自定义</button>'
+    + '</div><p class="field-note">只改字。事件来了照飞，不会一直挂着。</p></div>'
+    + '<div class="field span-2" id="part-custom-text-field" data-title-max="' + TITLE_CUSTOM_TEXT_MAX + '" data-body-max="' + BODY_CUSTOM_TEXT_MAX + '"' + (selectedPaint.contentSource === 'custom' && (selectedPart === 'title' || selectedPart === 'body') ? '' : ' hidden') + '><label for="part-custom-text">自定义文字</label>'
+    + '<textarea id="part-custom-text" rows="' + (selectedPart === 'body' ? '6' : '3') + '" maxlength="' + partCustomTextMax(selectedPart === 'body' ? 'body' : 'title') + '">' + escapeHtml(typeof selectedPaint.customText === 'string' ? selectedPaint.customText : '') + '</textarea>'
+    + '<p class="field-note" id="part-custom-text-count">' + (typeof selectedPaint.customText === 'string' ? selectedPaint.customText.length : 0) + ' / ' + partCustomTextMax(selectedPart === 'body' ? 'body' : 'title') + '</p></div>'
     + '<div class="paint-group" id="part-text-group"' + (textPartSelected ? '' : ' hidden') + '><p class="paint-kicker">文字</p><p class="field-note">字保持实色，不跟背景一起变淡。</p><div id="part-text-fields" class="fields">'
     + '<div class="field"><label for="part-paint-fill">文字</label><input id="part-paint-fill" type="color"' + (rainbowOn ? ' disabled' : '') + ' value="' + escapeHtml(visibleFill) + '"><div class="chip-row" id="part-fill-names" hidden></div></div>'
     + fieldNumber('字号（8–72）', 'part-paint-font-size', visibleFontSize, 8, 72)
@@ -534,7 +609,7 @@ function appearanceSection(props, appearance, skin, assetOptions, parts = {}, gl
     + '<button type="button" class="chip' + (textStrokeOn ? ' is-on' : '') + '" id="part-paint-text-stroke" aria-pressed="' + (textStrokeOn ? 'true' : 'false') + '">字描边</button>'
     + '<button type="button" class="chip' + (textStrokeRainbowOn ? ' is-on' : '') + '" id="part-paint-text-stroke-rainbow" aria-pressed="' + (textStrokeRainbowOn ? 'true' : 'false') + '"' + (textStrokeOn ? '' : ' hidden') + '>彩色描边</button>'
     + '</div></div>'
-    + '<div class="field" id="part-text-stroke-color-field"' + (textStrokeOn && !textStrokeRainbowOn ? '' : ' hidden') + '><label for="part-paint-text-stroke-color">字描边颜色</label><input id="part-paint-text-stroke-color" type="color" value="' + escapeHtml(visibleTextStrokeColor) + '"></div>'
+    + '<div class="field" id="part-text-stroke-color-field"' + (textStrokeOn && !textStrokeRainbowOn ? '' : ' hidden') + '><label for="part-paint-text-stroke-color">字描边颜色</label><input id="part-paint-text-stroke-color" type="color" value="' + escapeHtml(visibleTextStrokeColor) + '"><div class="chip-row" id="part-text-stroke-names" hidden></div></div>'
     + '<div class="field" id="part-text-stroke-width-field"' + (textStrokeOn ? '' : ' hidden') + '><label for="part-paint-text-stroke-width">字描边厚度（1–16）</label><input id="part-paint-text-stroke-width" type="number" min="1" max="16" step="1" value="' + visibleTextStrokeWidth + '"></div>'
     + '</div></div>'
     + '<div class="paint-group" id="part-bg-group"><p class="paint-kicker">背景</p><p class="field-note" id="part-bg-note">' + (textPartSelected ? '垫在字下面，让字能看清。没有就不画。' : '这块零件的底。关闭和图标默认用自己的底色。') + '</p><div class="fields">'
@@ -542,7 +617,7 @@ function appearanceSection(props, appearance, skin, assetOptions, parts = {}, gl
     + '<div class="field" id="part-background-color-field"' + (textPartSelected && !backgroundOn ? ' hidden' : '') + '><label for="part-paint-background">背景</label><input id="part-paint-background" type="color" value="' + escapeHtml(visibleBackground) + '"><div class="chip-row" id="part-background-names" hidden></div></div>'
     + '<div class="field" id="part-fill-as-bg-field"' + (textPartSelected ? ' hidden' : '') + '><label for="part-paint-fill-box">背景</label><input id="part-paint-fill-box" type="color" value="' + escapeHtml(visibleFill) + '"></div>'
     + fieldNumber('背景透明度（0–1）', 'part-paint-opacity', visiblePartOpacity, 0, 1, 0.01)
-    + '<div class="field span-2" id="part-bg-asset-field"' + (selectedPart === 'icon' ? ' hidden' : '') + '><span class="label">底图</span><select id="part-paint-bg-asset" aria-label="零件底图"><option value="">没有图 · 纯色</option>' + assetOptions + '</select><div class="chip-row"><button type="button" id="part-bg-adjust-open" class="chip">调整底图</button></div></div>'
+    + '<div class="field span-2" id="part-bg-asset-field"' + (selectedPart === 'icon' ? ' hidden' : '') + '><span class="label">底图</span><select id="part-paint-bg-asset" aria-label="零件底图">' + partAssetOptions + '</select><div class="chip-row"><button type="button" id="part-bg-adjust-open" class="chip">调整底图</button></div></div>'
     + '</div></div>'
     + '<div class="paint-group" id="part-stroke-group"><p class="paint-kicker">描边</p><div class="fields">'
     + fieldNumber('描边宽度（0–32）', 'part-paint-stroke-width', visibleStrokeWidth, 0, 32)
@@ -583,21 +658,44 @@ function saveProfileSection(profiles) {
     ? '<div class="profile-list">' + list.map(function (p) {
         var refs = p.references && p.references.length ? '<span class="profile-refs">' + escapeHtml(p.references.length + ' 个事件') + '</span>' : '<span class="profile-refs muted">未使用</span>';
         var canDelete = p.profileId !== 'visual.default';
-        var action = '<button type="button" class="secondary profile-export" data-profile-id="' + escapeHtml(p.profileId) + '" data-profile-name="' + escapeHtml(p.name) + '">导出</button>' + (canDelete ? '<button type="button" class="secondary profile-delete" data-profile-id="' + escapeHtml(p.profileId) + '">删除</button>' : '');
+        var action = '<button type="button" class="secondary profile-rename" data-profile-id="' + escapeHtml(p.profileId) + '" data-profile-name="' + escapeHtml(p.name) + '">重命名</button><button type="button" class="secondary profile-export" data-profile-id="' + escapeHtml(p.profileId) + '" data-profile-name="' + escapeHtml(p.name) + '">导出</button>' + (canDelete ? '<button type="button" class="secondary profile-delete" data-profile-id="' + escapeHtml(p.profileId) + '">删除</button>' : '');
         return '<div class="profile-list-item" data-profile-id="' + escapeHtml(p.profileId) + '"><span class="profile-list-name">' + escapeHtml(p.name) + '</span><span class="profile-list-meta">' + refs + '<span class="profile-source">' + escapeHtml(p.source === 'local' ? '本地' : p.source === 'import' ? '导入' : '内置') + '</span>' + action + '</span></div>';
       }).join('') + '</div>'
     : '<div class="profile-list-empty">暂无已保存的配置包</div>';
   return '<div class="fold-body">'
-    + '<p class="muted">把当前这组样子存成一份，以后可以换用。这里不是保存整页设置。</p>'
+    + '<p class="muted">把当前这组样子存成一份，以后可以换用。配置包只带样子和事件绑定，不带素材文件。导出全部打成一个文件，导入一份就能进来多份。</p>'
     + '<div class="row"><div class="field" style="flex:1;min-width:180px"><label for="visual-profile-name">名称</label>'
     + '<input id="visual-profile-name" type="text" value="" maxlength="80" placeholder="给这套样子起个中文名"></div>'
     + '<button id="visual-profile-save" class="secondary" type="button">保存为配置包</button></div>'
+    + '<div class="row">'
+    + '<button id="visual-profile-import" class="secondary" type="button">导入配置包</button>'
+    + '<button id="visual-profile-export-all" class="secondary" type="button">导出全部</button></div>'
+    + '<input id="visual-package-file" type="file" accept=".nhvisual,.zip,application/zip" hidden>'
     + '<div id="visual-feedback" class="feedback"></div>'
     + '<div id="visual-conflict-dialog" class="conflict-dialog" style="display:none"><div class="conflict-dialog-body">'
     + '<p>配置包 <strong id="visual-conflict-name"></strong> 已存在。请选择操作：</p>'
     + '<div class="conflict-actions"><button id="visual-conflict-overwrite" class="danger" type="button">覆盖</button>'
     + '<button id="visual-conflict-copy" class="secondary" type="button">创建副本</button>'
     + '<button id="visual-conflict-keep" class="secondary" type="button">保留 · 放弃</button></div></div></div>'
+    + '<div id="visual-missing-asset-dialog" class="conflict-dialog" style="display:none"><div class="conflict-dialog-body">'
+    + '<p id="visual-missing-copy">配置包用到的底图在素材库里找不到。缺的是：</p>'
+    + '<ul id="visual-missing-asset-list" class="delete-event-list"></ul>'
+    + '<div class="conflict-actions"><button id="visual-missing-clear" class="secondary" type="button">无底图导入</button>'
+    + '<button id="visual-missing-cancel" class="secondary" type="button">取消</button></div></div></div>'
+    + '<div id="visual-import-dialog" class="conflict-dialog" style="display:none"><div class="conflict-dialog-body">'
+    + '<p>配置包 <strong id="visual-import-name"></strong></p>'
+    + '<p id="visual-import-conflict" hidden>本地已有同名配置包。覆盖会换成包里的样子；保留则本地样子不动。</p>'
+    + '<p id="visual-import-default-guard" hidden>默认视觉方案不可覆盖，只能保留或取消。</p>'
+    + '<label class="sync-events"><input id="visual-import-sync-events" type="checkbox" checked> 同步事件应用</label>'
+    + '<div class="conflict-actions"><button id="visual-import-overwrite" class="danger" type="button">覆盖</button>'
+    + '<button id="visual-import-keep" class="secondary" type="button">保留</button>'
+    + '<button id="visual-import-commit" type="button">导入</button>'
+    + '<button id="visual-import-cancel" class="secondary" type="button">取消</button></div></div></div>'
+    + '<div id="visual-rename-dialog" class="conflict-dialog" style="display:none"><div class="conflict-dialog-body">'
+    + '<p>重命名配置包。只改显示名，不改编号。</p>'
+    + '<div class="field"><label for="visual-rename-input">名称</label><input id="visual-rename-input" type="text" maxlength="80"></div>'
+    + '<div class="conflict-actions"><button id="visual-rename-confirm" type="button">确定</button>'
+    + '<button id="visual-rename-cancel" class="secondary" type="button">取消</button></div></div></div>'
     + '<div id="visual-delete-dialog" class="conflict-dialog" style="display:none"><div class="conflict-dialog-body">'
     + '<p>删除配置包 <strong id="visual-delete-name"></strong> 后，下列已绑定事件会解除绑定，改走默认视觉档。后果不可从这条撤销。</p>'
     + '<ul id="visual-delete-events" class="delete-event-list"></ul>'
@@ -672,18 +770,15 @@ function renderBody(currentUrl, initialData) {
   const globalEnabled = global.enabled !== false;
   const globalDefaultMode = global.defaultMode || 'off';
   const initial = JSON.stringify(boot).replaceAll('<', '\\u003c');
-  const backgroundAssetId = activeConfig.skin?.background?.assetId ?? appearance.backgroundAssetId;
-  const assetOptions = boot.assets.map((asset) => `<option value="${escapeHtml(asset.assetId)}"${backgroundAssetId === asset.assetId ? ' selected' : ''}>${escapeHtml(asset.name)} · ${escapeHtml(String(asset.format).toUpperCase())}</option>`).join('');
-
   const behaviorOptions = BEHAVIOR_AXIS_OPTIONS.map((option) => '<option value="' + escapeHtml(option.value) + '"' + (option.value === behaviorId ? ' selected' : '') + (option.implemented ? '' : ' disabled') + '>' + escapeHtml(option.value) + '</option>').join('');
-  const closeVisible = props.dismissMode !== 'anywhere';
+  const closeVisible = closePartVisible(behaviorId, props.dismissMode);
   return '<div class="studio" data-settings-view-root="visual" data-mode="' + escapeHtml(behaviorId) + '" data-editor-mode="' + escapeHtml(activeType) + '" data-close="' + (closeVisible ? 'on' : 'off') + '">' 
     + '<header class="hero"><div><h1>通知视觉</h1><p>先定通道（全池一份法律），再定这张卡怎么走、活多久。换飞法只换这两组。</p></div>'
     + '<div class="hero-side"><div class="hero-actions"><button id="visual-try-one" class="secondary" type="button">试一条</button>'
-    + '<button id="open-visual-preview" class="secondary" type="button">打开实时预览</button>'
+    + '<button id="visual-clear-cards" class="secondary" type="button">清除屏幕上的视觉卡</button>'
     + '<button id="visual-settings-save" class="primary" type="button">保存</button></div>'
     + '<div class="hero-actions hero-library"><button id="open-visual-assets" class="secondary" type="button">素材库</button>'
-    + '<button id="visual-clear-cards" class="secondary" type="button">清除屏幕上的视觉卡</button></div>'
+    + '<button id="open-visual-preview" class="secondary" type="button">打开实时预览</button></div>'
     + '<div class="hero-preview-status"><span id="visual-preview-state" class="state-pill">等待更新</span>'
     + '<span id="visual-preview-confirmation" class="visual-preview-confirmation" role="status" aria-live="polite">尚未收到后端确认。</span>'
     + '<span id="visual-preview-toast" class="toast" role="status"></span></div></div></header>'
@@ -696,7 +791,7 @@ function renderBody(currentUrl, initialData) {
     + '<option value="stack"' + (globalDefaultMode === 'stack' || globalDefaultMode === 'minimal' ? ' selected' : '') + '>全部堆叠</option>'
     + '<option value="ticker"' + (globalDefaultMode === 'ticker' ? ' selected' : '') + '>全部弹幕</option></select></label>'
     + '<div id="visual-page-status" class="state-pill">' + escapeHtml(boot.status === 'applied' ? '已应用' : '已读取') + '</div></div>'
-    + '<p class="visual-global-hint" id="visual-default-mode-hint">没单独绑定的事件走这里；总开关仍最高。关闭总开关后，真实事件不出桌面卡，试一条和实时预览仍可用。</p></div>'
+    + '<p class="visual-global-hint" id="visual-default-mode-hint">没单独绑定的事件走这里；总开关仍最高。关闭总开关后，真实事件、试一条和实时预览都不会出桌面卡。</p></div>'
     + '<div id="visual-settings-feedback" class="feedback" role="status" aria-live="polite"></div>'
     + '<select id="pipeline-behavior" class="mode-contract-select" aria-label="飞法" tabindex="-1" aria-hidden="true">' + behaviorOptions + '</select>'
     + '<select id="pipeline-type" class="mode-contract-select" aria-label="卡片种类" tabindex="-1" aria-hidden="true">' + typeSelect(activeType) + '</select>'
@@ -704,7 +799,7 @@ function renderBody(currentUrl, initialData) {
     + '<div class="studio-main">'
     + stackSection(props, behaviorId)
     + tickerSection(profile.ticker ?? {}, behaviorId, props.hoverHighlight)
-    + appearanceSection(props, appearance, activeConfig.skin ?? {}, assetOptions, activeConfig.parts ?? {}, activeConfig.glossary ?? {}, boot.fonts ?? [], boot.studioAgents ?? [])
+    + appearanceSection(props, appearance, activeConfig.skin ?? {}, boot.assets ?? [], activeConfig.parts ?? {}, activeConfig.glossary ?? {}, boot.fonts ?? [], boot.studioAgents ?? [], closeVisible)
     + '</div>'
     + '<div class="studio-secondary">'
     + '<details class="fold panel"><summary>配置包 <small>存一份、换一份</small></summary>' + saveProfileSection(boot.profiles) + '</details>'
@@ -755,14 +850,18 @@ const CSS_PART_EXTRAS = '.paint-group{display:grid;gap:8px;padding:14px 0 4px;bo
   + '.stack-wrap .chip-row{flex-wrap:wrap}'
   + '.stack-life{display:grid;gap:12px;align-content:start}'
   + '.stack-life .label,.stack-life label{white-space:nowrap}'
-  + '.stack-life-row{display:grid;grid-template-columns:minmax(88px,.8fr) minmax(0,1fr);gap:12px 16px;align-items:end}'
+  + '.stack-life-row{display:grid;grid-template-columns:minmax(88px,.7fr) minmax(0,1fr) minmax(0,1fr);gap:12px 16px;align-items:end}'
   + '.stack-life .field-note{margin:0}'
+  + '.studio[data-close=off] #part-chip-row [data-part=close]{display:none}'
   + '.diag-toolbar{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:12px;position:sticky;top:0;z-index:2;padding:8px 0 12px;background:var(--surface);border-bottom:1px solid var(--line)}'
   + '.diag-toolbar .row{margin:0}'
   + '.diag-actions{justify-content:flex-end}'
   + '@media(max-width:1100px){.stack-layout{grid-template-columns:168px 168px minmax(0,1fr)}.stack-life{grid-column:1/-1}.stack-life-row{max-width:420px}}'
   + '@media(max-width:720px){.stack-layout{grid-template-columns:1fr 1fr}.stack-wrap{grid-column:1/-1}.stack-layout .dock,.stack-layout .grow{max-width:none}}'
-  + '@media(max-width:560px){.stack-layout{grid-template-columns:1fr}.stack-life-row{grid-template-columns:1fr}.diag-toolbar,.diag-actions{flex-direction:column;align-items:stretch}.diag-actions .secondary{width:100%}}';
+  + '@media(max-width:560px){.stack-layout{grid-template-columns:1fr}.stack-life-row{grid-template-columns:1fr}.diag-toolbar,.diag-actions{flex-direction:column;align-items:stretch}.diag-actions .secondary{width:100%}}'
+  + '.field textarea{width:100%;min-height:72px;padding:8px 10px;border:1px solid var(--line);border-radius:6px;background:var(--raised);color:var(--text);resize:vertical;line-height:1.45}'
+  + '.field.is-accent label,.field.is-accent .label{color:var(--accent)}'
+  + '.field.is-accent input[type=number]{border-color:var(--accent)}';
 export function renderVisualSettingsPage(currentUrl = '', initialData = null) {
   return '<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Notification Hub 通知视觉</title><style>'
     + PAGE_NAVIGATION_STYLE
@@ -813,6 +912,7 @@ export default function registerVisualSettingsRoute(app, ctx) {
   // Visual profile endpoints (forwarded to settings.js API)
   app.get('/visual-profiles', (c) => { try { const plugin = getPlugin(); if (!plugin?.listVisualProfiles) return c.json({ ok: false, error: { code: 'VISUAL_PROFILE_API_UNAVAILABLE', message: '视觉方案 API 暂不可用。' } }, 503); return c.json({ ok: true, profiles: plugin.listVisualProfiles() }); } catch (error) { return c.json({ ok: false, error: errorPayload(error) }, 500); } });
   app.post('/visual-profiles/save', async (c) => { try { const plugin = getPlugin(); if (!plugin?.saveVisualProfile) return c.json({ ok: false, error: { code: 'VISUAL_PROFILE_API_UNAVAILABLE', message: '视觉方案 API 暂不可用。' } }, 503); return c.json({ ok: true, profile: plugin.saveVisualProfile(await readJsonBody(c)) }); } catch (error) { return c.json({ ok: false, error: errorPayload(error) }, 400); } });
+  app.post('/visual-profiles/rename', async (c) => { try { const plugin = getPlugin(); if (!plugin?.renameVisualProfile) return c.json({ ok: false, error: { code: 'VISUAL_PROFILE_API_UNAVAILABLE', message: '视觉方案 API 暂不可用。' } }, 503); return c.json({ ok: true, profile: plugin.renameVisualProfile(await readJsonBody(c)) }); } catch (error) { return c.json({ ok: false, error: errorPayload(error) }, error?.code === 'VISUAL_PROFILE_REGISTRY_NOT_FOUND' ? 404 : 400); } });
   app.delete('/visual-profiles/:profileId', (c) => { try { const plugin = getPlugin(); if (!plugin?.removeVisualProfile) return c.json({ ok: false, error: { code: 'VISUAL_PROFILE_API_UNAVAILABLE', message: '视觉方案 API 暂不可用。' } }, 503); return c.json({ ok: true, ...plugin.removeVisualProfile(c.req.param('profileId')) }); } catch (error) { return c.json({ ok: false, error: errorPayload(error) }, error?.code === 'VISUAL_PROFILE_REGISTRY_IN_USE' ? 409 : error?.code === 'VISUAL_PROFILE_REGISTRY_NOT_FOUND' ? 404 : 400); } });
   app.post('/visual-profiles/preview-apply', async (c) => { try { const plugin = getPlugin(); if (!plugin?.previewApplyVisualProfile) return c.json({ ok: false, error: { code: 'VISUAL_PROFILE_API_UNAVAILABLE', message: '视觉方案 API 暂不可用。' } }, 503); return c.json({ ok: true, preview: plugin.previewApplyVisualProfile(await readJsonBody(c)) }); } catch (error) { return c.json({ ok: false, error: errorPayload(error) }, 400); } });
   app.post('/visual-profiles/apply', async (c) => { try { const plugin = getPlugin(); if (!plugin?.applyVisualProfileToEvents) return c.json({ ok: false, error: { code: 'VISUAL_PROFILE_API_UNAVAILABLE', message: '视觉方案 API 暂不可用。' } }, 503); return c.json({ ok: true, result: plugin.applyVisualProfileToEvents(await readJsonBody(c)) }); } catch (error) { return c.json({ ok: false, error: errorPayload(error) }, 400); } });

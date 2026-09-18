@@ -6,6 +6,7 @@ import {
   createStackCharter,
   createTickerCharter,
   createTickerMotion,
+  migrateStackCharterFromSpace,
   resolveFlightId,
   splitLegacyTicker,
   stripCharterFromExport,
@@ -18,13 +19,36 @@ test('resolveFlightId aliases danmaku to ticker and defaults stack', () => {
   assert.throws(() => resolveFlightId('orbit'), (error) => error.code === 'FLIGHT_ID_INVALID' && error.details.field === 'flight');
 });
 
-test('stack charter only accepts snap settle', () => {
-  assert.equal(createStackCharter().settle, 'snap');
-  assert.throws(() => createStackCharter({ settle: 'follow' }), (error) => (
+test('stack charter accepts snap and follow, defaults follow', () => {
+  assert.equal(createStackCharter().settle, 'follow');
+  assert.equal(createStackCharter({ settle: 'snap' }).settle, 'snap');
+  assert.equal(createStackCharter({ settle: 'follow' }).settle, 'follow');
+  assert.throws(() => createStackCharter({ settle: 'spring' }), (error) => (
     error.code === 'CHARTER_SETTLE_UNSUPPORTED'
-    && error.details.expected === 'snap'
-    && error.details.actual === 'follow'
+    && error.details.expected === 'snap|follow'
+    && error.details.actual === 'spring'
   ));
+});
+
+test('migrateStackCharterFromSpace copies settle', () => {
+  assert.equal(migrateStackCharterFromSpace({ anchor: 'bottom-right', settle: 'snap' }).settle, 'snap');
+  assert.equal(migrateStackCharterFromSpace({}).settle, 'follow');
+});
+
+test('stack charter accepts dock and next, defaults dock', () => {
+  assert.equal(createStackCharter().newest, 'dock');
+  assert.equal(createStackCharter({ newest: 'dock' }).newest, 'dock');
+  assert.equal(createStackCharter({ newest: 'next' }).newest, 'next');
+  assert.throws(() => createStackCharter({ newest: 'orbit' }), (error) => (
+    error.code === 'CHARTER_NEWEST_UNSUPPORTED'
+    && error.details.expected === 'dock|next'
+    && error.details.actual === 'orbit'
+  ));
+});
+
+test('migrateStackCharterFromSpace copies newest', () => {
+  assert.equal(migrateStackCharterFromSpace({ newest: 'next' }).newest, 'next');
+  assert.equal(migrateStackCharterFromSpace({}).newest, 'dock');
 });
 
 test('ticker charter rejects motion fields', () => {
@@ -65,7 +89,7 @@ test('createFlightChannels migrates from a mixed profile once', () => {
   });
   assert.equal(channels.stack.anchor, 'top-left');
   assert.equal(channels.stack.gap, 12);
-  assert.equal(channels.stack.settle, 'snap');
+  assert.equal(channels.stack.settle, 'follow');
   assert.equal(channels.ticker.band, 'bottom');
   assert.equal(channels.ticker.minGapPx, 40);
   assert.equal('direction' in channels.ticker, false);

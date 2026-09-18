@@ -102,6 +102,7 @@ struct VisualStyle {
     bool ticker_hover_pause{};
     std::string ticker_overflow{"avoid"};
     std::string ticker_direction{"left"};
+    bool hold_drag{true};
 };
 
 inline bool valid_visual_style(const VisualStyle& style) {

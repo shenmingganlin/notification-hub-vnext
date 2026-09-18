@@ -30,6 +30,20 @@ test('plugin saves the editable visual draft as an exportable profile and replac
   assert.equal(plugin.visualProfileRegistry.get('visual.workbench').profile.global.preset, 'accent');
 });
 
+test('plugin rename changes display name only and rejects duplicates', () => {
+  const plugin = new NotificationHubVNextPlugin(context());
+  plugin.saveVisualProfile({ profileId: 'visual.workbench', name: '工作台方案', profile: { global: { enabled: true } } });
+  plugin.saveVisualProfile({ profileId: 'visual.other', name: '另一份', profile: {} });
+  const renamed = plugin.renameVisualProfile({ profileId: 'visual.workbench', name: '晨间样子' });
+  assert.equal(renamed.profileId, 'visual.workbench');
+  assert.equal(renamed.name, '晨间样子');
+  assert.equal(plugin.visualProfileRegistry.get('visual.workbench').profile.global.enabled, true);
+  const defaultRenamed = plugin.renameVisualProfile({ profileId: 'visual.default', name: '我的默认' });
+  assert.equal(defaultRenamed.profileId, 'visual.default');
+  assert.equal(defaultRenamed.name, '我的默认');
+  assert.throws(() => plugin.renameVisualProfile({ profileId: 'visual.workbench', name: '另一份' }), (error) => error.code === 'VISUAL_PROFILE_NAME_DUPLICATE');
+});
+
 test('plugin removes an unreferenced visual profile but protects the default profile', () => {
   const plugin = new NotificationHubVNextPlugin(context());
   plugin.saveVisualProfile({ profileId: 'visual.delete-me', name: '删除我', profile: {} });
@@ -132,6 +146,32 @@ test('workbench card follows the draft behavior instead of hardcoded stack', asy
   assert.equal(create.behavior.behaviorChannelId, 'visual.event.ticker');
   assert.equal(create.visual.ticker.trackCount, 3);
   assert.equal(create.visual.ticker.trackGapPx, 8);
+});
+
+test('workbench card keeps custom title and body', async () => {
+  const plugin = new NotificationHubVNextPlugin(context());
+  const calls = [];
+  plugin.runtimeHost = {
+    state: 'running',
+    client: {
+      async request(type, payload) {
+        calls.push([type, payload]);
+        if (type === 'health') return { payload: { result: { workArea: { left: 0, top: 0, width: 1920, height: 1080 }, layout: { direction: 'right', anchor: 'bottom-left', spacing: 12 } } } };
+        return { payload: { result: { status: 'accepted' } } };
+      }
+    }
+  };
+  await plugin.openVisualWorkbenchCard({
+    phase: 'hold',
+    draft: {
+      global: { enabled: true },
+      card: { activeType: 'minimal', types: { minimal: { parts: { title: { contentSource: 'custom', customText: '写死标题' }, body: { contentSource: 'custom', customText: '写死正文' } } } } }
+    }
+  });
+  const create = calls.find(([type]) => type === 'scene.create')[1];
+  assert.equal(create.title, '写死标题');
+  assert.equal(create.body, '写死正文');
+  assert.doesNotMatch(create.title, /视觉实验台/);
 });
 
 test('clearVisualStudioCards dismisses studio cards without touching notification history', async () => {
@@ -438,6 +478,25 @@ test('visual draft sample uses the current draft without event binding', async (
   assert.doesNotMatch(create.title, /chat\.assistant_reply/);
 });
 
+test('visual draft sample keeps custom title and body', async () => {
+  const plugin = new NotificationHubVNextPlugin(context());
+  const calls = [];
+  plugin.runtimeHost = { state: 'running', client: { async request(type, payload) { calls.push([type, payload]); if (type === 'health') return { payload: { result: { workArea: { left: 0, top: 0, width: 1920, height: 1080 }, layout: { direction: 'right', anchor: 'bottom-left', spacing: 12 } } } }; return { payload: { result: { status: 'accepted' } } }; } } };
+  const result = await plugin.runVisualDraftSample({
+    draft: {
+      global: { enabled: true },
+      behaviorId: 'ticker',
+      ticker: { speedPxPerSec: 520, band: 'bottom', bandRatio: 0.4, trackCount: 3, minGapPx: 48 },
+      card: { activeType: 'minimal', types: { minimal: { parts: { title: { contentSource: 'custom', customText: '写死标题' }, body: { contentSource: 'custom', customText: '写死正文' } } } } }
+    }
+  });
+  assert.equal(result.generated, 1);
+  const create = calls.find(([type]) => type === 'scene.create')[1];
+  assert.equal(create.title, '写死标题');
+  assert.equal(create.body, '写死正文');
+  assert.doesNotMatch(create.title, /试一条/);
+});
+
 test('visual draft sample keeps stack off the ticker channel and size', async () => {
   const plugin = new NotificationHubVNextPlugin(context());
   const calls = [];
@@ -457,6 +516,69 @@ test('visual draft sample keeps stack off the ticker channel and size', async ()
   assert.equal('ticker' in create.visual, false);
   assert.equal(create.width, 420);
   assert.equal(create.height, 220);
+});
+
+test('stack try-one evicts oldest stack card on overflow and reports a Chinese hint', async () => {
+  const plugin = new NotificationHubVNextPlugin(context());
+  const calls = [];
+  let creates = 0;
+  const oldest = { id: 'nh-visual-try-old', behavior: { behaviorProfileId: 'stack' } };
+  const preview = { id: 'nh-visual-preview-keep', behavior: { behaviorProfileId: 'stack' } };
+  const ticker = { id: 'nh-visual-try-fly', behavior: { behaviorProfileId: 'ticker' } };
+  plugin.runtimeHost = {
+    state: 'running',
+    client: {
+      async request(type, payload) {
+        calls.push([type, payload]);
+        if (type === 'health') {
+          return { payload: { result: { workArea: { left: 0, top: 0, width: 800, height: 400 }, layout: { direction: 'down', anchor: 'bottom-right', spacing: 8, wrap: 'off' }, sceneCards: [oldest, preview, ticker] } } };
+        }
+        if (type === 'scene.create') {
+          creates += 1;
+          if (creates === 1) {
+            throw Object.assign(new Error('Stack cards exceed the work area extent'), { code: 'LAYOUT_BEHAVIOR_CHANNEL_OUT_OF_BOUNDS' });
+          }
+          return { payload: { result: { status: 'accepted' } } };
+        }
+        return { payload: { result: { status: 'accepted' } } };
+      }
+    }
+  };
+  const result = await plugin.runVisualDraftSample({
+    draft: {
+      global: { enabled: true },
+      behaviorId: 'stack',
+      card: { activeType: 'minimal', types: { minimal: { properties: { space: { wrap: 'off', anchor: 'bottom-right' } } } } }
+    }
+  });
+  assert.equal(result.generated, 1);
+  assert.equal(result.evictedCount, 1);
+  assert.deepEqual(result.evicted, ['nh-visual-try-old']);
+  assert.equal(result.overflowHint, '满了掀走 1 张旧卡');
+  assert.deepEqual(calls.filter(([type]) => type === 'scene.dismiss').map(([, payload]) => payload.id), ['nh-visual-try-old']);
+  assert.equal(creates, 2);
+});
+
+test('stack try-one maps leftover overflow to Chinese when nothing can be evicted', async () => {
+  const plugin = new NotificationHubVNextPlugin(context());
+  plugin.runtimeHost = {
+    state: 'running',
+    client: {
+      async request(type) {
+        if (type === 'health') {
+          return { payload: { result: { workArea: { left: 0, top: 0, width: 200, height: 80 }, layout: { wrap: 'off' }, sceneCards: [{ id: 'nh-visual-preview-keep', behavior: { behaviorProfileId: 'stack' } }, { id: 'nh-visual-try-fly', behavior: { behaviorProfileId: 'ticker' } }] } } };
+        }
+        if (type === 'scene.create') {
+          throw Object.assign(new Error('Stack cards exceed the work area extent'), { code: 'LAYOUT_BEHAVIOR_CHANNEL_OUT_OF_BOUNDS' });
+        }
+        return { payload: { result: { status: 'accepted' } } };
+      }
+    }
+  };
+  await assert.rejects(
+    () => plugin.runVisualDraftSample({ draft: { global: { enabled: true }, behaviorId: 'stack' } }),
+    (error) => error.code === 'LAYOUT_BEHAVIOR_CHANNEL_OUT_OF_BOUNDS' && error.message === '堆叠已经满了，这张卡放不下。'
+  );
 });
 
 test('visual draft sample rolls ticker speed when speedRandom is on', async () => {
@@ -492,6 +614,27 @@ test('visual event experiment uses the bound profile without notification histor
   assert.equal(plugin.notificationStore.size, 0);
   assert.equal(calls.filter(([type]) => type === 'scene.create').length, 2);
   assert.equal(calls.find(([type]) => type === 'scene.create')[1].visual.preset, 'accent');
+});
+
+test('visual event experiment keeps custom title and body', async () => {
+  const plugin = new NotificationHubVNextPlugin(context());
+  plugin.saveVisualProfile({
+    profileId: 'visual.bound',
+    name: 'Bound',
+    profile: {
+      global: { enabled: true, preset: 'accent' },
+      card: { activeType: 'minimal', types: { minimal: { parts: { title: { contentSource: 'custom', customText: '写死标题' }, body: { contentSource: 'custom', customText: '写死正文' } } } } }
+    }
+  });
+  plugin.applyVisualProfileToEvents({ profileId: 'visual.bound', eventIds: ['tool.execution.succeeded'] });
+  const calls = [];
+  plugin.runtimeHost = { state: 'running', client: { async request(type, payload) { calls.push([type, payload]); if (type === 'health') return { payload: { result: { workArea: { left: 0, top: 0, width: 1920, height: 1080 }, layout: { direction: 'right', anchor: 'bottom-left', spacing: 12 } } } }; return { payload: { result: { status: 'accepted' } } }; } } };
+  const result = await plugin.runVisualEventExperiment({ eventId: 'tool.execution.succeeded', count: 1, intervalMs: 0 });
+  assert.equal(result.generated, 1);
+  const create = calls.find(([type]) => type === 'scene.create')[1];
+  assert.equal(create.title, '写死标题');
+  assert.equal(create.body, '写死正文');
+  assert.doesNotMatch(create.title, /视觉实验台/);
 });
 
 test('overwriting a bound profile updates event experiment close mode without re-applying', async () => {
@@ -789,6 +932,26 @@ test('global visual switch blocks bound real cards', async () => {
   assert.equal(calls.filter(([type]) => type === 'scene.create').length, 0);
 });
 
+test('global visual switch blocks try-one and live preview cards', async () => {
+  const plugin = new NotificationHubVNextPlugin(context());
+  const { calls, host } = fakeRuntime();
+  plugin.runtimeHost = host;
+  const draft = {
+    global: { enabled: false },
+    behaviorId: 'stack',
+    card: { activeType: 'minimal', types: { minimal: { appearance: { opacity: 0.4, backgroundColor: '#123456' } } } }
+  };
+  await assert.rejects(
+    () => plugin.runVisualDraftSample({ draft }),
+    (error) => error.code === 'VISUAL_GLOBAL_DISABLED'
+  );
+  await assert.rejects(
+    () => plugin.openVisualPreviewCard({ draft }),
+    (error) => error.code === 'VISUAL_GLOBAL_DISABLED'
+  );
+  assert.equal(calls.filter(([type]) => type === 'scene.create').length, 0);
+});
+
 test('removing an in-use visual profile unbinds events first', () => {
   const plugin = new NotificationHubVNextPlugin(context());
   plugin.saveVisualProfile({ profileId: 'visual.in-use', name: '占用', profile: { behaviorId: 'stack' } });
@@ -927,7 +1090,7 @@ test('stack try-one and preview send set-mode before create; ticker try-one send
       card: { activeType: 'minimal', types: { minimal: { properties: { space: { anchor: 'top-left', gap: 16 } } } } }
     }
   });
-  assertStackSetModeBeforeCreate(tryCalls, { anchor: 'top-left', direction: 'up', spacing: 16, marginLeft: 18, marginRight: 0, marginTop: 18, marginBottom: 0 });
+  assertStackSetModeBeforeCreate(tryCalls, { anchor: 'top-left', direction: 'up', spacing: 16, marginLeft: 18, marginRight: 18, marginTop: 18, marginBottom: 18 });
 
   tryCalls.length = 0;
   await plugin.runVisualDraftSample({
@@ -949,5 +1112,38 @@ test('stack try-one and preview send set-mode before create; ticker try-one send
   const previewCalls = [];
   plugin.runtimeHost = previewRuntime(previewCalls);
   await plugin.openVisualPreviewCard({ draft: stackPreviewDraft('bottom-right') });
-  assertStackSetModeBeforeCreate(previewCalls, { anchor: 'bottom-right', direction: 'down', spacing: 8, marginLeft: 0, marginRight: 24, marginTop: 0, marginBottom: 24 });
+  assertStackSetModeBeforeCreate(previewCalls, { anchor: 'bottom-right', direction: 'down', spacing: 8, marginLeft: 24, marginRight: 24, marginTop: 24, marginBottom: 24 });
+});
+
+test('plugin saveVisualProfile drops leftover part backgrounds without asking', () => {
+  const plugin = new NotificationHubVNextPlugin(context());
+  const ghost = 'visual-asset-01185ffe-c345-4985-80e8-8142ce1544a3';
+  const saved = plugin.saveVisualProfile({
+    profileId: 'visual.no-art',
+    name: '无底图',
+    profile: {
+      card: {
+        types: {
+          minimal: {
+            appearance: { backgroundColor: '#5e5161' },
+            parts: {
+              title: { fill: '#ffffff', backgroundAssetId: ghost },
+              close: { fill: '#1d2b27', backgroundAssetId: ghost }
+            }
+          }
+        }
+      }
+    }
+  });
+  assert.equal(saved.profile.card.types.minimal.parts.title.fill, '#ffffff');
+  assert.equal(saved.profile.card.types.minimal.parts.title.backgroundAssetId ?? null, null);
+  assert.equal(saved.profile.card.types.minimal.parts.close.backgroundAssetId ?? null, null);
+});
+
+test('plugin saveVisualProfile drops missing fonts without asking', () => {
+  const plugin = new NotificationHubVNextPlugin(context());
+  const profile = { card: { types: { minimal: { parts: { title: { fill: '#f2fff9', fontAssetId: 'ghost-font' } } } } } };
+  const saved = plugin.saveVisualProfile({ profileId: 'visual.missing-font', name: '缺字体', profile });
+  assert.equal(saved.profile.card.types.minimal.parts.title.fill, '#f2fff9');
+  assert.equal(saved.profile.card.types.minimal.parts.title.fontAssetId ?? null, null);
 });

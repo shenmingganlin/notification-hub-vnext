@@ -4,6 +4,7 @@
 #include "renderer.hpp"
 #include "visual.hpp"
 
+#include <cstdint>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -24,6 +25,8 @@ struct WindowConfig {
     std::wstring assistant_name{};
 };
 
+std::uint64_t scene_window_paint_count() noexcept;
+
 class SceneWindow {
 public:
     explicit SceneWindow(WindowConfig config = {});
@@ -33,6 +36,7 @@ public:
     SceneWindow& operator=(const SceneWindow&) = delete;
 
     bool create();
+    const std::string& create_error() const noexcept { return create_error_; }
     bool show();
     void request_close(std::string_view reason = "programmatic-close");
     void mark_close_requested(std::string_view reason);
@@ -100,6 +104,7 @@ private:
     int drag_window_start_y_{};
     CardRenderer renderer_;
     std::wstring class_name_{L"NotificationHubVNextSceneWindow"};
+    std::string create_error_;
 };
 
 }  // namespace notification_hub::scene

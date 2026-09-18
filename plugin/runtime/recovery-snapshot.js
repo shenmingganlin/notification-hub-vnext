@@ -102,11 +102,18 @@ function validateSceneModePayload(payload) {
       throw recoveryError('RUNTIME_RECOVERY_INVALID_PAYLOAD', 'scene.set-mode requires a valid stack or shelf layout payload');
     }
   }
-  if ('settle' in payload && payload.settle !== 'snap') {
-    throw recoveryError('CHARTER_SETTLE_UNSUPPORTED', 'stack settle must be snap', {
+  if ('settle' in payload && payload.settle !== 'snap' && payload.settle !== 'follow') {
+    throw recoveryError('CHARTER_SETTLE_UNSUPPORTED', 'stack settle must be snap or follow', {
       field: 'settle',
-      expected: 'snap',
+      expected: 'snap|follow',
       actual: payload.settle
+    });
+  }
+  if ('newest' in payload && payload.newest !== 'dock' && payload.newest !== 'next') {
+    throw recoveryError('CHARTER_NEWEST_UNSUPPORTED', 'stack newest must be dock or next', {
+      field: 'newest',
+      expected: 'dock|next',
+      actual: payload.newest
     });
   }
   return payload;

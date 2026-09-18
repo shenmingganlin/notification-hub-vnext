@@ -1,12 +1,51 @@
 # 当前状态快照（2026-08-15，Windows）
 
+## 2026-09-17 自定义文字
+
+当前入口：`docs/superpowers/plans/2026-09-17-content-source.md`。产品仍 **0.1.8**。
+
+标题/正文零件有内容源：跟事件或自定义写死。只改字，事件照飞，不一直挂着。助手名不接。Native 不感知来源，Plugin 发卡时替换 title/body。试一条、实验台、实时预览都尊重写死字。试包 `dist/notification-hub-vnext-0.1.8-content.zip` SHA256 `7A3FB7EF6491F659D650183110CAA1C2E81289A48DF135164C2AB607481872F8`（3958700 字节）。钉死包与 overlay / follow / newest / coil / hover 历史试包哈希未变。须整包重装，不热换。本刀 JS-only，不 MSBuild。
+
+## 2026-09-17 幕布悬停
+
+入口：`docs/superpowers/plans/2026-09-17-overlay-hover.md`。产品仍 **0.1.8**。
+
+悬停加亮（卡片皮）与悬停暂停（这张卡弹幕动态）两颗独立，默关，可同时开。点穿开着两颗锁定。试包 `dist/notification-hub-vnext-0.1.8-hover.zip` SHA256 `DCD480E3931079902DA1777AE9323D3732F8997E09C3AB45278EC2269871A980`（3957205 字节）。钉死包与 overlay / follow / newest / coil 历史试包哈希未变。须整包重装，不热换。用户验收「非常完美」。
+
+## 2026-09-17 弹幕幕布 overlay
+
+入口：`docs/superpowers/plans/2026-09-17-ticker-overlay.md`。ADR-004 Accepted，落点 ADR-010。产品仍 **0.1.8**。
+
+弹幕一座池一块幕布。位移走 DirectComposition 精灵偏移，卡面只在内容变时画。堆叠仍一卡一窗。默认带宽不改。follow / newest / coil / overlay 历史试包不准覆盖。
+
+**已升钉死：** `dist/notification-hub-vnext-0.1.8.zip` SHA256 `CA8484EC76A32751CB4698A2F09CB7F7AB0FAF4BD0F93689B5BE32508E851B21`（3954931 字节），内容与 overlay 验收包相同。USER 命中区是卡面并集（`SetWindowRgn`）；点穿开再加 `WS_EX_TRANSPARENT`。下一刀试包打 `dist/notification-hub-vnext-0.1.8-hover.zip`，不覆盖钉死包。
+
+## 2026-09-17 堆叠走线回字 coil
+
+当前入口：`docs/superpowers/plans/2026-09-17-stack-wrap-coil.md`。ADR-009。产品仍 **0.1.8**。
+
+`wrap: coil`，用户词回字。占角/新位独立。关开新列时走线芯片禁用。钉死包、follow 试包、newest 试包不准覆盖；试包 `dist/notification-hub-vnext-0.1.8-coil.zip`。
+
+## 2026-09-17 堆叠新位 newest
+
+当前入口：`docs/superpowers/plans/2026-09-17-stack-newest.md`。ADR-008。产品仍 **0.1.8**。
+
+`newest: dock | next`，默认占角。用户词占角 / 新位。走线不再偷改新位。钉死包 `dist/notification-hub-vnext-0.1.8.zip` 不准覆盖；follow 试包也不覆盖；试包 `dist/notification-hub-vnext-0.1.8-newest.zip`。
+
+## 2026-09-17 堆叠落点 follow
+
+当前入口：`docs/superpowers/plans/2026-09-17-stack-settle-follow.md`。ADR-007。产品仍 **0.1.8**。
+
+`settle: follow | snap`，默认跟随。旧管道缺字段 Native 仍 snap。追槽是临界阻尼 PD（无 I），header-only `runtime/scene/follow.hpp`。工作室通道芯片「跟随 / 瞬移」。钉死包 `dist/notification-hub-vnext-0.1.8.zip` 不准覆盖；试包 `dist/notification-hub-vnext-0.1.8-follow.zip`。
+
 ## 2026-09-17 0.1.8 钉死
 
 VERSION / manifest / plugin version 已升 **0.1.8**。分支仍是 `reform/0.1.8-lexicon`；0.1.7 回滚点 `f389d29`。
 
-堆叠规约插座：`StackCharter.settle` 仅 `snap`。`follow` 在 JS charter、恢复快照、Native `scene.set-mode` 均拒绝，错误码 `CHARTER_SETTLE_UNSUPPORTED`。不写 PID 控制器。下发卡永远带 `settle: "snap"`。
-词表残留已登记：`docs/superpowers/lexicon-alias-inventory.md`。协议旧键、scene-state `behaviorChannels`、`VISUAL_BEHAVIOR_*` 别名留下。
-皮肤/裁切不做。下一刀：堆叠 PID（`settle: follow`）。
+钉死 zip 已换成 overlay 验收包：`dist/notification-hub-vnext-0.1.8.zip` SHA256 `CA8484EC76A32751CB4698A2F09CB7F7AB0FAF4BD0F93689B5BE32508E851B21`。含词表、follow / newest / coil、幕布合成器与点穿。
+
+堆叠规约 `settle` 见 ADR-007（不再仅 snap）。词表残留已登记：`docs/superpowers/lexicon-alias-inventory.md`。协议旧键、scene-state `behaviorChannels`、`VISUAL_BEHAVIOR_*` 别名留下。
+皮肤/裁切不做。
 
 ## 2026-09-16 词表 + 通道规约（0.1.8）
 

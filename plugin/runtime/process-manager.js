@@ -12,15 +12,36 @@ function processError(code, message, details = {}) {
 export function sceneStateFingerprint(snapshot) {
   if (snapshot === null || typeof snapshot !== 'object') return null;
   try {
-    return JSON.stringify(snapshot, (key, value) => (key === 'updatedAt' ? undefined : value));
+    return JSON.stringify(snapshot, (key, value) => {
+      if (key === 'updatedAt') return undefined;
+      if (value && typeof value === 'object' && !Array.isArray(value)) {
+        const profile = value.behavior?.behaviorProfileId;
+        if (profile === 'ticker' || profile === 'danmaku') {
+          const { x, y, ...rest } = value;
+          return rest;
+        }
+      }
+      return value;
+    });
   } catch {
     return null;
   }
 }
 
-export function sceneStateSyncDelayMs({ intervalMs, cardCount } = {}) {
+export function snapshotNeedsPositionRecovery(snapshot) {
+  const cards = snapshot?.cards;
+  if (!Array.isArray(cards) || cards.length === 0) return false;
+  return cards.some((card) => {
+    const profile = card?.behavior?.behaviorProfileId;
+    return profile !== 'ticker' && profile !== 'danmaku';
+  });
+}
+
+export function sceneStateSyncDelayMs({ intervalMs, cardCount, needsPositionRecovery } = {}) {
   if (!Number.isFinite(intervalMs) || intervalMs <= 0) return intervalMs;
-  if (cardCount === 0 && intervalMs >= 500) return Math.max(intervalMs, 2000);
+  if (intervalMs >= 500 && (cardCount === 0 || needsPositionRecovery === false)) {
+    return Math.max(intervalMs, 2000);
+  }
   return intervalMs;
 }
 
@@ -100,6 +121,7 @@ export class RuntimeProcessManager extends EventEmitter {
     this.lastSceneStateFingerprint = null;
     this.lastSceneStateSyncAt = 0;
     this.lastObservedCardCount = 0;
+    this.lastObservedNeedsPositionRecovery = false;
     this.recoveryInProgress = false;
     this.recoveryAttempts = new Map();
     this.recoveryReplay = new RecoveryReplayCoordinator({
@@ -433,7 +455,8 @@ export class RuntimeProcessManager extends EventEmitter {
       const now = Date.now();
       const delayMs = sceneStateSyncDelayMs({
         intervalMs: this.sceneStateSyncIntervalMs,
-        cardCount: this.lastObservedCardCount
+        cardCount: this.lastObservedCardCount,
+        needsPositionRecovery: this.lastObservedNeedsPositionRecovery
       });
       if (this.lastSceneStateSyncAt > 0 && now - this.lastSceneStateSyncAt < delayMs) return;
       this.sceneStateSyncInFlight = true;
@@ -454,6 +477,7 @@ export class RuntimeProcessManager extends EventEmitter {
           return;
         }
         this.lastObservedCardCount = Array.isArray(snapshot.cards) ? snapshot.cards.length : 0;
+        this.lastObservedNeedsPositionRecovery = snapshotNeedsPositionRecovery(snapshot);
         const observed = this.observeSceneStateSnapshot(snapshot, { updateRecovery: true });
         if (observed) {
           this.emit('scene.changed', {
@@ -500,6 +524,10 @@ export class RuntimeProcessManager extends EventEmitter {
 
   observeSceneStateSnapshot(snapshot, { updateRecovery = false } = {}) {
     if (this.intentionalStop) return null;
+    if (Array.isArray(snapshot?.cards)) {
+      this.lastObservedCardCount = snapshot.cards.length;
+      this.lastObservedNeedsPositionRecovery = snapshotNeedsPositionRecovery(snapshot);
+    }
     const fingerprint = sceneStateFingerprint(snapshot);
     if (fingerprint !== null && fingerprint === this.lastSceneStateFingerprint) return null;
     if (updateRecovery) {

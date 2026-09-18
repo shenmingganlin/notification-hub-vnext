@@ -142,10 +142,11 @@ function validateNativeVisual(visual) {
       || interaction.timeoutMs < 1000
       || interaction.timeoutMs > 120000
       || ('hoverHighlight' in interaction && interaction.hoverHighlight !== true)
-      || ('autoDismiss' in interaction && interaction.autoDismiss !== true)) {
+      || ('autoDismiss' in interaction && interaction.autoDismiss !== true)
+      || ('holdDrag' in interaction && interaction.holdDrag !== false)) {
       throw sceneStateError('RUNTIME_SCENE_STATE_CARD_INVALID', 'SceneState card visual interaction is invalid');
     }
-    assertExactFields(interaction, new Set(['dismissMode', 'closeButtonPosition', 'timeoutMs', 'hoverHighlight', 'autoDismiss']), 'SceneState card visual interaction', 'RUNTIME_SCENE_STATE_CARD_INVALID');
+    assertExactFields(interaction, new Set(['dismissMode', 'closeButtonPosition', 'timeoutMs', 'hoverHighlight', 'autoDismiss', 'holdDrag']), 'SceneState card visual interaction', 'RUNTIME_SCENE_STATE_CARD_INVALID');
   }
   const appearance = visual.appearance;
   if (!isRecord(appearance)

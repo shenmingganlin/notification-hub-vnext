@@ -75,8 +75,23 @@ test('stack layout wrap off stays on one strip and rejects overflow instead of o
   }), (error) => error.code === 'VISUAL_BEHAVIOR_LAYOUT_FAILED' && error.lexiconCode === 'FLIGHT_LAYOUT_FAILED');
 });
 
+test('stack layout newest next keeps old card on the corner', () => {
+  const layout = createStackLayout({ anchor: 'bottom-right', spacing: 0, margin: 0, grow: 'up', wrap: 'off', newest: 'next' });
+  const result = layout({
+    workArea: { left: 0, top: 0, width: 200, height: 80 },
+    cards: [
+      { cardId: 'old', width: 80, height: 40 },
+      { cardId: 'new', width: 80, height: 40 }
+    ]
+  });
+  assert.deepEqual(result.map(({ cardId, x, y }) => ({ cardId, x, y })), [
+    { cardId: 'old', x: 120, y: 40 },
+    { cardId: 'new', x: 120, y: 0 }
+  ]);
+});
+
 test('snake layout fills oldest-first then reverses the next run', () => {
-  const layout = createStackLayout({ anchor: 'top-left', spacing: 0, margin: 0, grow: 'right', wrap: 'snake' });
+  const layout = createStackLayout({ anchor: 'top-left', spacing: 0, margin: 0, grow: 'right', wrap: 'snake', newest: 'next' });
   const ids = ['1', '2', '3', '4', '5', '6', '7', '8'];
   const result = layout({
     workArea: { left: 0, top: 0, width: 320, height: 80 },
@@ -95,7 +110,7 @@ test('snake layout fills oldest-first then reverses the next run', () => {
 });
 
 test('snake layout leaves the hole on the reverse-run start after dropping the oldest', () => {
-  const layout = createStackLayout({ anchor: 'top-left', spacing: 0, margin: 0, grow: 'right', wrap: 'snake' });
+  const layout = createStackLayout({ anchor: 'top-left', spacing: 0, margin: 0, grow: 'right', wrap: 'snake', newest: 'next' });
   const result = layout({
     workArea: { left: 0, top: 0, width: 320, height: 80 },
     cards: ['2', '3', '4', '5', '6', '7', '8'].map((cardId) => ({ cardId, width: 80, height: 40 }))
@@ -112,7 +127,7 @@ test('snake layout leaves the hole on the reverse-run start after dropping the o
 });
 
 test('snake layout packs mixed sizes tightly and starts the reverse run from the far edge', () => {
-  const layout = createStackLayout({ anchor: 'top-left', spacing: 0, margin: 0, grow: 'right', wrap: 'snake' });
+  const layout = createStackLayout({ anchor: 'top-left', spacing: 0, margin: 0, grow: 'right', wrap: 'snake', newest: 'next' });
   const result = layout({
     workArea: { left: 0, top: 0, width: 200, height: 80 },
     cards: [
@@ -192,4 +207,82 @@ test('channel runtime emits lifecycle events and reflows after close/reclaim', (
   assert.equal(events.find((event) => event.type === 'card.closing').reason, 'user-dismissed');
   assert.equal(events[0].channelId, 'stack.main');
   assert.ok(events.every((event) => Object.isFrozen(event)));
+});
+
+test('coil wrap fills inward from top-left growing down', () => {
+  const layout = createStackLayout({
+    anchor: 'top-left', spacing: 0, margin: 0, grow: 'down', wrap: 'coil', newest: 'next'
+  });
+  const cards = [];
+  for (let i = 1; i <= 16; i += 1) cards.push({ cardId: String(i), width: 50, height: 50 });
+  const result = layout({ workArea: { left: 0, top: 0, width: 200, height: 200 }, cards });
+  const xy = Object.fromEntries(result.map((card) => [card.cardId, { x: card.x, y: card.y }]));
+  assert.deepEqual(xy['1'], { x: 0, y: 0 });
+  assert.deepEqual(xy['4'], { x: 0, y: 150 });
+  assert.deepEqual(xy['7'], { x: 150, y: 150 });
+  assert.deepEqual(xy['10'], { x: 150, y: 0 });
+  assert.deepEqual(xy['12'], { x: 50, y: 0 });
+  assert.deepEqual(xy['16'], { x: 100, y: 50 });
+});
+
+test('coil wrap dock keeps newest on the corner', () => {
+  const layout = createStackLayout({
+    anchor: 'top-left', spacing: 0, margin: 0, grow: 'down', wrap: 'coil', newest: 'dock'
+  });
+  const result = layout({
+    workArea: { left: 0, top: 0, width: 200, height: 200 },
+    cards: [
+      { cardId: 'old', width: 50, height: 50 },
+      { cardId: 'new', width: 50, height: 50 }
+    ]
+  });
+  const byId = Object.fromEntries(result.map((card) => [card.cardId, card]));
+  assert.equal(byId.new.x, 0);
+  assert.equal(byId.new.y, 0);
+  assert.equal(byId.old.x, 0);
+  assert.equal(byId.old.y, 50);
+});
+
+test('coil wrap uses the thickest card on a side and leaves a hole', () => {
+  const layout = createStackLayout({
+    anchor: 'top-left', spacing: 0, margin: 0, grow: 'down', wrap: 'coil', newest: 'next'
+  });
+  const result = layout({
+    workArea: { left: 0, top: 0, width: 120, height: 100 },
+    cards: [
+      { cardId: 'a', width: 40, height: 40 },
+      { cardId: 'b', width: 60, height: 40 },
+      { cardId: 'c', width: 40, height: 40 }
+    ]
+  });
+  const byId = Object.fromEntries(result.map((card) => [card.cardId, card]));
+  assert.equal(byId.a.x, 0);
+  assert.equal(byId.a.y, 0);
+  assert.equal(byId.b.x, 0);
+  assert.equal(byId.b.y, 40);
+  assert.equal(byId.c.x, 60);
+  assert.equal(byId.c.y, 60);
+});
+
+test('coil wrap stays on the first side when cards fit and rejects a full ring overflow', () => {
+  const layout = createStackLayout({
+    anchor: 'top-left', spacing: 0, margin: 0, grow: 'down', wrap: 'coil', newest: 'next'
+  });
+  const two = layout({
+    workArea: { left: 0, top: 0, width: 200, height: 200 },
+    cards: [
+      { cardId: 'a', width: 50, height: 50 },
+      { cardId: 'b', width: 50, height: 50 }
+    ]
+  });
+  assert.deepEqual(two.map(({ cardId, x, y }) => ({ cardId, x, y })), [
+    { cardId: 'a', x: 0, y: 0 },
+    { cardId: 'b', x: 0, y: 50 }
+  ]);
+  const cards = [];
+  for (let i = 1; i <= 17; i += 1) cards.push({ cardId: String(i), width: 50, height: 50 });
+  assert.throws(() => layout({
+    workArea: { left: 0, top: 0, width: 200, height: 200 },
+    cards
+  }), (error) => error.code === 'VISUAL_BEHAVIOR_LAYOUT_FAILED' && error.lexiconCode === 'FLIGHT_LAYOUT_FAILED');
 });

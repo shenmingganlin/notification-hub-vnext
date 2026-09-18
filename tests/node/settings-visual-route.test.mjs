@@ -52,13 +52,17 @@ test('ticker behavior renders live parameter controls only when selected', () =>
   assert.match(html, /id="ticker-click-through"[^>]*aria-pressed="true"/);
   assert.match(html, /id="ticker-charter"[\s\S]*id="ticker-click-through"/);
   assert.match(html, /id="ticker-card"[\s\S]*id="ticker-hover-highlight"/);
+  assert.match(html, /id="ticker-card"[\s\S]*id="ticker-hover-pause"/);
   assert.match(html, /id="ticker-hover-highlight"[^>]*is-locked/);
   assert.match(html, /id="ticker-hover-highlight"[^>]*aria-disabled="true"/);
-  assert.match(html, /id="ticker-hover-highlight"[^>]*title="不挡点击开着时，弹幕吃不到鼠标，没法加亮。"/);
+  assert.match(html, /id="ticker-hover-pause"[^>]*is-locked/);
+  assert.match(html, /id="ticker-hover-pause"[^>]*aria-disabled="true"/);
+  assert.match(html, /id="ticker-hover-highlight"[^>]*title="不挡点击开着时，弹幕吃不到鼠标。"/);
+  assert.match(html, /id="ticker-hover-pause"[^>]*title="不挡点击开着时，弹幕吃不到鼠标。"/);
   assert.match(html, /id="ticker-hover-why"(?![^>]*hidden)/);
   assert.match(html, /data-axis="behavior" data-value="ticker"[^>]*aria-pressed="true"/);
   assert.match(html, /id="stack-section"[^>]*hidden/);
-  assert.doesNotMatch(html, /id="ticker-hover-pause"|id="ticker-overflow"/);
+  assert.doesNotMatch(html, /id="ticker-overflow"/);
 });
 
 test('ticker click-through off unlocks hover highlight', () => {
@@ -67,7 +71,7 @@ test('ticker click-through off unlocks hover highlight', () => {
       profile: {
         version: 2,
         behaviorId: 'ticker',
-        ticker: { speedPxPerSec: 400, band: 'top', bandRatio: 0.28, trackCount: 3, minGapPx: 64, clickThrough: false },
+        ticker: { speedPxPerSec: 400, band: 'top', bandRatio: 0.28, trackCount: 3, minGapPx: 64, clickThrough: false, hoverPause: true },
         global: { enabled: true },
         card: { activeType: 'minimal', types: { minimal: { properties: { interaction: { hoverHighlight: 'on' } } } } }
       }
@@ -77,7 +81,29 @@ test('ticker click-through off unlocks hover highlight', () => {
   assert.match(html, /id="ticker-hover-highlight"[^>]*aria-pressed="true"/);
   assert.match(html, /id="ticker-hover-highlight"[^>]*aria-disabled="false"/);
   assert.doesNotMatch(html, /id="ticker-hover-highlight"[^>]*is-locked/);
+  assert.match(html, /id="ticker-hover-pause"[^>]*aria-pressed="true"/);
+  assert.match(html, /id="ticker-hover-pause"[^>]*aria-disabled="false"/);
+  assert.doesNotMatch(html, /id="ticker-hover-pause"[^>]*is-locked/);
   assert.match(html, /id="ticker-hover-why"[^>]*hidden/);
+});
+
+test('close part chip only appears on stack with close button', () => {
+  const stackClose = renderVisualSettingsPage('/settings-visual', {
+    settings: { profile: { version: 2, behaviorId: 'stack', global: { enabled: true }, card: { activeType: 'minimal', types: { minimal: { properties: { interaction: { dismissMode: 'closeButton' } } } } } } }
+  });
+  assert.match(stackClose, /data-close="on"/);
+  assert.match(stackClose, /data-part="close"(?![^>]*hidden)/);
+  const ticker = renderVisualSettingsPage('/settings-visual', {
+    settings: { profile: { version: 2, behaviorId: 'ticker', ticker: { speedPxPerSec: 400, band: 'top', trackCount: 3, minGapPx: 64 }, global: { enabled: true }, card: { activeType: 'minimal', types: { minimal: { properties: { interaction: { dismissMode: 'closeButton' } }, parts: { close: { fill: '#1d2b27' } } } } } } }
+  });
+  assert.match(ticker, /data-close="off"/);
+  assert.match(ticker, /data-part="close"[^>]*hidden/);
+  assert.doesNotMatch(ticker, /id="part-selected"[^>]*value="close"/);
+  const anywhere = renderVisualSettingsPage('/settings-visual', {
+    settings: { profile: { version: 2, behaviorId: 'stack', global: { enabled: true }, card: { activeType: 'minimal', types: { minimal: { properties: { interaction: { dismissMode: 'anywhere' } } } } } } }
+  });
+  assert.match(anywhere, /data-close="off"/);
+  assert.match(anywhere, /data-part="close"[^>]*hidden/);
 });
 
 test('visual settings collect emits ticker speedRandom from the random button', () => {
@@ -166,6 +192,8 @@ test('visual settings page renders card studio layout', () => {
   assert.match(html, /圆角（0–480）/);
   assert.match(html, /id="prop-hover-highlight"/);
   assert.match(html, /悬停加亮/);
+  assert.match(html, /id="prop-hold-drag"/);
+  assert.match(html, /按住拖动/);
   assert.match(html, /id="part-chip-row"/);
   assert.match(html, /data-part="root"/);
   assert.match(html, /data-part="title"/);
@@ -284,7 +312,9 @@ test('visual settings page renders card studio layout', () => {
   assert.doesNotMatch(html, /id="ticker-band-ratio"[^>]*type="range"/);
   assert.match(html, /id="ticker-track-count"/);
   assert.match(html, /id="ticker-min-gap"/);
-  assert.doesNotMatch(html, /id="ticker-hover-pause"|id="ticker-overflow"/);
+  assert.doesNotMatch(html, /id="ticker-overflow"/);
+  assert.match(html, /id="ticker-section"[^>]*hidden[\s\S]*id="ticker-hover-pause"/);
+  assert.doesNotMatch(html, /id="stack-card"[\s\S]{0,800}id="ticker-hover-pause"/);
   assert.doesNotMatch(html, /起步预设|卡片外观编辑器|VISUAL WORKBENCH|stack\.main|Native preview/);
   assert.match(html, /id="stack-section"(?![^>]*hidden)/);
   assert.match(html, /class="stack-layout"/);
@@ -338,12 +368,15 @@ test('visual studio keeps preview in document flow and contract fields', () => {
   assert.match(html, /距右（≥0）/);
   assert.match(html, /距上（≥0）/);
   assert.match(html, /距下（≥0）/);
-  assert.match(html, /只改停靠那两面。另外两面灰色，不挤空间。/);
+  assert.match(html, /四面都挤工作区。强调色是停靠那两面。/);
+  assert.doesNotMatch(html, /只改停靠那两面。另外两面灰色，不挤空间。/);
   assert.doesNotMatch(html, /id="prop-margin-left"[^>]*max=/);
-  assert.match(html, /id="prop-margin-left"[^>]*disabled/);
-  assert.match(html, /id="prop-margin-top"[^>]*disabled/);
-  assert.doesNotMatch(html, /id="prop-margin-right"[^>]*disabled/);
-  assert.doesNotMatch(html, /id="prop-margin-bottom"[^>]*disabled/);
+  assert.doesNotMatch(html, /id="prop-margin-(?:left|right|top|bottom)"[^>]*disabled/);
+  assert.match(html, /class="field is-accent"><label for="prop-margin-right"/);
+  assert.match(html, /class="field is-accent"><label for="prop-margin-bottom"/);
+  assert.doesNotMatch(html, /class="field is-accent"><label for="prop-margin-left"/);
+  assert.doesNotMatch(html, /class="field is-accent"><label for="prop-margin-top"/);
+  assert.match(html, /\.field\.is-accent input\[type=number\]/);
   assert.match(html, /id="prop-opacity" type="number" min="0" max="1"/);
   assert.match(html, /背景透明度（0–1）/);
   assert.match(html, /id="part-paint-opacity"[^>]*min="0"/);
@@ -371,6 +404,17 @@ test('visual studio keeps preview in document flow and contract fields', () => {
   assert.match(html, /id="part-paint-fit-compensate"/);
   assert.match(html, />补偿</);
   assert.doesNotMatch(html, /@keyframes ticker-flow/);
+});
+
+test('top-left dock accents left and top margins without disabling the far sides', () => {
+  const html = renderVisualSettingsPage('/settings-visual', {
+    profile: { global: { enabled: true }, card: { activeType: 'minimal', types: { minimal: { properties: { space: { anchor: 'top-left' } } } } } }
+  });
+  assert.match(html, /class="field is-accent"><label for="prop-margin-left"/);
+  assert.match(html, /class="field is-accent"><label for="prop-margin-top"/);
+  assert.doesNotMatch(html, /class="field is-accent"><label for="prop-margin-right"/);
+  assert.doesNotMatch(html, /class="field is-accent"><label for="prop-margin-bottom"/);
+  assert.doesNotMatch(html, /id="prop-margin-(?:left|right|top|bottom)"[^>]*disabled/);
 });
 
 test('visual studio collect keeps fill opacity 0', () => {
@@ -448,6 +492,7 @@ test('visual settings collect emits nested card visual contract', () => {
   assert.equal(collect.card.types.minimal.appearance.paintOverflow, 12);
   assert.equal(collect.card.types.minimal.properties.shape.borderWidth, 2);
   assert.equal(collect.card.types.minimal.properties.interaction.hoverHighlight, 'on');
+  assert.equal(collect.card.types.minimal.properties.interaction.holdDrag, 'on');
   assert.equal(collect.card.types.minimal.skin.background.color, '#0e1916');
   assert.equal(collect.card.types.minimal.parts.title.textPaint, 'solid');
   assert.equal(collect.card.types.minimal.parts.body.textPaint, 'solid');
@@ -856,6 +901,34 @@ test('ticker direction chips and collect default left, recover right', () => {
   assert.equal(recovered.ticker.direction, 'right');
 });
 
+test('ticker collect keeps hover highlight and pause independent', () => {
+  const html = renderVisualSettingsPage('/settings-visual', { profile: { global: { enabled: true }, card: { activeType: 'minimal', types: { minimal: {} } } } });
+  const script = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map((match) => match[1]).find((value) => value.includes('function collect('));
+  const collectStart = script.indexOf('function collect(');
+  const collectEnd = script.indexOf('var previewOpen', collectStart);
+  const source = script.slice(collectStart, collectEnd);
+  const values = new Map([
+    ['global-visual-enabled', { checked: true, value: '' }], ['global-visual-default-mode', { value: 'off' }],
+    ['pipeline-behavior', { value: 'ticker' }], ['pipeline-type', { value: 'minimal' }],
+    ['prop-size', { value: 'medium' }], ['prop-anchor', { value: 'bottom-right' }], ['prop-gap', { value: '8' }],
+    ['skin-bg-color', { value: '#0e1916' }], ['prop-border-radius', { value: '16' }], ['prop-opacity', { value: '0.96' }],
+    ['prop-duration', { value: '30000' }], ['prop-hold-duration', { value: '30000' }], ['prop-dismiss-mode', { value: 'closeButton' }],
+    ['ticker-speed', { value: '400' }], ['ticker-band', { value: 'top' }], ['ticker-track-count', { value: '3' }], ['ticker-band-ratio', { value: '28' }], ['ticker-min-gap', { value: '64' }], ['ticker-track-gap', { value: '8' }],
+    ['ticker-click-through', { getAttribute: (name) => name === 'aria-pressed' ? 'false' : null }],
+    ['ticker-hover-highlight', { getAttribute: (name) => name === 'aria-pressed' ? 'true' : null }],
+    ['ticker-hover-pause', { getAttribute: (name) => name === 'aria-pressed' ? 'true' : null }],
+    ['prop-hover-highlight', { getAttribute: (name) => name === 'aria-pressed' ? 'true' : null }]
+  ]);
+  const collect = new Function('state', '$', `${source}; return collect();`)({ profile: {} }, (id) => values.get(id) ?? { value: '' });
+  assert.equal(collect.ticker.clickThrough, false);
+  assert.equal(collect.ticker.hoverPause, true);
+  assert.equal(collect.card.types.minimal.properties.interaction.hoverHighlight, 'on');
+  values.set('ticker-hover-pause', { getAttribute: (name) => name === 'aria-pressed' ? 'false' : null });
+  const pauseOff = new Function('state', '$', `${source}; return collect();`)({ profile: {} }, (id) => values.get(id) ?? { value: '' });
+  assert.equal(pauseOff.ticker.hoverPause, false);
+  assert.equal(pauseOff.card.types.minimal.properties.interaction.hoverHighlight, 'on');
+});
+
 test('ticker collect forces hover highlight off while click-through is on', () => {
   const html = renderVisualSettingsPage('/settings-visual', { profile: { global: { enabled: true }, card: { activeType: 'minimal', types: { minimal: {} } } } });
   const script = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map((match) => match[1]).find((value) => value.includes('function collect('));
@@ -871,12 +944,14 @@ test('ticker collect forces hover highlight off while click-through is on', () =
     ['ticker-speed', { value: '400' }], ['ticker-band', { value: 'top' }], ['ticker-track-count', { value: '3' }], ['ticker-band-ratio', { value: '28' }], ['ticker-min-gap', { value: '64' }], ['ticker-track-gap', { value: '8' }],
     ['ticker-click-through', { getAttribute: (name) => name === 'aria-pressed' ? 'true' : null }],
     ['ticker-hover-highlight', { getAttribute: (name) => name === 'aria-pressed' ? 'true' : null }],
+    ['ticker-hover-pause', { getAttribute: (name) => name === 'aria-pressed' ? 'true' : null }],
     ['prop-hover-highlight', { getAttribute: (name) => name === 'aria-pressed' ? 'true' : null }]
   ]);
   const collect = new Function('state', '$', `${source}; return collect();`)({ profile: {} }, (id) => values.get(id) ?? { value: '' });
   assert.equal(collect.behaviorId, 'ticker');
   assert.equal(collect.flight, 'ticker');
   assert.equal(collect.ticker.clickThrough, true);
+  assert.equal(collect.ticker.hoverPause, false);
   assert.equal(collect.card.types.minimal.properties.interaction.hoverHighlight, 'off');
   assert.equal(collect.card.types.minimal.effects.slots.enter.effectId, 'fade');
   assert.equal('size' in collect.card.types.minimal.properties, false);
@@ -981,9 +1056,24 @@ test('visual settings fragment passes studio structure', () => {
   assert.match(fragment, /data-grow="up"/);
   assert.match(fragment, /往哪长/);
   assert.match(fragment, /id="prop-wrap"/);
+  assert.match(fragment, /id="prop-settle-follow"/);
+  assert.match(fragment, /id="prop-settle-snap"/);
+  assert.match(fragment, /id="prop-newest-dock"/);
+  assert.match(fragment, /id="prop-newest-next"/);
+  assert.match(fragment, />占角</);
+  assert.match(fragment, />新位</);
+  assert.match(fragment, /占角=新卡占停靠角/);
+  assert.match(fragment, />跟随</);
+  assert.match(fragment, />瞬移</);
+  assert.match(fragment, /跟随=槽动了卡追过去/);
+  assert.match(fragment, /id="stack-section"[\s\S]*prop-newest-dock[\s\S]*prop-settle-follow[\s\S]*id="ticker-section"/);
+  assert.doesNotMatch(fragment, /id="ticker-section"[\s\S]*落点/);
+  assert.doesNotMatch(fragment, /id="ticker-section"[\s\S]*占角/);
   assert.match(fragment, /data-wrap-open="off"/);
   assert.match(fragment, /data-wrap-path="parallel"/);
   assert.match(fragment, /data-wrap-path="snake"/);
+  assert.match(fragment, /data-wrap-path="coil"/);
+  assert.match(fragment, />回字</);
   assert.match(fragment, /开新列/);
   assert.match(fragment, /走线/);
   assert.match(fragment, /满了沿另一边开列/);
@@ -995,6 +1085,54 @@ test('visual settings fragment passes studio structure', () => {
   assert.match(fragment, /已绑定事件试运行/);
   assert.doesNotMatch(fragment, /全部事件/);
   assert.doesNotMatch(fragment, /run-tests/);
+});
+
+test('visual settings collect writes stack newest and defaults dock', () => {
+  const html = renderVisualSettingsPage('/settings-visual', { profile: { global: { enabled: true }, card: { activeType: 'minimal', types: { minimal: {} } } } });
+  const script = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map((match) => match[1]).find((value) => value.includes('function collect('));
+  const collectStart = script.indexOf('function collect(');
+  const collectEnd = script.indexOf('var previewOpen', collectStart);
+  const source = script.slice(collectStart, collectEnd);
+  const values = new Map([
+    ['global-visual-enabled', { checked: true, value: '' }], ['global-visual-default-mode', { value: 'off' }],
+    ['pipeline-type', { value: 'minimal' }], ['pipeline-behavior', { value: 'stack' }]
+  ]);
+  const collectDock = new Function('state', '$', `${source}; return collect();`)({ profile: {} }, (id) => values.get(id) ?? { value: '' });
+  assert.equal(collectDock.card.types.minimal.properties.space.newest, 'dock');
+  values.set('prop-newest', { value: 'next' });
+  const collectNext = new Function('state', '$', `${source}; return collect();`)({ profile: {} }, (id) => values.get(id) ?? { value: '' });
+  assert.equal(collectNext.card.types.minimal.properties.space.newest, 'next');
+  values.set('prop-wrap', { value: 'coil' });
+  const collectCoil = new Function('state', '$', `${source}; return collect();`)({ profile: {} }, (id) => values.get(id) ?? { value: '' });
+  assert.equal(collectCoil.card.types.minimal.properties.space.wrap, 'coil');
+});
+
+test('visual settings wrap off disables coil chip', () => {
+  const fragment = renderVisualSettingsFragment('/settings-content?view=visual', {
+    profile: {
+      global: { enabled: true },
+      card: { activeType: 'minimal', types: { minimal: { properties: { space: { wrap: 'off' } } } } }
+    }
+  });
+  assert.match(fragment, /data-wrap-path="coil"[^>]*aria-disabled="true"/);
+  assert.match(fragment, /data-wrap-path="snake"[^>]*aria-disabled="true"/);
+});
+
+test('visual settings collect writes stack settle and defaults follow', () => {
+  const html = renderVisualSettingsPage('/settings-visual', { profile: { global: { enabled: true }, card: { activeType: 'minimal', types: { minimal: {} } } } });
+  const script = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map((match) => match[1]).find((value) => value.includes('function collect('));
+  const collectStart = script.indexOf('function collect(');
+  const collectEnd = script.indexOf('var previewOpen', collectStart);
+  const source = script.slice(collectStart, collectEnd);
+  const values = new Map([
+    ['global-visual-enabled', { checked: true, value: '' }], ['global-visual-default-mode', { value: 'off' }],
+    ['pipeline-type', { value: 'minimal' }], ['pipeline-behavior', { value: 'stack' }]
+  ]);
+  const collectFollow = new Function('state', '$', `${source}; return collect();`)({ profile: {} }, (id) => values.get(id) ?? { value: '' });
+  assert.equal(collectFollow.card.types.minimal.properties.space.settle, 'follow');
+  values.set('prop-settle', { value: 'snap' });
+  const collectSnap = new Function('state', '$', `${source}; return collect();`)({ profile: {} }, (id) => values.get(id) ?? { value: '' });
+  assert.equal(collectSnap.card.types.minimal.properties.space.settle, 'snap');
 });
 
 test('visual settings route exposes status, update, and preview endpoints', async () => {
@@ -1022,7 +1160,7 @@ test('visual settings route exposes status, update, and preview endpoints', asyn
     restoreVisualEventDefault(eventId) { calls.push(['restore', eventId]); return { ok: true }; }
   };
   registerVisualSettingsRoute(app, { _notificationHubVNextPlugin: api });
-  assert.deepEqual([...routes.keys()], ['GET /settings-visual', 'GET /visual-settings-status', 'POST /visual-settings-status', 'GET /visual-diagnostics', 'POST /visual-diagnostics-clear', 'POST /visual-diagnostics-export', 'POST /visual-settings-update', 'POST /visual-settings-preview', 'POST /visual-workbench/open', 'POST /visual-workbench/update', 'POST /visual-workbench/close', 'POST /visual-preview/open', 'POST /visual-preview/update', 'POST /visual-preview/close', 'POST /visual-try-one', 'POST /visual-clear-cards', 'POST /visual-test-event', 'POST /visual-test-parallel-cards', 'GET /visual-profiles', 'POST /visual-profiles/save', 'DELETE /visual-profiles/:profileId', 'POST /visual-profiles/preview-apply', 'POST /visual-profiles/apply', 'GET /custom-visual-events', 'POST /custom-visual-events/restore-default', 'GET /agent-avatars/:id/file']);
+  assert.deepEqual([...routes.keys()], ['GET /settings-visual', 'GET /visual-settings-status', 'POST /visual-settings-status', 'GET /visual-diagnostics', 'POST /visual-diagnostics-clear', 'POST /visual-diagnostics-export', 'POST /visual-settings-update', 'POST /visual-settings-preview', 'POST /visual-workbench/open', 'POST /visual-workbench/update', 'POST /visual-workbench/close', 'POST /visual-preview/open', 'POST /visual-preview/update', 'POST /visual-preview/close', 'POST /visual-try-one', 'POST /visual-clear-cards', 'POST /visual-test-event', 'POST /visual-test-parallel-cards', 'GET /visual-profiles', 'POST /visual-profiles/save', 'POST /visual-profiles/rename', 'DELETE /visual-profiles/:profileId', 'POST /visual-profiles/preview-apply', 'POST /visual-profiles/apply', 'GET /custom-visual-events', 'POST /custom-visual-events/restore-default', 'GET /agent-avatars/:id/file']);
   const context = (body = {}) => ({ req: { url: '/settings-visual', json: async () => body }, html(value) { return { kind: 'html', value }; }, json(value, status = 200) { return { value, status }; } });
   assert.match(routes.get('GET /settings-visual')(context()).value, /通知视觉/);
   assert.equal((routes.get('GET /visual-settings-status')(context())).value.ok, true);
@@ -1071,8 +1209,28 @@ test('visual settings page has save-as-profile section', () => {
   });
   // Save-as-profile section
   assert.match(html, /保存为配置包/);
+  assert.match(html, /导入配置包/);
+  assert.match(html, /导出全部/);
   assert.match(html, /visual-profile-name/);
   assert.match(html, /visual-profile-save/);
+  assert.match(html, /visual-profile-import/);
+  assert.match(html, /visual-profile-export-all/);
+  assert.match(html, /function exportAllProfiles/);
+  assert.match(html, /id !== "visual.default"/);
+  assert.match(html, /packageName: "视觉配置"/);
+  assert.match(html, /function readPackageAsBase64/);
+  assert.match(html, /instanceof FormData/);
+  assert.doesNotMatch(html, /form\.append\("package"/);
+  assert.ok(html.indexOf('id="visual-profile-save"') < html.indexOf('id="visual-profile-import"'));
+  assert.match(html, /无底图导入/);
+  assert.match(html, /id="visual-missing-copy"/);
+  assert.match(html, /missingFonts/);
+  assert.match(html, /回雅黑导入/);
+  assert.match(html, /clearMissingFonts/);
+  assert.doesNotMatch(html, /回雅黑保存/);
+  assert.doesNotMatch(html, /无底图保存/);
+  assert.doesNotMatch(html, /pendingMissingMode === "save"/);
+  assert.match(html, /同步事件应用/);
   assert.doesNotMatch(html, /id="visual-package-export"/);
   assert.match(html, /visual-profile-list/);
   // Conflict dialog structure
@@ -1097,6 +1255,7 @@ test('visual settings page shows saved profiles when data provided', () => {
   assert.match(html, /stack·minimal/);
   assert.match(html, /ticker·maid/);
   assert.match(html, /chat\.assistant_reply\.completed/);
+  assert.match(html, /class="secondary profile-rename" data-profile-id="stack-minimal"/);
   assert.match(html, /class="secondary profile-export" data-profile-id="stack-minimal"/);
   assert.match(html, /profileIds:\s*\[profileId\]/);
   assert.match(html, /data-profile-name="stack·minimal"/);
@@ -1120,6 +1279,7 @@ test('visual settings route exposes save profile endpoints', async () => {
   registerVisualSettingsRoute(app, { _notificationHubVNextPlugin: api });
   const routeKeys = [...routes.keys()];
   assert.ok(routeKeys.includes('POST /visual-profiles/save'), 'save endpoint should be registered');
+  assert.ok(routeKeys.includes('POST /visual-profiles/rename'), 'rename endpoint should be registered');
   assert.ok(routeKeys.includes('GET /visual-profiles'), 'list profiles endpoint should be registered');
   assert.ok(routeKeys.includes('POST /visual-profiles/apply'), 'apply endpoint should be registered');
   assert.ok(routeKeys.includes('POST /visual-profiles/preview-apply'), 'preview-apply endpoint should be registered');
@@ -1157,12 +1317,13 @@ test('try-one sits in the title row and previews the current draft', () => {
   const html = renderVisualSettingsPage('/settings-visual', {
     settings: { profile: { version: 2, behaviorId: 'ticker', global: { enabled: true } } }
   });
-  assert.match(html, /hero-actions[\s\S]*id="visual-try-one"[\s\S]*id="open-visual-preview"[\s\S]*id="visual-settings-save"/);
-  assert.match(html, /hero-library[\s\S]*id="open-visual-assets"[\s\S]*id="visual-clear-cards"/);
+  assert.match(html, /hero-actions[\s\S]*id="visual-try-one"[\s\S]*id="visual-clear-cards"[\s\S]*id="visual-settings-save"/);
+  assert.match(html, /hero-library[\s\S]*id="open-visual-assets"[\s\S]*id="open-visual-preview"/);
   assert.doesNotMatch(html, /preview-actions[\s\S]{0,240}id="visual-try-one"/);
   assert.doesNotMatch(html, /preview-actions[\s\S]{0,400}id="open-visual-preview"/);
   assert.match(html, /json\("visual-try-one"[\s\S]*studioNativeBody\(\)/);
   assert.match(html, /试一条在标题旁/);
+  assert.match(html, /真实事件、试一条和实时预览都不会出桌面卡/);
 });
 
 test('visual settings page has apply-to-events section', () => {
@@ -1278,7 +1439,9 @@ test('visual studio hides inactive behavior knobs and keeps a single primary sav
   assert.match(ticker, /id="ticker-section"(?![^>]*hidden)/);
   assert.match(ticker, /id="stack-section"[^>]*hidden/);
   assert.equal((stack.match(/class="primary"/g) ?? []).length, 1);
-  assert.doesNotMatch(stack, /id="ticker-hover-pause"|id="ticker-overflow"/);
+  assert.doesNotMatch(stack, /id="ticker-overflow"/);
+  assert.match(stack, /id="ticker-section"[^>]*hidden[\s\S]*id="ticker-hover-pause"/);
+  assert.doesNotMatch(stack, /id="stack-card"[\s\S]{0,800}id="ticker-hover-pause"/);
   assert.match(ticker, /id="ticker-track-count"[^>]*(?![^>]*max)/);
   assert.doesNotMatch(stack, /id="ticker-track-count"[^>]*max=/);
   assert.doesNotMatch(stack, /VISUAL WORKBENCH|stack\.main|Native preview/);
@@ -1353,6 +1516,59 @@ test('visual settings collect writes click dismiss pair and independent autoDism
   assert.equal(collect.card.types.minimal.properties.lifecycle.holdDurationMs, 120000);
 });
 
+test('stack hold-drag chip defaults on, hydrates off, and collect writes off', () => {
+  const html = renderVisualSettingsPage('/settings-visual', { profile: { global: { enabled: true }, card: { activeType: 'minimal', types: { minimal: {} } } } });
+  assert.match(html, /id="prop-hold-drag"[^>]*aria-pressed="true"/);
+  assert.match(html, /#prop-hold-drag/);
+  const offHtml = renderVisualSettingsPage('/settings-visual', {
+    settings: { profile: { version: 2, behaviorId: 'stack', global: { enabled: true }, card: { activeType: 'minimal', types: { minimal: { properties: { interaction: { holdDrag: 'off' } } } } } } }
+  });
+  assert.match(offHtml, /id="prop-hold-drag"[^>]*aria-pressed="false"/);
+  const script = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map((match) => match[1]).find((value) => value.includes('function collect('));
+  const collectStart = script.indexOf('function collect(');
+  const collectEnd = script.indexOf('var previewOpen', collectStart);
+  const source = script.slice(collectStart, collectEnd);
+  const values = new Map([
+    ['global-visual-enabled', { checked: true, value: '' }], ['global-visual-default-mode', { value: 'off' }],
+    ['pipeline-type', { value: 'minimal' }], ['pipeline-behavior', { value: 'stack' }],
+    ['prop-size', { value: 'medium' }], ['prop-anchor', { value: 'bottom-right' }], ['prop-gap', { value: '8' }],
+    ['skin-bg-color', { value: '#0e1916' }], ['prop-border-radius', { value: '16' }], ['prop-opacity', { value: '0.96' }],
+    ['prop-duration', { value: '30000' }], ['prop-hold-duration', { value: '30000' }], ['prop-dismiss-mode', { value: 'closeButton' }],
+    ['prop-hold-drag', { getAttribute: (name) => name === 'aria-pressed' ? 'false' : null }]
+  ]);
+  const collect = new Function('state', '$', `${source}; return collect();`)({ profile: {} }, (id) => values.get(id) ?? { value: '' });
+  assert.equal(collect.card.types.minimal.properties.interaction.holdDrag, 'off');
+});
+
+test('anywhere dismiss locks hold-drag chip gray without writing off', () => {
+  const html = renderVisualSettingsPage('/settings-visual', {
+    settings: { profile: { version: 2, behaviorId: 'stack', global: { enabled: true }, card: { activeType: 'minimal', types: { minimal: { properties: { interaction: { dismissMode: 'anywhere', holdDrag: 'on' } } } } } } }
+  });
+  assert.match(html, /id="prop-hold-drag"[^>]*is-locked/);
+  assert.match(html, /id="prop-hold-drag"[^>]*aria-disabled="true"/);
+  assert.match(html, /id="prop-hold-drag"[^>]*data-intent="on"/);
+  assert.match(html, /id="hold-drag-why"(?![^>]*hidden)/);
+  assert.match(html, /任意点击关卡时拖动变灰/);
+  assert.match(html, /function syncHoldDragLock\(/);
+  assert.match(html, /result\.overflowHint/);
+  assert.match(html, /满了掀最旧/);
+  const script = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map((match) => match[1]).find((value) => value.includes('function collect('));
+  const collectStart = script.indexOf('function collect(');
+  const collectEnd = script.indexOf('var previewOpen', collectStart);
+  const source = script.slice(collectStart, collectEnd);
+  const values = new Map([
+    ['global-visual-enabled', { checked: true, value: '' }], ['global-visual-default-mode', { value: 'off' }],
+    ['pipeline-type', { value: 'minimal' }], ['pipeline-behavior', { value: 'stack' }],
+    ['prop-size', { value: 'medium' }], ['prop-anchor', { value: 'bottom-right' }], ['prop-gap', { value: '8' }],
+    ['skin-bg-color', { value: '#0e1916' }], ['prop-border-radius', { value: '16' }], ['prop-opacity', { value: '0.96' }],
+    ['prop-duration', { value: '30000' }], ['prop-hold-duration', { value: '30000' }], ['prop-dismiss-mode', { value: 'anywhere' }],
+    ['prop-hold-drag', { getAttribute: (name) => name === 'data-intent' ? 'on' : name === 'aria-pressed' ? 'false' : null }]
+  ]);
+  const collect = new Function('state', '$', `${source}; return collect();`)({ profile: {} }, (id) => values.get(id) ?? { value: '' });
+  assert.equal(collect.card.types.minimal.properties.interaction.holdDrag, 'on');
+  assert.equal(collect.card.types.minimal.properties.interaction.dismissMode, 'anywhere');
+});
+
 test('title and body fill control is labeled as text color, not fill', () => {
   const html = renderVisualSettingsPage('/settings-visual', {
     profile: {
@@ -1370,6 +1586,46 @@ test('title and body fill control is labeled as text color, not fill', () => {
   assert.match(html, /id="part-paint-background"/);
   assert.match(html, /id="part-paint-background-on"/);
   assert.match(html, /function clampNumberInput/);
+});
+
+test('title and body content source chips sit on the card face', () => {
+  const html = renderVisualSettingsPage('/settings-visual', {
+    profile: {
+      global: { enabled: true },
+      card: { activeType: 'minimal', types: { minimal: { parts: { title: { contentSource: 'custom', customText: '写死标题', x: 30, y: 24, w: 200, h: 28 }, body: { contentSource: 'event' } } } } }
+    }
+  });
+  assert.match(html, /id="part-content-source-event"/);
+  assert.match(html, /id="part-content-source-custom"/);
+  assert.match(html, /id="part-custom-text"/);
+  assert.match(html, /id="part-custom-text"[^>]*maxlength="2000"/);
+  assert.match(html, /id="part-custom-text-count">4 \/ 2000/);
+  assert.match(html, /id="part-custom-text-field"[^>]*data-title-max="2000"/);
+  assert.match(html, /id="part-custom-text-field"[^>]*data-body-max="4000"/);
+  assert.match(html, /id="part-title-content-source"[^>]*value="custom"/);
+  assert.match(html, /id="part-title-custom-text"[^>]*value="写死标题"/);
+  assert.match(html, /只改字。事件来了照飞，不会一直挂着。/);
+  assert.doesNotMatch(html, /id="part-assistantName-content-source"/);
+  assert.doesNotMatch(html, /id="part-custom-text"[^>]*maxlength="120"/);
+});
+
+test('visual settings collect writes title custom and body event independently', () => {
+  const html = renderVisualSettingsPage('/settings-visual');
+  const source = extractFlushAndCollect(html);
+  const values = new Map([
+    ['pipeline-type', { value: 'minimal' }],
+    ['pipeline-behavior', { value: 'stack' }],
+    ['global-visual-enabled', { checked: true, value: '' }],
+    ['part-title-content-source', { value: 'custom' }],
+    ['part-title-custom-text', { value: '写死标题' }],
+    ['part-body-content-source', { value: '' }],
+    ['part-body-custom-text', { value: '还留着' }]
+  ]);
+  const collect = new Function('state', '$', `${source}; return collect();`)({ profile: {} }, (id) => values.get(id) ?? { value: '' });
+  assert.equal(collect.card.types.minimal.parts.title.contentSource, 'custom');
+  assert.equal(collect.card.types.minimal.parts.title.customText, '写死标题');
+  assert.equal(collect.card.types.minimal.parts.body.contentSource, undefined);
+  assert.equal(collect.card.types.minimal.parts.body.customText, '还留着');
 });
 
 test('visual settings page has a show chip for title and body parts', () => {
@@ -1816,6 +2072,68 @@ test('visual settings collect writes unbounded gap, stroke extras, and close ico
   assert.equal(collect.card.types.minimal.parts.close.closeIconColor, '#ffcc00');
 });
 
+test('text stroke color has glossary chips and collect keeps glossary names', () => {
+  const html = renderVisualSettingsPage('/settings-visual');
+  assert.match(html, /id="part-text-stroke-names"/);
+  const source = extractFlushAndCollect(html);
+  const values = new Map([
+    ['pipeline-type', { value: 'minimal' }],
+    ['pipeline-behavior', { value: 'stack' }],
+    ['global-visual-enabled', { checked: true, value: '' }],
+    ['glossary-json', { value: '{"\u63cf\u8fb9\u8272":"#112233"}' }],
+    ['part-selected', { value: 'title' }],
+    ['part-paint-text-stroke', { value: '', getAttribute: (name) => (name === 'aria-pressed' ? 'true' : null) }],
+    ['part-paint-text-stroke-color', { value: '#ffffff' }],
+    ['part-title-text-stroke', { value: 'true' }],
+    ['part-title-text-stroke-color', { value: '\u63cf\u8fb9\u8272' }]
+  ]);
+  const collect = new Function('state', '$', `${source}; return collect();`)({ profile: {} }, (id) => values.get(id) ?? { value: '' });
+  assert.equal(collect.card.types.minimal.parts.title.textStroke, true);
+  assert.equal(collect.card.types.minimal.parts.title.textStrokeColor, '描边色');
+});
+
+test('close part background asset survives collect and does not inherit the root selected option', () => {
+  const html = renderVisualSettingsPage('/settings-visual', {
+    assets: [
+      { assetId: 'wall-red', name: '红墙', format: 'png' },
+      { assetId: 'wall-blue', name: '蓝墙', format: 'png' }
+    ],
+    profile: {
+      version: 2,
+      global: { enabled: true },
+      card: {
+        activeType: 'minimal',
+        types: {
+          minimal: {
+            appearance: { backgroundAssetId: 'wall-red' },
+            parts: { close: { fill: '#1d2b27', backgroundAssetId: 'wall-blue' } }
+          }
+        }
+      }
+    }
+  });
+  assert.match(html, /id="part-close-bg-asset"[^>]*value="wall-blue"/);
+  assert.match(html, /id="skin-bg-asset"[\s\S]*?<option value="wall-red" selected>/);
+  assert.match(html, /id="part-paint-bg-asset"[\s\S]*?<option value="wall-blue" selected>/);
+  assert.doesNotMatch(html, /id="part-paint-bg-asset"[\s\S]*?<option value="wall-red" selected>/);
+  const source = extractFlushAndCollect(html);
+  const values = new Map([
+    ['pipeline-type', { value: 'minimal' }],
+    ['pipeline-behavior', { value: 'stack' }],
+    ['global-visual-enabled', { checked: true, value: '' }],
+    ['part-close-bg-asset', { value: 'wall-blue' }]
+  ]);
+  const collect = new Function('state', '$', `${source}; return collect();`)({ profile: {} }, (id) => values.get(id) ?? { value: '' });
+  assert.equal(collect.card.types.minimal.parts.close.backgroundAssetId, 'wall-blue');
+});
+
+test('mode editor restores icon, assistantName, and root background asset', () => {
+  const html = renderVisualSettingsPage('/settings-visual');
+  assert.match(html, /setPartHidden\("icon", savedParts\.icon\)/);
+  assert.match(html, /setPartHidden\("assistantName", savedParts\.assistantName\)/);
+  assert.match(html, /setControl\("skin-bg-asset"/);
+});
+
 test('visual settings collect writes close radius 0 and studio defaults unsaved close to a circle', () => {
   const html = renderVisualSettingsPage('/settings-visual');
   const source = extractFlushAndCollect(html);
@@ -1865,4 +2183,41 @@ test('visual settings collect writes title background and opacity', () => {
   assert.equal(collect.card.types.minimal.parts.title.fill, '#f2fff9');
   assert.equal(collect.card.types.minimal.parts.title.background, '#1d2b27');
   assert.equal(collect.card.types.minimal.parts.title.opacity, 0.6);
+});
+
+test('visual settings collect keeps icon geometry apart from crop offset', () => {
+  const html = renderVisualSettingsPage('/settings-visual');
+  const source = extractFlushAndCollect(html);
+  const values = new Map([
+    ['pipeline-type', { value: 'minimal' }],
+    ['pipeline-behavior', { value: 'stack' }],
+    ['global-visual-enabled', { checked: true, value: '' }],
+    ['part-icon-show', { value: 'true' }],
+    ['part-icon-x', { value: '48' }],
+    ['part-icon-y', { value: '12' }],
+    ['part-icon-bg-x', { value: '0.2' }],
+    ['part-icon-bg-y', { value: '0.8' }],
+    ['part-icon-bg-scale', { value: '2' }]
+  ]);
+  const collect = new Function('state', '$', `${source}; return collect();`)({ profile: {} }, (id) => values.get(id) ?? { value: '' });
+  assert.equal(collect.card.types.minimal.parts.icon.x, 48);
+  assert.equal(collect.card.types.minimal.parts.icon.y, 12);
+  assert.equal(collect.card.types.minimal.parts.icon.backgroundX, 0.2);
+  assert.equal(collect.card.types.minimal.parts.icon.backgroundY, 0.8);
+  assert.equal(collect.card.types.minimal.parts.icon.backgroundScale, 2);
+  const store = new VisualSettingsStore({
+    initialSettings: {
+      profile: {
+        version: 2,
+        global: { enabled: true },
+        card: { activeType: 'minimal', types: { minimal: { parts: collect.card.types.minimal.parts } } }
+      }
+    }
+  });
+  const fragment = renderVisualSettingsFragment('/settings-content?view=visual', {
+    settings: store.getSnapshot().settings,
+    profile: store.getSnapshot().settings.profile
+  });
+  assert.match(fragment, /id="part-icon-x"[^>]*value="48"/);
+  assert.match(fragment, /id="part-icon-bg-x"[^>]*value="0.2"/);
 });

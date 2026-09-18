@@ -1,11 +1,12 @@
 import { lexiconError } from './lexicon-error.js';
 
-const CHARTER_SETTLE_IDS = Object.freeze(['snap']);
+const CHARTER_SETTLE_IDS = Object.freeze(['snap', 'follow']);
+const CHARTER_NEWEST_IDS = Object.freeze(['dock', 'next']);
 const TICKER_BANDS = Object.freeze(['top', 'bottom']);
 const TICKER_OVERFLOWS = Object.freeze(['avoid', 'queue']);
 const STACK_ANCHORS = Object.freeze(['top-left', 'top-right', 'bottom-left', 'bottom-right']);
 const STACK_GROWS = Object.freeze(['up', 'down', 'left', 'right']);
-const STACK_WRAPS = Object.freeze(['off', 'parallel', 'snake']);
+const STACK_WRAPS = Object.freeze(['off', 'parallel', 'snake', 'coil']);
 
 function plain(value) {
   return value !== null && typeof value === 'object' && !Array.isArray(value)
@@ -79,7 +80,8 @@ export function resolveFlightId(value, field = 'flight') {
 
 export const STACK_CHARTER_DEFAULTS = Object.freeze({
   flight: 'stack',
-  settle: 'snap',
+  settle: 'follow',
+  newest: 'dock',
   anchor: 'bottom-right',
   grow: null,
   wrap: 'off',
@@ -110,7 +112,7 @@ export const TICKER_MOTION_DEFAULTS = Object.freeze({
 });
 
 const STACK_CHARTER_FIELDS = Object.freeze([
-  'flight', 'settle', 'anchor', 'grow', 'wrap', 'gap', 'margin',
+  'flight', 'settle', 'newest', 'anchor', 'grow', 'wrap', 'gap', 'margin',
   'marginLeft', 'marginRight', 'marginTop', 'marginBottom'
 ]);
 const TICKER_CHARTER_FIELDS = Object.freeze([
@@ -128,15 +130,23 @@ export function createStackCharter(input = {}) {
   }
   const settle = input.settle ?? STACK_CHARTER_DEFAULTS.settle;
   if (!CHARTER_SETTLE_IDS.includes(settle)) {
-    fail('CHARTER_SETTLE_UNSUPPORTED', 'stack settle must be snap', {
+    fail('CHARTER_SETTLE_UNSUPPORTED', 'stack settle must be snap or follow', {
       field: 'channels.stack.settle',
-      expected: 'snap',
+      expected: 'snap|follow',
       actual: settle
     });
   }
   const anchor = input.anchor ?? STACK_CHARTER_DEFAULTS.anchor;
   if (!STACK_ANCHORS.includes(anchor)) {
     fail('CHARTER_FIELD_INVALID', 'invalid stack anchor', { field: 'channels.stack.anchor', expected: STACK_ANCHORS.join('|'), actual: anchor });
+  }
+  const newest = input.newest ?? STACK_CHARTER_DEFAULTS.newest;
+  if (!CHARTER_NEWEST_IDS.includes(newest)) {
+    fail('CHARTER_NEWEST_UNSUPPORTED', 'stack newest must be dock or next', {
+      field: 'channels.stack.newest',
+      expected: 'dock|next',
+      actual: newest
+    });
   }
   const wrap = input.wrap ?? STACK_CHARTER_DEFAULTS.wrap;
   if (!STACK_WRAPS.includes(wrap)) {
@@ -153,7 +163,8 @@ export function createStackCharter(input = {}) {
   };
   return freeze({
     flight: 'stack',
-    settle: 'snap',
+    settle,
+    newest,
     anchor,
     grow,
     wrap,
@@ -253,6 +264,8 @@ export function stripCharterFromExport(value) {
 export function migrateStackCharterFromSpace(space = {}) {
   const source = plain(space) ? space : {};
   return createStackCharter({
+    settle: source.settle,
+    newest: source.newest,
     anchor: source.anchor,
     grow: source.grow ?? null,
     wrap: source.wrap ?? 'off',

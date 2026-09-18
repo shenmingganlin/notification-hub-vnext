@@ -280,11 +280,178 @@ StackLayoutResult layout_snake_wrap(
     return result;
 }
 
+enum class CoilHug {
+    Left,
+    Right,
+    Top,
+    Bottom
+};
+
+StackDirection coil_wrap_axis(StackAnchor anchor, StackDirection grow) {
+    if (grow == StackDirection::Up || grow == StackDirection::Down) {
+        return anchor_is_right(anchor) ? StackDirection::Left : StackDirection::Right;
+    }
+    return anchor_is_bottom(anchor) ? StackDirection::Up : StackDirection::Down;
+}
+
+CoilHug coil_hug_from_anchor_grow(StackAnchor anchor, StackDirection grow) {
+    if (grow == StackDirection::Up || grow == StackDirection::Down) {
+        return anchor_is_right(anchor) ? CoilHug::Right : CoilHug::Left;
+    }
+    return anchor_is_bottom(anchor) ? CoilHug::Bottom : CoilHug::Top;
+}
+
+CoilHug coil_far_hug(StackDirection dir) {
+    if (dir == StackDirection::Down) return CoilHug::Bottom;
+    if (dir == StackDirection::Up) return CoilHug::Top;
+    if (dir == StackDirection::Right) return CoilHug::Right;
+    return CoilHug::Left;
+}
+
+void coil_shrink_rect(int& left, int& top, int& width, int& height, CoilHug hug, int consume) {
+    if (hug == CoilHug::Left) {
+        left += consume;
+        width -= consume;
+        return;
+    }
+    if (hug == CoilHug::Right) {
+        width -= consume;
+        return;
+    }
+    if (hug == CoilHug::Top) {
+        top += consume;
+        height -= consume;
+        return;
+    }
+    height -= consume;
+}
+
+StackLayoutResult layout_coil_wrap(
+    const std::vector<StackCardInput>& cards,
+    const StackLayoutOptions& options) {
+    if (options.dpi_scale <= 0.0f || !std::isfinite(options.dpi_scale)) {
+        return failure("LAYOUT_DPI_INVALID", "Stack layout DPI scale must be finite and greater than zero");
+    }
+    if (options.work_area_width <= 0 || options.work_area_height <= 0) {
+        return failure("LAYOUT_WORK_AREA_INVALID", "Stack layout work area must have positive dimensions");
+    }
+    if (options.spacing < 0) {
+        return failure("LAYOUT_SPACING_INVALID", "Stack layout spacing cannot be negative");
+    }
+    if (options.margin_left < 0 || options.margin_right < 0
+        || options.margin_top < 0 || options.margin_bottom < 0) {
+        return failure("LAYOUT_MARGIN_INVALID", "Stack layout margins cannot be negative");
+    }
+    if (options.margin_left + options.margin_right >= options.work_area_width
+        || options.margin_top + options.margin_bottom >= options.work_area_height) {
+        return failure("LAYOUT_WORK_AREA_INVALID", "Stack layout work area must have positive dimensions");
+    }
+
+    int left = options.margin_left;
+    int top = options.margin_top;
+    int width = options.work_area_width - options.margin_left - options.margin_right;
+    int height = options.work_area_height - options.margin_top - options.margin_bottom;
+    if (width <= 0 || height <= 0) {
+        return failure("LAYOUT_WORK_AREA_INVALID", "Stack layout work area must have positive dimensions");
+    }
+
+    const StackDirection grow = options.newest == StackNewest::Next
+        ? options.direction
+        : opposite_direction(options.direction);
+    const StackDirection wrap_axis = coil_wrap_axis(options.anchor, grow);
+    const StackDirection dirs[4] = {
+        grow,
+        wrap_axis,
+        opposite_direction(grow),
+        opposite_direction(wrap_axis)
+    };
+    CoilHug hug = coil_hug_from_anchor_grow(options.anchor, grow);
+    const int spacing = options.spacing;
+    const int count = static_cast<int>(cards.size());
+    const bool newest_first = options.newest != StackNewest::Next;
+
+    auto card_at = [&](int packed_index) -> const StackCardInput& {
+        const int source = newest_first ? (count - 1 - packed_index) : packed_index;
+        return cards[static_cast<std::size_t>(source)];
+    };
+
+    StackLayoutResult result{true, {}, {}, {}, {}};
+    result.placements.reserve(cards.size());
+    int packed = 0;
+    int dir_index = 0;
+    while (packed < count) {
+        const StackDirection dir = dirs[dir_index % 4];
+        const bool horizontal = dir == StackDirection::Left || dir == StackDirection::Right;
+        const int span = horizontal ? width : height;
+        std::vector<int> run;
+        int used = 0;
+        int cross = 0;
+        while (packed + static_cast<int>(run.size()) < count) {
+            const auto& card = card_at(packed + static_cast<int>(run.size()));
+            const int extent = horizontal ? card.width : card.height;
+            const int need = run.empty() ? extent : used + spacing + extent;
+            if (need > span) break;
+            run.push_back(packed + static_cast<int>(run.size()));
+            used = need;
+            cross = std::max(cross, horizontal ? card.height : card.width);
+        }
+        if (run.empty()) {
+            const auto& failing = card_at(packed);
+            return failure("LAYOUT_CARD_OUT_OF_BOUNDS", "Card does not fit in work area", failing.id);
+        }
+        int cursor = 0;
+        if (dir == StackDirection::Down) cursor = top;
+        else if (dir == StackDirection::Up) cursor = top + height;
+        else if (dir == StackDirection::Right) cursor = left;
+        else cursor = left + width;
+        for (int packed_index : run) {
+            const auto& card = card_at(packed_index);
+            StackCardPlacement placement;
+            placement.id = card.id;
+            placement.width = card.width;
+            placement.height = card.height;
+            if (dir == StackDirection::Down) {
+                placement.y = cursor;
+                cursor += card.height + spacing;
+            } else if (dir == StackDirection::Up) {
+                placement.y = cursor - card.height;
+                cursor = placement.y - spacing;
+            } else if (dir == StackDirection::Right) {
+                placement.x = cursor;
+                cursor += card.width + spacing;
+            } else {
+                placement.x = cursor - card.width;
+                cursor = placement.x - spacing;
+            }
+            if (horizontal) {
+                placement.y = hug == CoilHug::Bottom ? top + height - card.height : top;
+            } else {
+                placement.x = hug == CoilHug::Right ? left + width - card.width : left;
+            }
+            if (!placement_inside_work_area(placement, options)) {
+                return failure("LAYOUT_CARD_OUT_OF_BOUNDS", "Card does not fit in work area", card.id);
+            }
+            placement.x += options.work_area_left;
+            placement.y += options.work_area_top;
+            result.placements.push_back(std::move(placement));
+        }
+        packed += static_cast<int>(run.size());
+        if (packed >= count) break;
+        coil_shrink_rect(left, top, width, height, hug, cross + spacing);
+        hug = coil_far_hug(dir);
+        dir_index += 1;
+    }
+    return result;
+}
+
 }  // namespace
 
 StackLayoutResult layout_stack(
     const std::vector<StackCardInput>& cards,
     const StackLayoutOptions& options) {
+    if (options.wrap == StackWrap::Coil) {
+        return layout_coil_wrap(cards, options);
+    }
     const auto fitted = layout_linear(cards, options, LayoutMode::Stack);
     if (options.wrap == StackWrap::Off) return fitted;
     if (fitted.ok || fitted.code != "LAYOUT_CARD_OUT_OF_BOUNDS" || cards.empty()) {

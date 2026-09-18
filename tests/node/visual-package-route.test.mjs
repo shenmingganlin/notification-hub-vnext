@@ -16,7 +16,7 @@ function createHarness({ body = {}, file = null, contentType = 'multipart/form-d
   const plugin = {
     exportVisualPackageToPicker: async (input) => ({ cancelled: false, savedFilename: 'test.nhvisual', bytes: 12, input }),
     previewVisualPackage: async (input) => ({ packageName: 'Test Package', profileCount: 1, input }),
-    importVisualPackage: async (input) => ({ strategy: input.strategy, profiles: { registered: [{ effectiveId: 'imported' }] }, assets: { imported: [] } }),
+    importVisualPackage: async (input) => ({ strategy: input.strategy, applyBindings: input.applyBindings, clearMissingAssets: input.clearMissingAssets, clearMissingFonts: input.clearMissingFonts, profiles: { registered: [{ effectiveId: 'imported' }] }, assets: { imported: [] }, input }),
     exportVisualPackageDiagnostics: async (input) => ({ cancelled: false, savedFilename: 'diagnostics.json', input })
   };
   const fileValue = file ?? { name: 'test.nhvisual', async arrayBuffer() { return new ArrayBuffer(4); } };
@@ -25,7 +25,7 @@ function createHarness({ body = {}, file = null, contentType = 'multipart/form-d
       url: '/api/plugins/notification-hub/visual-package',
       header(name) { return name.toLowerCase() === 'content-type' ? contentType : ''; },
       async json() { return body; },
-      async parseBody() { return { package: fileValue, strategy: body.strategy ?? 'copy' }; },
+      async parseBody() { return { package: fileValue, strategy: body.strategy ?? 'copy', applyBindings: body.applyBindings, clearMissingAssets: body.clearMissingAssets, clearMissingFonts: body.clearMissingFonts }; },
       param() { return 'asset-1'; },
       query() { return {}; }
     },
@@ -60,6 +60,18 @@ test('visual package import route delegates selected conflict strategy', async (
   const response = await harness.routes.get('POST /visual-package-import')(harness.context);
   assert.equal(response.body.ok, true);
   assert.equal(response.body.report.strategy, 'overwrite');
+  assert.equal(response.body.report.applyBindings, true);
+  assert.equal(response.body.report.clearMissingAssets, false);
+});
+
+test('visual package import route forwards missing-art and event-sync flags', async () => {
+  const harness = createHarness({ body: { strategy: 'skip', applyBindings: 'false', clearMissingAssets: 'true' } });
+  registerVisualAssetRoute(harness.app, { _notificationHubVNextPlugin: harness.plugin });
+  const response = await harness.routes.get('POST /visual-package-import')(harness.context);
+  assert.equal(response.body.ok, true);
+  assert.equal(response.body.report.strategy, 'skip');
+  assert.equal(response.body.report.applyBindings, false);
+  assert.equal(response.body.report.clearMissingAssets, true);
 });
 
 test('visual package diagnostics export route delegates filename and returns save status', async () => {
@@ -69,6 +81,18 @@ test('visual package diagnostics export route delegates filename and returns sav
   assert.equal(response.body.ok, true);
   assert.equal(response.body.savedFilename, 'diagnostics.json');
   assert.equal(response.body.input.name, 'import-diagnostics');
+});
+
+test('visual package import route accepts JSON base64', async () => {
+  const harness = createHarness({ body: { base64: Buffer.from('zip').toString('base64'), strategy: 'skip', applyBindings: false, clearMissingAssets: true, clearMissingFonts: true }, contentType: 'application/json' });
+  registerVisualAssetRoute(harness.app, { _notificationHubVNextPlugin: harness.plugin });
+  const response = await harness.routes.get('POST /visual-package-import')(harness.context);
+  assert.equal(response.body.ok, true);
+  assert.equal(response.body.report.strategy, 'skip');
+  assert.equal(response.body.report.applyBindings, false);
+  assert.equal(response.body.report.clearMissingAssets, true);
+  assert.equal(response.body.report.clearMissingFonts, true);
+  assert.ok(Buffer.isBuffer(response.body.report.input.zipBuffer));
 });
 
 test('visual package JSON base64 input is accepted for preview', async () => {

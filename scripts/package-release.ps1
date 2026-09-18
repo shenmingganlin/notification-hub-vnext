@@ -10,7 +10,7 @@ $ErrorActionPreference = 'Stop'
 
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $canonicalVersion = (Get-Content (Join-Path $repoRoot 'VERSION') -Raw -Encoding UTF8).Trim()
-if ($canonicalVersion -ne '0.1.6') { throw "VERSION must be exactly 0.1.6, got '$canonicalVersion'" }
+if ($canonicalVersion -notmatch '^\d+\.\d+\.\d+$') { throw "VERSION must be x.y.z, got '$canonicalVersion'" }
 
 $packageJsonPath = Join-Path $repoRoot 'package.json'
 $packageJson = Get-Content $packageJsonPath -Raw -Encoding UTF8 | ConvertFrom-Json
@@ -19,13 +19,27 @@ $manifestSourcePath = Join-Path $repoRoot 'plugin\manifest.json'
 $manifestSource = Get-Content $manifestSourcePath -Raw -Encoding UTF8 | ConvertFrom-Json
 if ([string]$manifestSource.version -ne $canonicalVersion) { throw 'plugin/manifest.json version does not match VERSION' }
 
-# Keep -Configuration compatible, but derive only the active CMake preset output.
+# Keep -Configuration compatible. Prefer the shipping plugin Runtime plus the follow-default audio engine when present; otherwise use the active CMake preset output.
 $currentPresetRoot = Join-Path $repoRoot ("build\debug-vs2026\runtime\$Configuration")
+$pluginRuntimeDir = Join-Path $repoRoot 'plugin\runtime'
+$followAudioPath = Join-Path $repoRoot 'build\audio-follow-default\runtime\Release\notification-hub-audio-engine.exe'
 if ([string]::IsNullOrWhiteSpace($RuntimePath)) {
-  $RuntimePath = Join-Path $currentPresetRoot 'notification-hub-runtime.exe'
+  $pluginRuntimePath = Join-Path $pluginRuntimeDir 'notification-hub-runtime.exe'
+  if (Test-Path -LiteralPath $pluginRuntimePath -PathType Leaf) {
+    $RuntimePath = $pluginRuntimePath
+  } else {
+    $RuntimePath = Join-Path $currentPresetRoot 'notification-hub-runtime.exe'
+  }
 }
 if ([string]::IsNullOrWhiteSpace($AudioEnginePath)) {
-  $AudioEnginePath = Join-Path $currentPresetRoot 'notification-hub-audio-engine.exe'
+  $pluginAudioPath = Join-Path $pluginRuntimeDir 'notification-hub-audio-engine.exe'
+  if (Test-Path -LiteralPath $followAudioPath -PathType Leaf) {
+    $AudioEnginePath = $followAudioPath
+  } elseif (Test-Path -LiteralPath $pluginAudioPath -PathType Leaf) {
+    $AudioEnginePath = $pluginAudioPath
+  } else {
+    $AudioEnginePath = Join-Path $currentPresetRoot 'notification-hub-audio-engine.exe'
+  }
 }
 
 function Resolve-ReleaseArtifact([string]$label, [string]$candidatePath, [string]$expectedName) {
@@ -62,8 +76,18 @@ function Invoke-StagingRuntimeSmoke([string]$stagingRoot, [bool]$skip) {
 
 $runtimeItem = Resolve-ReleaseArtifact 'RuntimePath' $RuntimePath 'notification-hub-runtime.exe'
 $audioEngineItem = Resolve-ReleaseArtifact 'AudioEnginePath' $AudioEnginePath 'notification-hub-audio-engine.exe'
-if ($runtimeItem.Directory.FullName -ne $audioEngineItem.Directory.FullName) {
-  throw "Runtime and audio engine must come from the same build output directory. Runtime='$($runtimeItem.Directory.FullName)', Audio='$($audioEngineItem.Directory.FullName)'"
+$sameBuildDirectory = $runtimeItem.Directory.FullName -eq $audioEngineItem.Directory.FullName
+$pluginRuntimeFull = $null
+$followAudioFull = $null
+if (Test-Path -LiteralPath (Join-Path $pluginRuntimeDir 'notification-hub-runtime.exe') -PathType Leaf) {
+  $pluginRuntimeFull = (Get-Item -LiteralPath (Join-Path $pluginRuntimeDir 'notification-hub-runtime.exe')).FullName
+}
+if (Test-Path -LiteralPath $followAudioPath -PathType Leaf) {
+  $followAudioFull = (Get-Item -LiteralPath $followAudioPath).FullName
+}
+$knownSplitPair = ($null -ne $pluginRuntimeFull) -and ($null -ne $followAudioFull) -and ($runtimeItem.FullName -eq $pluginRuntimeFull) -and ($audioEngineItem.FullName -eq $followAudioFull)
+if (-not $sameBuildDirectory -and -not $knownSplitPair) {
+  throw "Runtime and audio engine must come from the same build output directory, or the shipping plugin Runtime plus audio-follow-default pair. Runtime='$($runtimeItem.Directory.FullName)', Audio='$($audioEngineItem.Directory.FullName)'"
 }
 $artifactTimeDeltaSeconds = [math]::Abs(($runtimeItem.LastWriteTimeUtc - $audioEngineItem.LastWriteTimeUtc).TotalSeconds)
 if ($artifactTimeDeltaSeconds -gt 86400) {
@@ -81,7 +105,18 @@ $stageDir = Join-Path $distDir 'notification-hub-vnext'
 $zipPath = Join-Path $distDir "notification-hub-vnext-$canonicalVersion.zip"
 $releaseManifestPath = Join-Path $distDir "notification-hub-vnext-$canonicalVersion.release-manifest.json"
 
-Remove-Item $distDir -Recurse -Force -ErrorAction SilentlyContinue
+if (-not (Test-Path -LiteralPath $distDir -PathType Container)) {
+  New-Item -ItemType Directory -Path $distDir | Out-Null
+}
+if (Test-Path -LiteralPath $stageDir) {
+  Remove-Item $stageDir -Recurse -Force
+}
+if (Test-Path -LiteralPath $zipPath -PathType Leaf) {
+  Remove-Item $zipPath -Force
+}
+if (Test-Path -LiteralPath $releaseManifestPath -PathType Leaf) {
+  Remove-Item $releaseManifestPath -Force
+}
 New-Item -ItemType Directory -Path $stageDir | Out-Null
 New-Item -ItemType Directory -Path (Join-Path $stageDir 'runtime') | Out-Null
 

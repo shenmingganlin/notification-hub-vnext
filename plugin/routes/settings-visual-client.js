@@ -23,25 +23,67 @@ function tickerClickThroughOn() {
   var btn = $("ticker-click-through");
   return !(btn && btn.getAttribute && btn.getAttribute("aria-pressed") === "false");
 }
-function syncTickerHoverLock() {
-  var hover = $("ticker-hover-highlight");
-  var why = $("ticker-hover-why");
-  if (!hover) return;
-  var locked = tickerClickThroughOn();
-  if (hover.classList) hover.classList.toggle("is-locked", locked);
-  hover.setAttribute("aria-disabled", locked ? "true" : "false");
+function lockTickerHoverChip(id, locked) {
+  var el = $(id);
+  if (!el) return;
+  if (el.classList) el.classList.toggle("is-locked", locked);
+  el.setAttribute("aria-disabled", locked ? "true" : "false");
   if (locked) {
-    hover.setAttribute("title", "不挡点击开着时，弹幕吃不到鼠标，没法加亮。");
-    hover.setAttribute("aria-describedby", "ticker-hover-why");
-    setPressed("ticker-hover-highlight", false);
+    el.setAttribute("title", "不挡点击开着时，弹幕吃不到鼠标。");
+    el.setAttribute("aria-describedby", "ticker-hover-why");
+    setPressed(id, false);
   } else {
-    hover.removeAttribute("title");
-    hover.removeAttribute("aria-describedby");
+    el.removeAttribute("title");
+    el.removeAttribute("aria-describedby");
+  }
+}
+function syncTickerHoverLock() {
+  var why = $("ticker-hover-why");
+  var locked = tickerClickThroughOn();
+  lockTickerHoverChip("ticker-hover-highlight", locked);
+  lockTickerHoverChip("ticker-hover-pause", locked);
+  if (why) {
+    if (locked) why.removeAttribute("hidden");
+    else why.setAttribute("hidden", "");
+  }
+}
+function dismissAnywhereOn() {
+  return pressed("prop-dismiss-anywhere");
+}
+function holdDragIntentOn(btn) {
+  if (!btn || !btn.getAttribute) return true;
+  var intent = btn.getAttribute("data-intent");
+  if (intent === "off") return false;
+  if (intent === "on") return true;
+  return btn.getAttribute("aria-pressed") !== "false";
+}
+function syncHoldDragLock() {
+  var btn = $("prop-hold-drag");
+  var why = $("hold-drag-why");
+  if (!btn) return;
+  var locked = dismissAnywhereOn();
+  if (btn.classList) btn.classList.toggle("is-locked", locked);
+  btn.setAttribute("aria-disabled", locked ? "true" : "false");
+  if (locked) {
+    btn.setAttribute("title", "任意点击关卡时，按住会当成点击，没法拖。");
+    btn.setAttribute("aria-describedby", "hold-drag-why");
+    setPressed("prop-hold-drag", false);
+  } else {
+    btn.removeAttribute("title");
+    btn.removeAttribute("aria-describedby");
+    setPressed("prop-hold-drag", holdDragIntentOn(btn));
   }
   if (why) {
     if (locked) why.removeAttribute("hidden");
     else why.setAttribute("hidden", "");
   }
+}
+function studioErrorText(error) {
+  var code = error && error.code;
+  if (code === "LAYOUT_BEHAVIOR_CHANNEL_OUT_OF_BOUNDS" || code === "LAYOUT_CARD_OUT_OF_BOUNDS") {
+    return error.message || "堆叠已经满了，这张卡放不下。";
+  }
+  return (code ? code + " · " : "") + (error && error.message || "");
 }
 function modeConfig(value) {
   var profile = state.profile || {};
@@ -54,6 +96,7 @@ function pressed(id) {
 }
 var PART_PAINT_DEFAULTS = { title: { fill: "#f2fff9", stroke: "#62d0a8" }, body: { fill: "#c5d8d0", stroke: "#62d0a8" }, close: { fill: "#1d2b27", stroke: "#62d0a8" }, icon: { fill: "#1d2b27", stroke: "#62d0a8" }, assistantName: { fill: "#62d0a8", stroke: "#62d0a8" } };
 function isTextPart(id) { return id === "title" || id === "body" || id === "assistantName"; }
+function isContentSourcePart(id) { return id === "title" || id === "body"; }
 function isFitWidthPart(id) { return id === "title" || id === "assistantName"; }
 function isShowablePart(id) { return id === "title" || id === "body" || id === "icon" || id === "assistantName"; }
 function isSelectablePart(id) { return id === "root" || id === "title" || id === "body" || id === "close" || id === "icon" || id === "assistantName"; }
@@ -93,6 +136,8 @@ function setPartHidden(id, paint) {
   setControl("part-" + id + "-radius", Number.isInteger(paint.radius) ? paint.radius : "");
   if (id === "title" || id === "body") {
     setControl("part-" + id + "-show", paint.show === false ? "false" : "");
+    setControl("part-" + id + "-content-source", paint.contentSource === "custom" ? "custom" : "");
+    setControl("part-" + id + "-custom-text", typeof paint.customText === "string" ? paint.customText : "");
   }
   if (id === "icon" || id === "assistantName") {
     setControl("part-" + id + "-show", paint.show === true ? "true" : "false");
@@ -100,9 +145,9 @@ function setPartHidden(id, paint) {
   if (id === "icon") {
     setControl("part-icon-source", paint.source === "custom" ? "custom" : "assistant");
     setControl("part-icon-asset-id", paint.assetId || "");
-    setControl("part-icon-scale", Number.isFinite(Number(paint.backgroundScale)) ? paint.backgroundScale : 1);
-    setControl("part-icon-x", Number.isFinite(Number(paint.backgroundX)) ? paint.backgroundX : 0.5);
-    setControl("part-icon-y", Number.isFinite(Number(paint.backgroundY)) ? paint.backgroundY : 0.5);
+    setControl("part-icon-bg-scale", Number.isFinite(Number(paint.backgroundScale)) ? paint.backgroundScale : 1);
+    setControl("part-icon-bg-x", Number.isFinite(Number(paint.backgroundX)) ? paint.backgroundX : 0.5);
+    setControl("part-icon-bg-y", Number.isFinite(Number(paint.backgroundY)) ? paint.backgroundY : 0.5);
   }
   if (id !== "icon") {
     setControl("part-" + id + "-bg-asset", paint.backgroundAssetId || "");
@@ -169,11 +214,17 @@ function attrEscape(value) {
 function renderNameChips() {
   var names = Object.keys(readGlossary());
   var id = selectedPart();
-  ["fill", "stroke"].forEach(function (kind) {
-    var row = $("part-" + kind + "-names");
+  ["fill", "stroke", "textStroke"].forEach(function (kind) {
+    var target = paintNameTarget(kind);
+    var row = $(target.row);
     if (!row) return;
+    if (kind === "textStroke" && !isTextPart(id)) {
+      row.hidden = true;
+      row.innerHTML = "";
+      return;
+    }
     row.hidden = names.length === 0;
-    var stored = id && id !== "root" ? ($("part-" + id + "-" + kind) && $("part-" + id + "-" + kind).value) : "";
+    var stored = id && id !== "root" ? ($("part-" + id + "-" + target.hidden) && $("part-" + id + "-" + target.hidden).value) : "";
     var ownOn = !stored || stored.charAt(0) === "#";
     row.innerHTML = '<button type="button" class="chip' + (ownOn ? " is-on" : "") + '" data-paint-name="" data-paint-kind="' + kind + '">自己的色</button>'
       + names.map(function (name) {
@@ -198,8 +249,8 @@ function renderGlossaryRows() {
   renderNameChips();
 }
 function remapPartPaintNames(renamed, map) {
-  ["title", "body", "close"].forEach(function (id) {
-    ["fill", "stroke"].forEach(function (kind) {
+  ["title", "body", "close", "icon", "assistantName"].forEach(function (id) {
+    ["fill", "stroke", "text-stroke-color"].forEach(function (kind) {
       var el = $("part-" + id + "-" + kind);
       if (!el || !el.value) return;
       if (renamed[el.value]) el.value = renamed[el.value];
@@ -249,20 +300,26 @@ function deleteGlossaryName(name) {
   renderGlossaryRows();
   if (selectedPart() !== "root") selectPart(selectedPart());
 }
+function paintNameTarget(kind) {
+  if (kind === "textStroke") return { hidden: "text-stroke-color", picker: "part-paint-text-stroke-color", row: "part-text-stroke-names" };
+  return { hidden: kind, picker: "part-paint-" + kind, row: "part-" + kind + "-names" };
+}
 function selectedPaintName(kind) {
-  var on = document.querySelector("#part-" + kind + "-names [data-paint-name].is-on");
+  var target = paintNameTarget(kind);
+  var on = document.querySelector("#" + target.row + " [data-paint-name].is-on");
   return on ? (on.getAttribute("data-paint-name") || "") : "";
 }
 function bindPaintName(kind, name) {
   var id = selectedPart();
   if (!id || id === "root") return;
+  var target = paintNameTarget(kind);
   if (name) {
-    setControl("part-" + id + "-" + kind, name);
+    setControl("part-" + id + "-" + target.hidden, name);
     var hex = readGlossary()[name];
-    if (hex) setControl("part-paint-" + kind, hex);
+    if (hex) setControl(target.picker, hex);
   } else {
-    var picker = $("part-paint-" + kind);
-    setControl("part-" + id + "-" + kind, picker && picker.value ? picker.value : "");
+    var picker = $(target.picker);
+    setControl("part-" + id + "-" + target.hidden, picker && picker.value ? picker.value : "");
   }
   renderNameChips();
 }
@@ -305,8 +362,14 @@ function writeSelectedPartPaint() {
   if (isTextPart(id) && typeof pressed === "function") {
     setControl("part-" + id + "-text-stroke", pressed("part-paint-text-stroke") ? "true" : "");
     var textStrokeColorEl = $("part-paint-text-stroke-color");
-    if (pressed("part-paint-text-stroke") && textStrokeColorEl && textStrokeColorEl.value) {
-      setControl("part-" + id + "-text-stroke-color", textStrokeColorEl.value);
+    var textStrokeName = selectedPaintName("textStroke");
+    if (pressed("part-paint-text-stroke")) {
+      if (textStrokeName) {
+        if (textStrokeColorEl && textStrokeColorEl.value) glossary[textStrokeName] = textStrokeColorEl.value;
+        setControl("part-" + id + "-text-stroke-color", textStrokeName);
+      } else if (textStrokeColorEl && textStrokeColorEl.value) {
+        setControl("part-" + id + "-text-stroke-color", textStrokeColorEl.value);
+      }
     }
     var textStrokeWidthEl = $("part-paint-text-stroke-width");
     if (pressed("part-paint-text-stroke") && textStrokeWidthEl && textStrokeWidthEl.value !== "") {
@@ -358,11 +421,18 @@ function setDismissChips(mode, autoOn) {
   setPressed("prop-dismiss-anywhere", clickMode === "anywhere");
   if (autoOn !== undefined) setPressed("prop-dismiss-auto", !!autoOn);
   syncClosePartVisibility();
+  syncHoldDragLock();
 }
 function syncClosePartVisibility() {
+  var on = closePartEnabled();
   var studio = document.querySelector(".studio");
-  if (studio) studio.setAttribute("data-close", closePartEnabled() ? "on" : "off");
-  if (!closePartEnabled() && selectedPart() === "close") selectPart("root");
+  if (studio) studio.setAttribute("data-close", on ? "on" : "off");
+  var chip = document.querySelector("#part-chip-row [data-part=close]");
+  if (chip) {
+    if (on) chip.removeAttribute("hidden");
+    else chip.setAttribute("hidden", "");
+  }
+  if (!on && selectedPart() === "close") selectPart("root");
 }
 function partShown(id) {
   if (id === "icon" || id === "assistantName") {
@@ -774,9 +844,13 @@ function flushSelectedPartEditor() {
       setControl("part-" + id + "-font-underline", pressed("part-paint-font-underline") ? "true" : "");
       setControl("part-" + id + "-font-strike", pressed("part-paint-font-strike") ? "true" : "");
       setControl("part-" + id + "-text-stroke", pressed("part-paint-text-stroke") ? "true" : "");
+      var hidTextStrokeColor = $("part-" + id + "-text-stroke-color");
       var textStrokeColorEl = $("part-paint-text-stroke-color");
-      if (pressed("part-paint-text-stroke") && textStrokeColorEl && textStrokeColorEl.value) {
-        setControl("part-" + id + "-text-stroke-color", textStrokeColorEl.value);
+      if (pressed("part-paint-text-stroke") && hidTextStrokeColor) {
+        var currentTextStroke = hidTextStrokeColor.value || "";
+        if (!currentTextStroke || currentTextStroke.charAt(0) === "#") {
+          if (textStrokeColorEl && textStrokeColorEl.value) hidTextStrokeColor.value = textStrokeColorEl.value;
+        }
       }
       var textStrokeWidthEl = $("part-paint-text-stroke-width");
       if (pressed("part-paint-text-stroke") && textStrokeWidthEl && textStrokeWidthEl.value !== "") {
@@ -795,7 +869,7 @@ function flushSelectedPartEditor() {
   ["x", "y", "w", "h", "radius"].forEach(function (axis) {
     var hidden = $("part-" + id + "-" + axis);
     var visible = $("part-paint-" + axis);
-    if (!hidden || !visible || hidden.value === "") return;
+    if (!hidden || !visible || visible.value === "") return;
     hidden.value = visible.value;
   });
   if (id === "icon") {
@@ -803,6 +877,11 @@ function flushSelectedPartEditor() {
     var assetEl = $("part-icon-asset");
     if (sourceEl && !sourceEl.value) sourceEl.value = "assistant";
     if (assetEl) setControl("part-icon-asset-id", assetEl.value || "");
+  }
+  if (isContentSourcePart(id)) {
+    var customTextEl = $("part-custom-text");
+    var hidCustom = $("part-" + id + "-custom-text");
+    if (hidCustom && customTextEl) hidCustom.value = customTextEl.value || "";
   }
   var hidBg = $("part-" + id + "-background");
   if (hidBg && isTextPart(id)) {
@@ -924,6 +1003,7 @@ function selectPart(id, skipFlush) {
       else iconFields.setAttribute("hidden", "");
     }
     if (id === "icon") syncIconSourceUi();
+    if (typeof syncContentSourceUi === "function") syncContentSourceUi(id);
     if (typeof syncStudioSampleUi === "function") syncStudioSampleUi();
   }
   if (id === "root") renderGlossaryRows();
@@ -993,8 +1073,12 @@ function applyModeEditor(value, restorePart) {
   var decoration = skin.decoration || {};
   setControl("prop-anchor", space.anchor || behavior.anchor || meta.anchor);
   setControl("prop-grow", space.grow || ((space.anchor || behavior.anchor || meta.anchor || "bottom-right").slice(0, 3) === "top" ? "down" : "up"));
-  setControl("prop-wrap", space.wrap === "off" || space.wrap === "snake" ? space.wrap : "parallel");
-  if (space.wrap === "snake" || space.wrap === "parallel") lastWrapPath = space.wrap;
+  setControl("prop-wrap", space.wrap === "off" || space.wrap === "snake" || space.wrap === "coil" ? space.wrap : "parallel");
+  if (space.wrap === "snake" || space.wrap === "parallel" || space.wrap === "coil") lastWrapPath = space.wrap;
+  setControl("prop-settle", space.settle === "snap" ? "snap" : "follow");
+  refreshSettlePad();
+  setControl("prop-newest", space.newest === "next" ? "next" : "dock");
+  refreshNewestPad();
   setControl("prop-size", space.size || appearance.size || meta.size);
   setControl("prop-gap", space.gap === undefined ? meta.gap : space.gap);
   var legacyMargin = space.margin === undefined ? (behavior.margin === undefined ? meta.margin : behavior.margin) : space.margin;
@@ -1014,10 +1098,20 @@ function applyModeEditor(value, restorePart) {
   refreshDockMargins();
   refreshGrowPad();
   refreshWrapPad();
+  refreshNewestPad();
+  refreshSettlePad();
   var savedParts = config.parts || {};
   setPartHidden("title", savedParts.title);
   setPartHidden("body", savedParts.body);
   setPartHidden("close", savedParts.close);
+  setPartHidden("icon", savedParts.icon);
+  setPartHidden("assistantName", savedParts.assistantName);
+  setControl("skin-bg-asset", background.assetId || appearance.backgroundAssetId || "");
+  setControl("skin-bg-fit", background.fit || appearance.backgroundFit || "fill");
+  setControl("skin-bg-padding", background.padding == null ? (appearance.backgroundPadding == null ? 0 : appearance.backgroundPadding) : background.padding);
+  setControl("skin-bg-scale", appearance.backgroundScale == null ? 1 : appearance.backgroundScale);
+  setControl("skin-bg-x", appearance.backgroundX == null ? 0.5 : appearance.backgroundX);
+  setControl("skin-bg-y", appearance.backgroundY == null ? 0.5 : appearance.backgroundY);
   setControl("glossary-json", JSON.stringify(config.glossary || {}));
   renderGlossaryRows();
   var part = restorePart ? (rememberedSelectedPart() || ($("part-selected") && $("part-selected").value) || "root") : "root";
@@ -1032,7 +1126,13 @@ function applyModeEditor(value, restorePart) {
   var hoverOn = interaction.hoverHighlight === "on" || interaction.hoverHighlight === true;
   setPressed("prop-hover-highlight", hoverOn);
   setPressed("ticker-hover-highlight", hoverOn);
+  setPressed("ticker-hover-pause", !!(state.profile && state.profile.ticker && state.profile.ticker.hoverPause));
   syncTickerHoverLock();
+  var holdDragOn = interaction.holdDrag !== "off" && interaction.holdDrag !== false;
+  var holdBtn = $("prop-hold-drag");
+  if (holdBtn && holdBtn.setAttribute) holdBtn.setAttribute("data-intent", holdDragOn ? "on" : "off");
+  setPressed("prop-hold-drag", holdDragOn);
+  syncHoldDragLock();
   var width = $("prop-width");
   var height = $("prop-height");
   if (width) width.disabled = false;
@@ -1103,7 +1203,10 @@ function refreshDockMargins() {
   function setSide(id, on) {
     var el = $(id);
     if (!el) return;
-    el.disabled = !on;
+    el.disabled = false;
+    el.removeAttribute("disabled");
+    var field = el.closest ? el.closest(".field") : el.parentElement;
+    if (field && field.classList) field.classList.toggle("is-accent", !!on);
   }
   setSide("prop-margin-left", leftOn);
   setSide("prop-margin-right", rightOn);
@@ -1113,19 +1216,37 @@ function refreshDockMargins() {
 var lastWrapPath = "parallel";
 function wrapFromControls() {
   var wrap = ($("prop-wrap") && $("prop-wrap").value) || "parallel";
-  if (wrap === "off" || wrap === "snake" || wrap === "parallel") return wrap;
+  if (wrap === "off" || wrap === "snake" || wrap === "parallel" || wrap === "coil") return wrap;
   return "parallel";
+}
+function refreshNewestPad() {
+  var newest = ($("prop-newest") && $("prop-newest").value) || "dock";
+  if (newest !== "next") newest = "dock";
+  document.querySelectorAll("[data-newest]").forEach(function (chip) {
+    var on = chip.getAttribute("data-newest") === newest;
+    chip.classList.toggle("is-on", on);
+    chip.setAttribute("aria-pressed", on ? "true" : "false");
+  });
+}
+function refreshSettlePad() {
+  var settle = ($("prop-settle") && $("prop-settle").value) || "follow";
+  if (settle !== "snap") settle = "follow";
+  document.querySelectorAll("[data-settle]").forEach(function (chip) {
+    var on = chip.getAttribute("data-settle") === settle;
+    chip.classList.toggle("is-on", on);
+    chip.setAttribute("aria-pressed", on ? "true" : "false");
+  });
 }
 function refreshWrapPad() {
   var grow = ($("prop-grow") && $("prop-grow").value) || "up";
   var wrap = wrapFromControls();
   var open = wrap !== "off";
-  var path = wrap === "snake" ? "snake" : "parallel";
-  if (wrap === "snake" || wrap === "parallel") lastWrapPath = wrap;
+  var path = wrap === "snake" || wrap === "coil" ? wrap : "parallel";
+  if (wrap === "snake" || wrap === "parallel" || wrap === "coil") lastWrapPath = wrap;
   var label = $("prop-wrap-open-label");
   if (label) label.textContent = (grow === "left" || grow === "right") ? "开新行" : "开新列";
   var note = $("prop-wrap-note");
-  if (note) note.textContent = wrap === "off" ? "满了掀最旧" : wrap === "snake" ? "折返，二维满了掀最旧。停靠是最先来的那张。" : "满了沿另一边开列";
+  if (note) note.textContent = wrap === "off" ? "满了掀最旧" : wrap === "snake" ? "折返，二维满了掀最旧。" : wrap === "coil" ? "越绕越小，满了掀最旧。" : "满了沿另一边开列";
   document.querySelectorAll("[data-wrap-open]").forEach(function (chip) {
     var on = (chip.getAttribute("data-wrap-open") === "off") ? !open : open;
     chip.classList.toggle("is-on", on);
@@ -1168,9 +1289,9 @@ function ctrlNumber(id, fallback, min, max) {
 }
 function writeBgTransform(scale, x, y) {
   if (bgAdjust.target === "icon") {
-    setControl("part-icon-scale", scale);
-    setControl("part-icon-x", x);
-    setControl("part-icon-y", y);
+    setControl("part-icon-bg-scale", scale);
+    setControl("part-icon-bg-x", x);
+    setControl("part-icon-bg-y", y);
     return;
   }
   if (bgAdjust.target && bgAdjust.target !== "root") {
@@ -1271,9 +1392,9 @@ function openBgAdjust(target) {
   bgAdjust.open = true;
   bgAdjust.target = target === "icon" ? "icon" : (target && target !== "root" ? target : "root");
   if (bgAdjust.target === "icon") {
-    bgAdjust.scale = ctrlNumber("part-icon-scale", 1, 0.2, 8);
-    bgAdjust.x = ctrlNumber("part-icon-x", 0.5, 0, 1);
-    bgAdjust.y = ctrlNumber("part-icon-y", 0.5, 0, 1);
+    bgAdjust.scale = ctrlNumber("part-icon-bg-scale", 1, 0.2, 8);
+    bgAdjust.x = ctrlNumber("part-icon-bg-x", 0.5, 0, 1);
+    bgAdjust.y = ctrlNumber("part-icon-bg-y", 0.5, 0, 1);
   } else if (bgAdjust.target !== "root") {
     bgAdjust.scale = ctrlNumber("part-" + bgAdjust.target + "-bg-scale", 1, 0.2, 8);
     bgAdjust.x = ctrlNumber("part-" + bgAdjust.target + "-bg-x", 0.5, 0, 1);
@@ -1383,6 +1504,57 @@ function syncStudioSampleUi() {
   var show = part === "assistantName" || (part === "icon" && source === "assistant");
   if (show) field.removeAttribute("hidden");
   else field.setAttribute("hidden", "");
+}
+function partCustomTextMax(id) {
+  var field = $("part-custom-text-field");
+  var raw = field && field.getAttribute(id === "body" ? "data-body-max" : "data-title-max");
+  var n = Number(raw);
+  return Number.isFinite(n) && n > 0 ? n : (id === "body" ? 4000 : 2000);
+}
+function syncCustomTextCount() {
+  var text = $("part-custom-text");
+  var count = $("part-custom-text-count");
+  if (!text || !count) return;
+  var max = text.maxLength > 0 ? text.maxLength : 0;
+  count.textContent = (text.value || "").length + " / " + max;
+}
+function syncContentSourceUi(id) {
+  id = id || selectedPart();
+  var row = $("part-content-source-row");
+  var field = $("part-custom-text-field");
+  var text = $("part-custom-text");
+  var allowed = isContentSourcePart(id);
+  if (row) {
+    if (allowed) row.removeAttribute("hidden");
+    else row.setAttribute("hidden", "");
+  }
+  var sourceEl = allowed ? $("part-" + id + "-content-source") : null;
+  var custom = allowed && sourceEl && sourceEl.value === "custom";
+  setPressed("part-content-source-event", allowed && !custom);
+  setPressed("part-content-source-custom", !!custom);
+  if (text) {
+    text.maxLength = partCustomTextMax(id);
+    text.rows = id === "body" ? 6 : 3;
+    text.value = allowed ? (($("part-" + id + "-custom-text") && $("part-" + id + "-custom-text").value) || "") : "";
+  }
+  if (field) {
+    if (custom) field.removeAttribute("hidden");
+    else field.setAttribute("hidden", "");
+  }
+  syncCustomTextCount();
+}
+function setContentSource(source) {
+  var id = selectedPart();
+  if (!isContentSourcePart(id)) return;
+  var next = source === "custom" ? "custom" : "";
+  setControl("part-" + id + "-content-source", next);
+  if (next === "custom") {
+    var hid = $("part-" + id + "-custom-text");
+    if (hid && !hid.value) {
+      hid.value = id === "title" ? "自定义标题" : "";
+    }
+  }
+  syncContentSourceUi(id);
 }
 function syncIconSourceUi() {
   var sourceEl = $("part-icon-source");
@@ -1556,6 +1728,14 @@ function studioClickHandler(event) {
     try { localStorage.setItem("nh-bg-wheel-invert", bgAdjust.invert ? "1" : "0"); } catch (error) {}
     return;
   }
+  var contentSourceChip = event.target && event.target.closest ? event.target.closest("#part-content-source-event, #part-content-source-custom") : null;
+  if (contentSourceChip) {
+    event.preventDefault();
+    setContentSource(contentSourceChip.id === "part-content-source-custom" ? "custom" : "event");
+    markVisualDirty();
+    syncPreview();
+    return;
+  }
   var iconSourceChip = event.target && event.target.closest ? event.target.closest("#part-icon-source-assistant, #part-icon-source-custom") : null;
   if (iconSourceChip) {
     event.preventDefault();
@@ -1718,6 +1898,7 @@ function studioClickHandler(event) {
   var partChip = event.target && event.target.closest ? event.target.closest("#part-chip-row [data-part]") : null;
   if (partChip) {
     event.preventDefault();
+    if (partChip.hasAttribute("hidden")) return;
     selectPart(partChip.getAttribute("data-part"));
     return;
   }
@@ -1759,9 +1940,27 @@ function studioClickHandler(event) {
   var wrapPath = event.target && event.target.closest ? event.target.closest("[data-wrap-path]") : null;
   if (wrapPath && wrapPath.getAttribute("aria-disabled") !== "true") {
     var nextWrap = wrapPath.getAttribute("data-wrap-path");
-    if (nextWrap === "snake" || nextWrap === "parallel") lastWrapPath = nextWrap;
+    if (nextWrap === "snake" || nextWrap === "parallel" || nextWrap === "coil") lastWrapPath = nextWrap;
     setControl("prop-wrap", nextWrap);
     refreshWrapPad();
+    markVisualDirty();
+    syncPreview();
+    return;
+  }
+  var newestChip = event.target && event.target.closest ? event.target.closest("[data-newest]") : null;
+  if (newestChip) {
+    var nextNewest = newestChip.getAttribute("data-newest") === "next" ? "next" : "dock";
+    setControl("prop-newest", nextNewest);
+    refreshNewestPad();
+    markVisualDirty();
+    syncPreview();
+    return;
+  }
+  var settleChip = event.target && event.target.closest ? event.target.closest("[data-settle]") : null;
+  if (settleChip) {
+    var nextSettle = settleChip.getAttribute("data-settle") === "snap" ? "snap" : "follow";
+    setControl("prop-settle", nextSettle);
+    refreshSettlePad();
     markVisualDirty();
     syncPreview();
     return;
@@ -1826,12 +2025,38 @@ function studioClickHandler(event) {
   if (hoverBtn) {
     if (hoverBtn.classList && hoverBtn.classList.contains("is-locked") || hoverBtn.getAttribute("aria-disabled") === "true") {
       var toast = $("visual-preview-toast");
-      if (toast) { toast.textContent = "不挡点击开着时，弹幕吃不到鼠标，没法加亮。"; toast.className = "toast"; }
+      if (toast) { toast.textContent = "不挡点击开着时，弹幕吃不到鼠标。"; toast.className = "toast"; }
       return;
     }
     var hoverNext = hoverBtn.getAttribute("aria-pressed") !== "true";
     setPressed("prop-hover-highlight", hoverNext);
     setPressed("ticker-hover-highlight", hoverNext);
+    markVisualDirty();
+    syncPreview();
+    return;
+  }
+  var pauseBtn = event.target && event.target.closest ? event.target.closest("#ticker-hover-pause") : null;
+  if (pauseBtn) {
+    if (pauseBtn.classList && pauseBtn.classList.contains("is-locked") || pauseBtn.getAttribute("aria-disabled") === "true") {
+      var pauseToast = $("visual-preview-toast");
+      if (pauseToast) { pauseToast.textContent = "不挡点击开着时，弹幕吃不到鼠标。"; pauseToast.className = "toast"; }
+      return;
+    }
+    setPressed("ticker-hover-pause", pauseBtn.getAttribute("aria-pressed") !== "true");
+    markVisualDirty();
+    syncPreview();
+    return;
+  }
+  var holdDragBtn = event.target && event.target.closest ? event.target.closest("#prop-hold-drag") : null;
+  if (holdDragBtn) {
+    if (holdDragBtn.classList && holdDragBtn.classList.contains("is-locked") || holdDragBtn.getAttribute("aria-disabled") === "true") {
+      var dragToast = $("visual-preview-toast");
+      if (dragToast) { dragToast.textContent = "任意点击关卡时，按住会当成点击，没法拖。"; dragToast.className = "toast"; }
+      return;
+    }
+    var holdNext = holdDragBtn.getAttribute("data-intent") !== "on";
+    holdDragBtn.setAttribute("data-intent", holdNext ? "on" : "off");
+    setPressed("prop-hold-drag", holdNext);
     markVisualDirty();
     syncPreview();
   }
@@ -1844,7 +2069,8 @@ function request(path, options) {
   var requestOptions = Object.assign({}, options);
   requestOptions.cache = options.cache || "no-store";
   requestOptions.headers = Object.assign({ "Accept": "application/json", "Cache-Control": "no-store", Pragma: "no-cache" }, options.headers || {});
-  if (options.body !== undefined && !requestOptions.headers["Content-Type"] && !requestOptions.headers["content-type"]) requestOptions.headers["Content-Type"] = "application/json";
+  var formBody = typeof FormData === "function" && options.body instanceof FormData;
+  if (options.body !== undefined && !formBody && !requestOptions.headers["Content-Type"] && !requestOptions.headers["content-type"]) requestOptions.headers["Content-Type"] = "application/json";
   var api = window.hana && window.hana.api && typeof window.hana.api.fetch === "function" ? window.hana.api : null;
   try {
     if (api) return Promise.resolve(api.fetch(path, requestOptions));
@@ -1872,12 +2098,31 @@ function readJsonPayload(value) {
   if (typeof value === "object") return Promise.resolve({ ok: value.ok !== false, data: value });
   return Promise.reject(Object.assign(new Error("视觉预览响应不是有效 JSON"), { code: "VISUAL_PREVIEW_RESPONSE_INVALID" }));
 }
+function readPackageAsBase64(file) {
+  return new Promise(function (resolve, reject) {
+    if (!file) {
+      reject(Object.assign(new Error("视觉配置包文件不能为空"), { code: "VISUAL_PACKAGE_FILE_INVALID" }));
+      return;
+    }
+    var reader = new FileReader();
+    reader.onload = function () {
+      var result = String(reader.result || "");
+      var comma = result.indexOf(",");
+      resolve(comma >= 0 ? result.slice(comma + 1) : result);
+    };
+    reader.onerror = function () {
+      reject(Object.assign(new Error("无法读取配置包文件"), { code: "VISUAL_PACKAGE_FILE_INVALID" }));
+    };
+    reader.readAsDataURL(file);
+  });
+}
 function json(path, options) {
   return Promise.resolve(request(path, options)).then(readJsonPayload).then(function (parsed) {
     var data = parsed.data || {};
     if (parsed.ok === false || data.ok === false) {
       var e = new Error((data.error && data.error.message) || "请求失败");
       e.code = (data.error && data.error.code) || "VISUAL_PREVIEW_REQUEST_FAILED";
+      e.details = (data.error && data.error.details) || {};
       throw e;
     }
     return data;
@@ -1958,9 +2203,11 @@ function collect() {
         })(),
         wrap: (function () {
           var wrap = value("prop-wrap", "parallel");
-          if (wrap === "off" || wrap === "snake" || wrap === "parallel") return wrap;
+          if (wrap === "off" || wrap === "snake" || wrap === "parallel" || wrap === "coil") return wrap;
           return "parallel";
         })(),
+        settle: value("prop-settle", "follow") === "snap" ? "snap" : "follow",
+        newest: value("prop-newest", "dock") === "next" ? "next" : "dock",
         gap: integer("prop-gap", 8, 0),
         marginLeft: integer("prop-margin-left", 18, 0),
         marginRight: integer("prop-margin-right", 18, 0),
@@ -1985,6 +2232,12 @@ function collect() {
         var tick = $("ticker-hover-highlight");
         var on = (stack && stack.getAttribute && stack.getAttribute("aria-pressed") === "true") || (tick && tick.getAttribute && tick.getAttribute("aria-pressed") === "true");
         return on ? "on" : "off";
+      })(), holdDrag: (function () {
+        var btn = $("prop-hold-drag");
+        if (!btn || typeof btn.getAttribute !== "function") return "on";
+        var intent = btn.getAttribute("data-intent");
+        if (intent === "on" || intent === "off") return intent;
+        return btn.getAttribute("aria-pressed") === "false" ? "off" : "on";
       })(), expandable: "off", clickable: "off" },
       resource: { maxVisible: 0, maxActive: 0, maxParticles: 0, overflow: "allow" }
     },
@@ -2076,9 +2329,9 @@ function collect() {
       paint.source = sourceEl && sourceEl.value === "custom" ? "custom" : "assistant";
       var assetEl = $("part-icon-asset-id");
       paint.assetId = paint.source === "custom" && assetEl && assetEl.value ? assetEl.value : null;
-      var iconScale = number("part-icon-scale", 1);
-      var iconX = number("part-icon-x", 0.5);
-      var iconY = number("part-icon-y", 0.5);
+      var iconScale = number("part-icon-bg-scale", 1);
+      var iconX = number("part-icon-bg-x", 0.5);
+      var iconY = number("part-icon-bg-y", 0.5);
       if (iconScale !== 1 || iconX !== 0.5 || iconY !== 0.5) {
         paint.backgroundScale = Math.max(0.2, Math.min(8, iconScale));
         paint.backgroundX = Math.max(0, Math.min(1, iconX));
@@ -2099,6 +2352,10 @@ function collect() {
       if (id === "title" || id === "body") {
         var showEl = $("part-" + id + "-show");
         paint.show = !(showEl && showEl.value === "false");
+        var contentSourceEl = $("part-" + id + "-content-source");
+        if (contentSourceEl && contentSourceEl.value === "custom") paint.contentSource = "custom";
+        var customTextEl = $("part-" + id + "-custom-text");
+        if (customTextEl && customTextEl.value) paint.customText = customTextEl.value;
       }
       var sizeEl = $("part-" + id + "-font-size");
       if (sizeEl && sizeEl.value !== "") {
@@ -2128,7 +2385,11 @@ function collect() {
       if (textStrokeEl && textStrokeEl.value === "true") {
         paint.textStroke = true;
         var textStrokeColorEl = $("part-" + id + "-text-stroke-color");
-        if (textStrokeColorEl && /^#[0-9a-fA-F]{6}$/.test(textStrokeColorEl.value)) paint.textStrokeColor = textStrokeColorEl.value;
+        if (textStrokeColorEl && textStrokeColorEl.value) {
+          if (/^#[0-9a-fA-F]{6}$/.test(textStrokeColorEl.value) || (textStrokeColorEl.value.charAt(0) !== "#" && textStrokeColorEl.value.length <= 12)) {
+            paint.textStrokeColor = textStrokeColorEl.value;
+          }
+        }
         var textStrokeWidthEl = $("part-" + id + "-text-stroke-width");
         if (textStrokeWidthEl && textStrokeWidthEl.value !== "") {
           var textStrokeWidth = Math.round(Number(textStrokeWidthEl.value));
@@ -2170,7 +2431,11 @@ function collect() {
       trackGapPx: integer("ticker-track-gap", 8, 0, 48),
       speedRandom: !!($("ticker-speed-random") && $("ticker-speed-random").getAttribute && $("ticker-speed-random").getAttribute("aria-pressed") === "true"),
       clickThrough: !($("ticker-click-through") && $("ticker-click-through").getAttribute && $("ticker-click-through").getAttribute("aria-pressed") === "false"),
-      hoverPause: (p.ticker && p.ticker.hoverPause) === true,
+      hoverPause: (function () {
+        if (!($("ticker-click-through") && $("ticker-click-through").getAttribute && $("ticker-click-through").getAttribute("aria-pressed") === "false")) return false;
+        var pause = $("ticker-hover-pause");
+        return !!(pause && pause.getAttribute && pause.getAttribute("aria-pressed") === "true");
+      })(),
       overflow: (p.ticker && p.ticker.overflow) || "avoid",
       direction: value("ticker-direction", "left")
     };
@@ -2255,6 +2520,8 @@ function applyGlobalVisualState() {
   var enabled = $("global-visual-enabled").checked;
   var label = document.querySelector(".visual-global-toggle span");
   if (label) label.textContent = enabled ? "开启全局视觉" : "关闭全局视觉";
+  if ($("visual-try-one")) $("visual-try-one").disabled = !enabled;
+  if ($("open-visual-preview")) $("open-visual-preview").disabled = !enabled && !previewOpen;
 }
 function markVisualDirty() {
   var status = $("visual-page-status");
@@ -2296,7 +2563,7 @@ function saveVisualSettings() {
     throw error;
   }).finally(function () { if (save) save.disabled = false; });
 }
-var syncIds = ["global-visual-enabled", "global-visual-default-mode", "prop-size", "prop-anchor", "prop-grow", "prop-wrap", "prop-margin-left", "prop-margin-right", "prop-margin-top", "prop-margin-bottom", "prop-gap", "prop-layout", "prop-width", "prop-height", "prop-border-radius", "prop-opacity", "prop-border-width", "prop-border-color", "prop-paint-overflow", "part-paint-fill", "part-paint-fill-box", "part-paint-background", "part-paint-opacity", "part-paint-bg-asset", "part-paint-stroke", "part-paint-stroke-width", "part-paint-x", "part-paint-y", "part-paint-w", "part-paint-h", "part-paint-radius", "part-paint-font-size", "part-paint-font-family", "part-paint-text-stroke-color", "part-paint-text-stroke-width", "part-paint-close-icon-color", "part-icon-asset", "studio-sample-agent", "prop-duration", "prop-hold-duration", "prop-dismiss-mode", "skin-bg-color", "skin-bg-asset", "skin-bg-fit", "skin-bg-padding", "skin-bg-scale", "skin-bg-x", "skin-bg-y", "pipeline-behavior", "pipeline-type", "ticker-speed", "ticker-band", "ticker-band-ratio", "ticker-track-count", "ticker-track-gap", "ticker-min-gap", "ticker-direction"];
+var syncIds = ["global-visual-enabled", "global-visual-default-mode", "prop-size", "prop-anchor", "prop-grow", "prop-wrap", "prop-newest", "prop-settle", "prop-margin-left", "prop-margin-right", "prop-margin-top", "prop-margin-bottom", "prop-gap", "prop-layout", "prop-width", "prop-height", "prop-border-radius", "prop-opacity", "prop-border-width", "prop-border-color", "prop-paint-overflow", "part-paint-fill", "part-paint-fill-box", "part-paint-background", "part-paint-opacity", "part-paint-bg-asset", "part-paint-stroke", "part-paint-stroke-width", "part-paint-x", "part-paint-y", "part-paint-w", "part-paint-h", "part-paint-radius", "part-paint-font-size", "part-paint-font-family", "part-paint-text-stroke-color", "part-paint-text-stroke-width", "part-paint-close-icon-color", "part-icon-asset", "part-custom-text", "studio-sample-agent", "prop-duration", "prop-hold-duration", "prop-dismiss-mode", "skin-bg-color", "skin-bg-asset", "skin-bg-fit", "skin-bg-padding", "skin-bg-scale", "skin-bg-x", "skin-bg-y", "pipeline-behavior", "pipeline-type", "ticker-speed", "ticker-band", "ticker-band-ratio", "ticker-track-count", "ticker-track-gap", "ticker-min-gap", "ticker-direction"];
 var syncIdSet = {};
 syncIds.forEach(function (id) { syncIdSet[id] = true; });
 function clampNumberInput(el, hard) {
@@ -2335,6 +2602,11 @@ function visualInputHandler(event) {
   if (target.id === "part-paint-fill" || target.id === "part-paint-fill-box" || target.id === "part-paint-background" || target.id === "part-paint-opacity" || target.id === "part-paint-bg-asset" || target.id === "part-paint-stroke" || target.id === "part-paint-stroke-width" || target.id === "part-paint-text-stroke-color" || target.id === "part-paint-text-stroke-width" || target.id === "part-paint-close-icon-color") writeSelectedPartPaint();
   if (target.id === "part-paint-x" || target.id === "part-paint-y" || target.id === "part-paint-w" || target.id === "part-paint-h" || target.id === "part-paint-radius") writeSelectedPartAxis(target.id.slice("part-paint-".length));
   if (target.id === "part-icon-asset") setControl("part-icon-asset-id", target.value || "");
+  if (target.id === "part-custom-text") {
+    var contentPart = selectedPart();
+    if (isContentSourcePart(contentPart)) setControl("part-" + contentPart + "-custom-text", target.value || "");
+    syncCustomTextCount();
+  }
   if (target.id === "part-paint-bg-asset") {
     var partId = selectedPart();
     if (partId && partId !== "root" && partId !== "icon") {
@@ -2429,10 +2701,12 @@ var tryOne = $("visual-try-one");
 if (tryOne) tryOne.addEventListener("click", function () {
   tryOne.disabled = true;
   Promise.resolve(json("visual-try-one", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(studioNativeBody()) })).then(function (result) {
-    feedback("visual-settings-feedback", "已试一条" + (result.behaviorId === "ticker" ? "弹幕" : "堆叠"), "success");
+    var text = "已试一条" + (result.behaviorId === "ticker" ? "弹幕" : "堆叠");
+    if (result.overflowHint) text += "，" + result.overflowHint;
+    feedback("visual-settings-feedback", text, "success");
     loadVisualDiagnostics().catch(function () {});
   }).catch(function (error) {
-    feedback("visual-settings-feedback", (error.code ? error.code + " · " : "") + error.message, "error");
+    feedback("visual-settings-feedback", studioErrorText(error), "error");
   }).finally(function () { tryOne.disabled = false; });
 });
 var saveSettings = $("visual-settings-save");
@@ -2502,7 +2776,7 @@ function renderProfileList(profiles) {
   root.innerHTML = '<div class="profile-list">' + list.map(function (p) {
     var refs = p.references && p.references.length ? '<span class="profile-refs">' + esc(p.references.length + " 个事件") + "</span>" : '<span class="profile-refs muted">未使用</span>';
     var canDelete = p.profileId !== "visual.default";
-    var action = '<button type="button" class="secondary profile-export" data-profile-id="' + esc(p.profileId) + '" data-profile-name="' + esc(p.name) + '">导出</button>' + (canDelete ? '<button type="button" class="secondary profile-delete" data-profile-id="' + esc(p.profileId) + '" data-profile-name="' + esc(p.name) + '">删除</button>' : "");
+    var action = '<button type="button" class="secondary profile-rename" data-profile-id="' + esc(p.profileId) + '" data-profile-name="' + esc(p.name) + '">重命名</button><button type="button" class="secondary profile-export" data-profile-id="' + esc(p.profileId) + '" data-profile-name="' + esc(p.name) + '">导出</button>' + (canDelete ? '<button type="button" class="secondary profile-delete" data-profile-id="' + esc(p.profileId) + '" data-profile-name="' + esc(p.name) + '">删除</button>' : "");
     return '<div class="profile-list-item" data-profile-id="' + esc(p.profileId) + '"><span class="profile-list-name">' + esc(p.name) + '</span><span class="profile-list-meta">' + refs + '<span class="profile-source">' + esc(sourceLabel(p.source)) + "</span>" + action + "</span></div>";
   }).join("") + "</div>";
 }
@@ -2558,6 +2832,23 @@ function exportSavedProfile(profileId, profileName, button) {
     profileFeedback.className = "feedback error";
   }).finally(function () { if (button) button.disabled = false; });
 }
+function exportAllProfiles(button) {
+  var ids = (state.profiles || []).map(function (p) { return p.profileId; }).filter(function (id) { return id && id !== "visual.default"; });
+  if (!ids.length) {
+    profileFeedback.textContent = "没有可导出的自定义配置包";
+    profileFeedback.className = "feedback error";
+    return;
+  }
+  if (button) button.disabled = true;
+  profileFeedback.textContent = "正在导出全部配置包…";
+  Promise.resolve(json("visual-package-export", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ profileIds: ids, meta: { packageName: "视觉配置" } }) })).then(function (data) {
+    profileFeedback.textContent = data.cancelled ? "已取消导出" : "已导出 " + ids.length + " 份配置包：" + (data.savedFilename || "已完成");
+    profileFeedback.className = data.cancelled ? "feedback" : "feedback success";
+  }).catch(function (error) {
+    profileFeedback.textContent = (error.code ? error.code + " · " : "") + error.message;
+    profileFeedback.className = "feedback error";
+  }).finally(function () { if (button) button.disabled = false; });
+}
 function closeDeleteDialog() {
   pendingDeleteId = null;
   if (deleteDialog) deleteDialog.style.display = "none";
@@ -2588,7 +2879,180 @@ function confirmDeleteProfile() {
     profileFeedback.className = "feedback error";
   });
 }
+var exportAllBtn = $("visual-profile-export-all");
+var importBtn = $("visual-profile-import");
+var packageFile = $("visual-package-file");
+var missingDialog = $("visual-missing-asset-dialog");
+var missingList = $("visual-missing-asset-list");
+var missingClear = $("visual-missing-clear");
+var missingCancel = $("visual-missing-cancel");
+var importDialog = $("visual-import-dialog");
+var importName = $("visual-import-name");
+var importConflict = $("visual-import-conflict");
+var importDefaultGuard = $("visual-import-default-guard");
+var importSync = $("visual-import-sync-events");
+var importOverwrite = $("visual-import-overwrite");
+var importKeep = $("visual-import-keep");
+var importCommit = $("visual-import-commit");
+var importCancel = $("visual-import-cancel");
+var renameDialog = $("visual-rename-dialog");
+var renameInput = $("visual-rename-input");
+var renameConfirm = $("visual-rename-confirm");
+var renameCancel = $("visual-rename-cancel");
+var pendingPackageFile = null;
+var pendingImportPreview = null;
+var pendingClearMissing = false;
+var pendingMissingMode = null;
+var pendingRenameId = null;
+function closeMissingDialog() {
+  if (missingDialog) missingDialog.style.display = "none";
+}
+function closeImportDialog() {
+  pendingPackageFile = null;
+  pendingImportPreview = null;
+  pendingClearMissing = false;
+  if (importDialog) importDialog.style.display = "none";
+  if (packageFile) packageFile.value = "";
+}
+function closeRenameDialog() {
+  pendingRenameId = null;
+  if (renameDialog) renameDialog.style.display = "none";
+}
+function openRenameDialog(profile) {
+  pendingRenameId = profile.profileId;
+  if (renameInput) renameInput.value = profile.name || profile.profileId;
+  if (renameDialog) renameDialog.style.display = "flex";
+  if (renameInput) renameInput.focus();
+}
+function confirmRenameProfile() {
+  if (!pendingRenameId || !renameInput) return;
+  var name = renameInput.value.trim();
+  if (!name) {
+    profileFeedback.textContent = "请输入配置包名称";
+    profileFeedback.className = "feedback error";
+    return;
+  }
+  var id = pendingRenameId;
+  Promise.resolve(json("visual-profiles/rename", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ profileId: id, name: name }) })).then(function (result) {
+    if (result.profile) upsertProfileState(result.profile);
+    refreshProfiles();
+    profileFeedback.textContent = "已重命名：" + name;
+    profileFeedback.className = "feedback success";
+    closeRenameDialog();
+  }).catch(function (error) {
+    profileFeedback.textContent = (error.code ? error.code + " · " : "") + error.message;
+    profileFeedback.className = "feedback error";
+  });
+}
+function applyImportedLook(report) {
+  var registered = report && report.profiles && report.profiles.registered && report.profiles.registered[0];
+  if (!registered || !registered.profile) return Promise.resolve();
+  return Promise.resolve(json("visual-settings-update", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ profile: registered.profile }) })).then(function () {
+    return hydrateVisualFromServer();
+  }).catch(function () { return null; });
+}
+function commitVisualPackageImport(strategy) {
+  if (!pendingPackageFile) return;
+  var file = pendingPackageFile;
+  profileFeedback.textContent = "正在导入配置包…";
+  profileFeedback.className = "feedback";
+  Promise.resolve(readPackageAsBase64(file)).then(function (base64) {
+    return json("visual-package-import", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ base64: base64, strategy: strategy, applyBindings: !(importSync && importSync.checked === false), clearMissingAssets: !!pendingClearMissing, clearMissingFonts: !!pendingClearMissing }) });
+  }).then(function (result) {
+    var report = result.report || {};
+    if (report.failed) {
+      profileFeedback.textContent = "导入失败，已回滚：" + (report.failedStage || "unknown") + (report.error && report.error.message ? " · " + report.error.message : "");
+      profileFeedback.className = "feedback error";
+      closeImportDialog();
+      return;
+    }
+    return Promise.resolve(json("visual-profiles", { method: "GET" })).then(function (data) {
+      state.profiles = Array.isArray(data.profiles) ? data.profiles : state.profiles;
+      refreshProfiles();
+      loadBoundEvents().catch(function () {});
+      return applyImportedLook(report);
+    }).then(function () {
+      var count = report.profiles && report.profiles.registered ? report.profiles.registered.length : 0;
+      var skipped = report.profiles && report.profiles.skipped ? report.profiles.skipped.length : 0;
+      profileFeedback.textContent = count ? "配置包已导入" : (skipped ? "已保留本地配置包" : "配置包未改动");
+      profileFeedback.className = "feedback success";
+      closeImportDialog();
+    });
+  }).catch(function (error) {
+    profileFeedback.textContent = (error.code ? error.code + " · " : "") + error.message;
+    profileFeedback.className = "feedback error";
+  });
+}
+function openImportDialog(preview) {
+  pendingImportPreview = preview || {};
+  var conflict = Number(pendingImportPreview.conflictProfiles || 0) > 0;
+  var protectedConflict = Array.isArray(pendingImportPreview.profiles) && pendingImportPreview.profiles.some(function (item) { return item && item.protected; });
+  if (importName) importName.textContent = pendingImportPreview.packageName || pendingImportPreview.packageId || pendingPackageFile && pendingPackageFile.name || "未命名";
+  if (importConflict) importConflict.hidden = !conflict;
+  if (importDefaultGuard) importDefaultGuard.hidden = !protectedConflict;
+  if (importSync) importSync.checked = true;
+  if (importOverwrite) {
+    importOverwrite.style.display = conflict && !protectedConflict ? "" : "none";
+    importOverwrite.disabled = !!protectedConflict;
+  }
+  if (importKeep) importKeep.style.display = conflict ? "" : "none";
+  if (importCommit) importCommit.style.display = conflict ? "none" : "";
+  if (importDialog) importDialog.style.display = "flex";
+}
+function openMissingDialog(preview, mode) {
+  preview = preview || {};
+  pendingMissingMode = mode || "import";
+  var missingAssets = Array.isArray(preview.missingAssets) ? preview.missingAssets : [];
+  var missingFonts = Array.isArray(preview.missingFonts) ? preview.missingFonts : [];
+  var copyEl = $("visual-missing-copy");
+  if (copyEl) {
+    if (missingAssets.length && missingFonts.length) copyEl.textContent = "配置包用到的底图或字体在库里找不到。缺的是：";
+    else if (missingFonts.length) copyEl.textContent = "配置包用到的字体在字体库里找不到。缺的是：";
+    else copyEl.textContent = "配置包用到的底图在素材库里找不到。缺的是：";
+  }
+  if (missingClear) {
+    if (missingAssets.length && missingFonts.length) missingClear.textContent = "去掉缺失项并导入";
+    else if (missingFonts.length) missingClear.textContent = "回雅黑导入";
+    else missingClear.textContent = "无底图导入";
+  }
+  if (missingList) {
+    var items = []
+      .concat(missingAssets.map(function (item) { return "<li>底图 · " + esc(item.name || item.assetId) + "</li>"; }))
+      .concat(missingFonts.map(function (item) { return "<li>字体 · " + esc(item.name || item.assetId) + "</li>"; }));
+    missingList.innerHTML = items.length ? items.join("") : "<li>未提供缺失标识</li>";
+  }
+  if (missingDialog) missingDialog.style.display = "flex";
+}
+function beginPackagePreview(file) {
+  pendingPackageFile = file;
+  pendingClearMissing = false;
+  pendingMissingMode = "import";
+  profileFeedback.textContent = "正在检查配置包…";
+  profileFeedback.className = "feedback";
+  Promise.resolve(readPackageAsBase64(file)).then(function (base64) {
+    return json("visual-package-preview", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ base64: base64 }) });
+  }).then(function (data) {
+    var preview = data.preview || {};
+    if (preview.missingAssetCount || (preview.missingAssets && preview.missingAssets.length) || preview.missingFontCount || (preview.missingFonts && preview.missingFonts.length)) {
+      pendingImportPreview = preview;
+      openMissingDialog(preview, "import");
+      return;
+    }
+    openImportDialog(preview);
+  }).catch(function (error) {
+    profileFeedback.textContent = (error.code ? error.code + " · " : "") + error.message;
+    profileFeedback.className = "feedback error";
+    closeImportDialog();
+  });
+}
 function visualProfileClickHandler(event) {
+  var renameButton = event.target && event.target.closest ? event.target.closest(".profile-rename") : null;
+  if (renameButton) {
+    var renameId = renameButton.getAttribute("data-profile-id");
+    var renameProfile = (state.profiles || []).find(function (p) { return p.profileId === renameId; }) || { profileId: renameId, name: renameButton.getAttribute("data-profile-name") || renameId };
+    openRenameDialog(renameProfile);
+    return;
+  }
   var exportButton = event.target && event.target.closest ? event.target.closest(".profile-export") : null;
   if (exportButton) {
     exportSavedProfile(exportButton.getAttribute("data-profile-id"), exportButton.getAttribute("data-profile-name"), exportButton);
@@ -2602,6 +3066,39 @@ function visualProfileClickHandler(event) {
   openDeleteDialog(profile);
 }
 document.addEventListener("click", visualProfileClickHandler);
+if (exportAllBtn) exportAllBtn.addEventListener("click", function () { exportAllProfiles(exportAllBtn); });
+if (importBtn && packageFile) importBtn.addEventListener("click", function () { packageFile.click(); });
+if (packageFile) packageFile.addEventListener("change", function () {
+  var file = this.files && this.files[0];
+  if (!file) return;
+  beginPackagePreview(file);
+});
+if (missingClear) missingClear.addEventListener("click", function () {
+  pendingClearMissing = true;
+  closeMissingDialog();
+  openImportDialog(pendingImportPreview || {});
+});
+if (missingCancel) missingCancel.addEventListener("click", function () {
+  pendingMissingMode = null;
+  closeMissingDialog();
+  closeImportDialog();
+  profileFeedback.textContent = "已取消导入";
+  profileFeedback.className = "feedback";
+});
+if (importOverwrite) importOverwrite.addEventListener("click", function () { commitVisualPackageImport("overwrite"); });
+if (importKeep) importKeep.addEventListener("click", function () { commitVisualPackageImport("skip"); });
+if (importCommit) importCommit.addEventListener("click", function () { commitVisualPackageImport("copy"); });
+if (importCancel) importCancel.addEventListener("click", function () {
+  closeImportDialog();
+  profileFeedback.textContent = "已取消导入";
+  profileFeedback.className = "feedback";
+});
+if (renameConfirm) renameConfirm.addEventListener("click", confirmRenameProfile);
+if (renameCancel) renameCancel.addEventListener("click", closeRenameDialog);
+if (renameInput) renameInput.addEventListener("keydown", function (event) {
+  if (event.key === "Enter") confirmRenameProfile();
+  if (event.key === "Escape") closeRenameDialog();
+});
 if (saveBtn) saveBtn.addEventListener("click", function () {
   var name = nameInput.value.trim();
   if (!name) {

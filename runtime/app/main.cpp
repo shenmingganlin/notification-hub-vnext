@@ -5,9 +5,11 @@
 #include "../transport/named_pipe.hpp"
 #include "../scene/controller.hpp"
 #include "../scene/layout.hpp"
+#include "../scene/follow.hpp"
 #include "../scene/ticker.hpp"
 #include "../scene/work_area.hpp"
 #include "../scene/window.hpp"
+#include "../scene/overlay.hpp"
 #include "../scene/visual.hpp"
 
 #ifdef _WIN32
@@ -15,6 +17,7 @@
 #endif
 
 #include <chrono>
+#include <cstdint>
 #include <iostream>
 #include <limits>
 #include <string>
@@ -44,6 +47,7 @@ using notification_hub::scene::StackCardInput;
 using notification_hub::scene::StackDirection;
 using notification_hub::scene::StackLayoutOptions;
 using notification_hub::scene::StackWrap;
+using notification_hub::scene::StackNewest;
 using notification_hub::scene::layout_stack;
 using notification_hub::scene::layout_shelf;
 using notification_hub::scene::fallback_work_area;
@@ -797,6 +801,53 @@ bool layout_self_test() {
         || snake_mixed.placements[3].id != "4" || snake_mixed.placements[3].x != 120 || snake_mixed.placements[3].y != 40
         || snake_mixed.placements[4].id != "5" || snake_mixed.placements[4].x != 80 || snake_mixed.placements[4].y != 40) {
         std::cerr << "stack layout snake mixed failed\n";
+        return false;
+    }
+
+    StackLayoutOptions coil_options;
+    coil_options.direction = StackDirection::Down;
+    coil_options.anchor = StackAnchor::TopLeft;
+    coil_options.spacing = 0;
+    coil_options.work_area_width = 200;
+    coil_options.work_area_height = 200;
+    coil_options.dpi_scale = 1.0f;
+    coil_options.wrap = StackWrap::Coil;
+    coil_options.newest = StackNewest::Next;
+    std::vector<StackCardInput> coil_cards;
+    coil_cards.reserve(16);
+    for (int i = 1; i <= 16; ++i) {
+        coil_cards.push_back({ std::to_string(i), 50, 50 });
+    }
+    const auto coiled = layout_stack(coil_cards, coil_options);
+    if (!coiled.ok || coiled.placements.size() != 16
+        || coiled.placements[0].id != "1" || coiled.placements[0].x != 0 || coiled.placements[0].y != 0
+        || coiled.placements[3].id != "4" || coiled.placements[3].x != 0 || coiled.placements[3].y != 150
+        || coiled.placements[6].id != "7" || coiled.placements[6].x != 150 || coiled.placements[6].y != 150
+        || coiled.placements[9].id != "10" || coiled.placements[9].x != 150 || coiled.placements[9].y != 0
+        || coiled.placements[11].id != "12" || coiled.placements[11].x != 50 || coiled.placements[11].y != 0
+        || coiled.placements[15].id != "16" || coiled.placements[15].x != 100 || coiled.placements[15].y != 50) {
+        std::cerr << "stack layout coil failed\n";
+        return false;
+    }
+    StackLayoutOptions coil_dock = coil_options;
+    coil_dock.newest = StackNewest::Dock;
+    coil_dock.direction = StackDirection::Up;
+    const auto coiled_dock = layout_stack({{ "old", 50, 50 }, { "new", 50, 50 }}, coil_dock);
+    if (!coiled_dock.ok || coiled_dock.placements.size() != 2
+        || coiled_dock.placements[0].id != "new" || coiled_dock.placements[0].x != 0 || coiled_dock.placements[0].y != 0
+        || coiled_dock.placements[1].id != "old" || coiled_dock.placements[1].x != 0 || coiled_dock.placements[1].y != 50) {
+        std::cerr << "stack layout coil dock failed\n";
+        return false;
+    }
+    const auto coil_overflow = layout_stack(
+        [] {
+            std::vector<StackCardInput> cards;
+            for (int i = 1; i <= 17; ++i) cards.push_back({ std::to_string(i), 50, 50 });
+            return cards;
+        }(),
+        coil_options);
+    if (coil_overflow.ok || coil_overflow.code != "LAYOUT_CARD_OUT_OF_BOUNDS") {
+        std::cerr << "stack layout coil overflow failed\n";
         return false;
     }
 
@@ -2262,9 +2313,12 @@ bool render_self_test() {
         180,
         true});
     if (!window.create() || !window.is_renderer_ready()) {
+        const auto detail = window.create_error().empty()
+            ? std::string("Direct2D or DirectWrite resources could not be initialized")
+            : window.create_error();
         const auto event = create_event(
             "render-self-test", "renderer-created", "RENDERER_RESOURCE_FAILED", "error", false,
-            "Direct2D or DirectWrite resources could not be initialized", std::string(kTimestamp));
+            detail, std::string(kTimestamp));
         std::cerr << serialize_jsonl(event);
         return false;
     }
@@ -2306,9 +2360,12 @@ bool window_self_test() {
         120,
         true});
     if (!window.create()) {
+        const auto detail = window.create_error().empty()
+            ? std::string("Native scene window creation failed")
+            : window.create_error();
         const auto event = create_event(
             "window-self-test", "renderer-created", "RENDERER_WINDOW_CREATE_FAILED", "error", false,
-            "Native scene window creation failed", std::string(kTimestamp));
+            detail, std::string(kTimestamp));
         std::cerr << serialize_jsonl(event);
         return false;
     }
@@ -2491,16 +2548,287 @@ bool protocol_self_test() {
     return true;
 }
 
+bool follow_self_test() {
+    using notification_hub::scene::FollowState;
+    using notification_hub::scene::tick_follow;
+    using notification_hub::scene::clamp_follow_dt;
+
+    FollowState chase{};
+    double overshoot = 0.0;
+    bool settled = false;
+    for (int i = 0; i < 120; ++i) {
+        const auto step = tick_follow(chase, 200.0, 80.0, 1.0 / 60.0);
+        chase = step.state;
+        settled = step.settled;
+        if (chase.x - 200.0 > overshoot) overshoot = chase.x - 200.0;
+        if (chase.y - 80.0 > overshoot) overshoot = chase.y - 80.0;
+        if (settled) break;
+    }
+    if (!settled || overshoot > 8.0) {
+        std::cerr << "follow chase failed: settled=" << settled << " overshoot=" << overshoot
+                  << " x=" << chase.x << " y=" << chase.y << "\n";
+        return false;
+    }
+
+    FollowState rest{200.0, 80.0, 0.0, 0.0};
+    const auto rest_step = tick_follow(rest, 200.0, 80.0, 1.0 / 60.0);
+    if (!rest_step.settled || rest_step.state.x != 200.0 || rest_step.state.y != 80.0
+        || rest_step.state.vx != 0.0 || rest_step.state.vy != 0.0) {
+        std::cerr << "follow rest step must stay settled on target\n";
+        return false;
+    }
+
+    if (std::abs(clamp_follow_dt(2.0) - (1.0 / 20.0)) > 1e-9) {
+        std::cerr << "follow dt clamp failed\n";
+        return false;
+    }
+    FollowState huge{};
+    const auto huge_step = tick_follow(huge, 200.0, 80.0, 2.0);
+    if (std::abs(huge_step.state.x) > 400.0 || std::abs(huge_step.state.y) > 200.0) {
+        std::cerr << "follow huge dt escaped: x=" << huge_step.state.x << " y=" << huge_step.state.y << "\n";
+        return false;
+    }
+
+    const auto event = create_event(
+        "follow-self-test", "follow-integrated", "STACK_SETTLE_FOLLOW_OK", "info", true,
+        "Critically damped stack follow integrator completed", std::string(kTimestamp));
+    std::cout << serialize_jsonl(event);
+    return true;
+}
+
+bool overlay_self_test() {
+    using notification_hub::scene::OverlaySpriteBox;
+    using notification_hub::scene::OverlayWorkArea;
+    using notification_hub::scene::TickerOverlay;
+    using notification_hub::scene::hit_test_overlay_sprites;
+    using notification_hub::scene::overlay_host_rect;
+    using notification_hub::scene::overlay_should_highlight;
+    using notification_hub::scene::overlay_should_pause;
+    using notification_hub::scene::ticker_spawn_shift_ms;
+
+    const auto host = overlay_host_rect(OverlayWorkArea{10, 20, 800, 600});
+    if (host.left != 10 || host.top != 20 || host.width != 800 || host.height != 600) {
+        std::cerr << "overlay host rect failed\n";
+        return false;
+    }
+    const std::vector<OverlaySpriteBox> boxes{{"old", 0, 0, 50, 50}, {"new", 20, 20, 50, 50}};
+    if (hit_test_overlay_sprites(boxes, 25, 25) != "new") {
+        std::cerr << "overlay hit newest-on-top failed\n";
+        return false;
+    }
+    if (!hit_test_overlay_sprites(boxes, 400, 400).empty()) {
+        std::cerr << "overlay hit empty failed\n";
+        return false;
+    }
+    if (overlay_should_highlight(true, "a", "a", true)
+        || overlay_should_pause(true, "a", "a", true)
+        || overlay_should_highlight(false, "a", "b", true)
+        || overlay_should_pause(false, "a", "b", true)
+        || !overlay_should_highlight(false, "a", "a", true)
+        || !overlay_should_pause(false, "a", "a", true)
+        || overlay_should_highlight(false, "a", "a", false)
+        || overlay_should_pause(false, "a", "a", false)
+        || ticker_spawn_shift_ms(16.0, false) != 0.0
+        || ticker_spawn_shift_ms(16.0, true) != 16.0) {
+        std::cerr << "overlay hover law failed\n";
+        return false;
+    }
+
+    TickerOverlay overlay;
+    if (!overlay.create(48, 48, 320, 180)) {
+        std::cerr << "overlay create failed " << overlay.last_error() << "\n";
+        return false;
+    }
+    std::vector<std::uint8_t> red(static_cast<std::size_t>(80 * 40 * 4), 0);
+    std::vector<std::uint8_t> green = red;
+    for (int i = 0; i < 80 * 40; ++i) {
+        red[static_cast<std::size_t>(i * 4 + 2)] = 180;
+        red[static_cast<std::size_t>(i * 4 + 3)] = 180;
+        green[static_cast<std::size_t>(i * 4 + 1)] = 180;
+        green[static_cast<std::size_t>(i * 4 + 3)] = 180;
+    }
+    if (!overlay.add_sprite("a", 80, 40, red.data(), 80 * 4)
+        || !overlay.add_sprite("b", 80, 40, green.data(), 80 * 4)) {
+        std::cerr << "overlay add failed " << overlay.last_error() << "\n";
+        overlay.destroy();
+        return false;
+    }
+    if (!overlay.set_offset("a", 56, 56) || !overlay.set_offset("b", 100, 64) || !overlay.commit()) {
+        std::cerr << "overlay move failed " << overlay.last_error() << "\n";
+        overlay.destroy();
+        return false;
+    }
+    const auto paints_after_add = overlay.paint_count();
+    const auto commits_after_move = overlay.commit_count();
+    if (paints_after_add != 2) {
+        std::cerr << "overlay paint_count " << paints_after_add << "\n";
+        overlay.destroy();
+        return false;
+    }
+    if (!overlay.set_offset("a", 120, 70) || !overlay.commit()) {
+        std::cerr << "overlay second move failed " << overlay.last_error() << "\n";
+        overlay.destroy();
+        return false;
+    }
+    if (overlay.paint_count() != paints_after_add) {
+        std::cerr << "overlay move painted\n";
+        overlay.destroy();
+        return false;
+    }
+    if (overlay.commit_count() <= commits_after_move) {
+        std::cerr << "overlay commit did not rise\n";
+        overlay.destroy();
+        return false;
+    }
+    if (overlay.hit_test(190, 80) != "a") {
+        std::cerr << "overlay live hit failed got=" << overlay.hit_test(190, 80) << "\n";
+        overlay.destroy();
+        return false;
+    }
+    if (overlay.hit_test(110, 70) != "b") {
+        std::cerr << "overlay live hit top sprite failed got=" << overlay.hit_test(110, 70) << "\n";
+        overlay.destroy();
+        return false;
+    }
+#ifdef _WIN32
+    const auto overlay_hwnd = static_cast<HWND>(overlay.native_handle());
+    const auto nchit = [](HWND hwnd, int x, int y) {
+        return SendMessageW(hwnd, WM_NCHITTEST, 0, MAKELPARAM(x, y));
+    };
+    if (!overlay.set_click_through(true)
+        || nchit(overlay_hwnd, 190, 80) != HTTRANSPARENT
+        || nchit(overlay_hwnd, 300, 160) != HTTRANSPARENT) {
+        std::cerr << "overlay click-through still captures\n";
+        overlay.destroy();
+        return false;
+    }
+    const HWND empty_hit = WindowFromPoint(POINT{300, 160});
+    if (empty_hit == overlay_hwnd) {
+        std::cerr << "overlay WindowFromPoint still hits host hwnd=" << overlay_hwnd << "\n";
+        overlay.destroy();
+        return false;
+    }
+    if (!overlay.set_click_through(false)
+        || nchit(overlay_hwnd, 190, 80) != HTCLIENT
+        || nchit(overlay_hwnd, 300, 160) != HTTRANSPARENT) {
+        std::cerr << "overlay click-through off hit holes failed\n";
+        overlay.destroy();
+        return false;
+    }
+    overlay.note_pointer(190, 80);
+    if (overlay.hovered_id() != "a") {
+        std::cerr << "overlay hover miss got=" << overlay.hovered_id() << "\n";
+        overlay.destroy();
+        return false;
+    }
+    overlay.note_pointer(300, 160);
+    if (!overlay.hovered_id().empty()) {
+        std::cerr << "overlay hover empty miss\n";
+        overlay.destroy();
+        return false;
+    }
+    overlay.note_pointer(190, 80);
+    if (!overlay.set_click_through(true) || !overlay.hovered_id().empty()) {
+        std::cerr << "overlay hover survived click-through\n";
+        overlay.destroy();
+        return false;
+    }
+    if (!overlay.set_click_through(false)) {
+        std::cerr << "overlay restore click-through off failed\n";
+        overlay.destroy();
+        return false;
+    }
+    overlay.note_pointer(190, 80);
+    if (overlay.hovered_id() != "a") {
+        std::cerr << "overlay hover after unlock failed\n";
+        overlay.destroy();
+        return false;
+    }
+    const HWND empty_hit_off = WindowFromPoint(POINT{300, 160});
+    if (empty_hit_off == overlay_hwnd) {
+        std::cerr << "overlay empty area still owns mouse hwnd=" << overlay_hwnd << "\n";
+        overlay.destroy();
+        return false;
+    }
+    overlay.destroy();
+
+    RECT work{};
+    if (SystemParametersInfoW(SPI_GETWORKAREA, 0, &work, 0) == FALSE) {
+        std::cerr << "overlay work area query failed\n";
+        return false;
+    }
+    TickerOverlay full_overlay;
+    const int host_w = work.right - work.left;
+    const int host_h = work.bottom - work.top;
+    if (!full_overlay.create(work.left, work.top, host_w, host_h)) {
+        std::cerr << "overlay host create failed " << full_overlay.last_error() << "\n";
+        return false;
+    }
+    if (!full_overlay.add_sprite("a", 80, 40, red.data(), 80 * 4)
+        || !full_overlay.set_offset("a", work.left + 24, work.top + 24)
+        || !full_overlay.commit() || !full_overlay.set_click_through(true)) {
+        std::cerr << "overlay host sprite failed " << full_overlay.last_error() << "\n";
+        full_overlay.destroy();
+        return false;
+    }
+    const auto pump = []() {
+        MSG msg{};
+        while (PeekMessageW(&msg, nullptr, 0, 0, PM_REMOVE)) {
+            TranslateMessage(&msg);
+            DispatchMessageW(&msg);
+        }
+        Sleep(80);
+    };
+    pump();
+    const POINT host_empty{
+        work.left + host_w / 2,
+        work.top + host_h / 2};
+    const POINT sprite_point{work.left + 64, work.top + 44};
+    const HWND host_hwnd = static_cast<HWND>(full_overlay.native_handle());
+    if (WindowFromPoint(host_empty) == host_hwnd || WindowFromPoint(sprite_point) == host_hwnd) {
+        std::cerr << "fullscreen overlay still owns mouse hwnd=" << host_hwnd
+                  << " nchit-empty=" << nchit(host_hwnd, host_empty.x, host_empty.y) << "\n";
+        full_overlay.destroy();
+        return false;
+    }
+    if (!full_overlay.set_click_through(false)) {
+        std::cerr << "overlay click-through off failed\n";
+        full_overlay.destroy();
+        return false;
+    }
+    pump();
+    if (WindowFromPoint(host_empty) == host_hwnd) {
+        std::cerr << "overlay empty area still owns mouse hwnd=" << host_hwnd << "\n";
+        full_overlay.destroy();
+        return false;
+    }
+    if (WindowFromPoint(sprite_point) != host_hwnd) {
+        std::cerr << "overlay card rect lost mouse hwnd=" << host_hwnd
+                  << " hit=" << WindowFromPoint(sprite_point) << "\n";
+        full_overlay.destroy();
+        return false;
+    }
+    full_overlay.destroy();
+#endif
+    const auto event = create_event(
+        "overlay-self-test", "overlay-integrated", "TICKER_OVERLAY_COMPOSITOR_OK", "info", true,
+        "Ticker overlay moved sprites without reuploading card surfaces", std::string(kTimestamp));
+    std::cout << serialize_jsonl(event);
+    return true;
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
     if (argc > 1 && std::string_view(argv[1]) == "--self-test") {
         const bool protocol_passed = protocol_self_test();
         const bool transport_passed = transport_self_test();
-        const bool passed = protocol_passed && transport_passed;
+        const bool follow_passed = follow_self_test();
+        const bool passed = protocol_passed && transport_passed && follow_passed;
         std::cout << "notification-hub-runtime self-test: " << (passed ? "ok" : "failed")
                   << " (protocol=" << (protocol_passed ? "ok" : "failed")
-                  << ", transport=" << (transport_passed ? "ok" : "failed") << ")\n";
+                  << ", transport=" << (transport_passed ? "ok" : "failed")
+                  << ", follow=" << (follow_passed ? "ok" : "failed") << ")\n";
         return passed ? 0 : 1;
     }
     if (argc > 1 && std::string_view(argv[1]) == "--config-self-test") {
@@ -2641,6 +2969,16 @@ int main(int argc, char** argv) {
     if (argc > 1 && std::string_view(argv[1]) == "--ticker-self-test") {
         const bool passed = ticker_self_test();
         std::cout << "notification-hub-runtime ticker self-test: " << (passed ? "ok" : "failed") << "\n";
+        return passed ? 0 : 1;
+    }
+    if (argc > 1 && std::string_view(argv[1]) == "--follow-self-test") {
+        const bool passed = follow_self_test();
+        std::cout << "notification-hub-runtime follow self-test: " << (passed ? "ok" : "failed") << "\n";
+        return passed ? 0 : 1;
+    }
+    if (argc > 1 && std::string_view(argv[1]) == "--overlay-self-test") {
+        const bool passed = overlay_self_test();
+        std::cout << "notification-hub-runtime overlay self-test: " << (passed ? "ok" : "failed") << "\n";
         return passed ? 0 : 1;
     }
     if (argc > 2 && std::string_view(argv[1]) == "--pipe-server") {

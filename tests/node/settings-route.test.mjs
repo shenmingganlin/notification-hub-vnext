@@ -99,7 +99,7 @@ test('settings page is one shell with internal settings views', async () => {
   const plugin = api();
   registerSettingsRoute(harness.app, { _notificationHubVNextPlugin: plugin });
 
-  assert.equal(harness.routes.size, 38);
+  assert.equal(harness.routes.size, 39);
   const page = harness.routes.get('GET /settings')(harness.contextFor({}, '/settings'));
   assert.equal(page.kind, 'html');
   assert.match(page.value, /Notification Hub 设置/);

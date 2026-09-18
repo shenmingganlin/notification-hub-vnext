@@ -1,5 +1,5 @@
 import { CARD_TYPES as CONTENT_CARD_TYPES } from './card-visual-settings.js';
-import { resolveStackWrap, stackGrowToNativeDirection } from './stack-grow.js';
+import { resolveStackNewest, resolveStackWrap, stackGrowToNativeDirection } from './stack-grow.js';
 
 // cardType 只承载内容结构轴（与 CARD_TYPES 单一来源对齐）。
 // 出现方式（stack/ticker/popup）不再混进 cardType，已独立为 behaviorId 轴。
@@ -65,19 +65,19 @@ function nativeStackMargin(space, side) {
 export function spaceToNativeStackLayout(space = {}) {
   const anchor = NATIVE_STACK_ANCHORS.has(space.anchor) ? space.anchor : 'bottom-right';
   const wrap = resolveStackWrap(space.wrap);
-  const leftOn = String(anchor).endsWith('left');
-  const topOn = String(anchor).startsWith('top');
+  const newest = resolveStackNewest(space.newest);
   return {
     layout: 'stack',
-    direction: stackGrowToNativeDirection(anchor, space.grow, wrap),
+    direction: stackGrowToNativeDirection(anchor, space.grow, wrap, newest),
     wrap,
+    newest,
     anchor,
     spacing: Number.isInteger(space.gap) ? space.gap : 8,
-    marginLeft: leftOn ? nativeStackMargin(space, 'marginLeft') : 0,
-    marginRight: leftOn ? 0 : nativeStackMargin(space, 'marginRight'),
-    marginTop: topOn ? nativeStackMargin(space, 'marginTop') : 0,
-    marginBottom: topOn ? 0 : nativeStackMargin(space, 'marginBottom'),
-    settle: 'snap'
+    marginLeft: nativeStackMargin(space, 'marginLeft'),
+    marginRight: nativeStackMargin(space, 'marginRight'),
+    marginTop: nativeStackMargin(space, 'marginTop'),
+    marginBottom: nativeStackMargin(space, 'marginBottom'),
+    settle: space.settle === 'snap' ? 'snap' : 'follow'
   };
 }
 
@@ -143,7 +143,8 @@ export function resolveVisualDraftPayload(visual = {}, cardType = {}) {
       closeButtonPosition: visual.interaction?.closeButtonPosition ?? propertiesInteraction.closeButtonPosition ?? 'top-right',
       timeoutMs: visual.interaction?.timeoutMs ?? propertiesInteraction.timeoutMs ?? propertiesInteraction.durationMs ?? 30000,
       hoverHighlight: visual.interaction?.hoverHighlight ?? propertiesInteraction.hoverHighlight ?? 'off',
-      autoDismiss: visual.interaction?.autoDismiss ?? propertiesInteraction.autoDismiss ?? 'off'
+      autoDismiss: visual.interaction?.autoDismiss ?? propertiesInteraction.autoDismiss ?? 'off',
+      holdDrag: visual.interaction?.holdDrag ?? propertiesInteraction.holdDrag ?? 'on'
     }
   };
 }
@@ -227,5 +228,7 @@ export function projectNativeVisualPayload(visual = {}) {
   } else if (autoOn) {
     projected.interaction.autoDismiss = true;
   }
+  const holdDragOff = visual.interaction?.holdDrag === 'off' || visual.interaction?.holdDrag === false;
+  if (holdDragOff) projected.interaction.holdDrag = false;
   return projected;
 }

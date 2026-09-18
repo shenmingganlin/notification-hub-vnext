@@ -64,7 +64,8 @@ test('visual settings own flight channels and keep behaviorId as the ticket alia
   assert.equal('direction' in settings.channels.ticker, false);
   assert.equal(settings.profile.ticker.direction, 'right');
   assert.equal(settings.channels.stack.anchor, 'top-left');
-  assert.equal(settings.channels.stack.settle, 'snap');
+  assert.equal(settings.channels.stack.settle, 'follow');
+  assert.equal(settings.channels.stack.newest, 'dock');
 });
 
 test('stale flight key does not override a newer behaviorId ticket', () => {

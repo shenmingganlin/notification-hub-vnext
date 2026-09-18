@@ -19,6 +19,7 @@ const SETTINGS_ERROR_MESSAGES = Object.freeze({
   SETTINGS_VIEW_INVALID: '当前设置页面暂不支持这个设置分类。',
   SOUND_PACKAGE_CONFLICT: '音频包中有声音与本机重复，请逐项选择覆盖或保留。',
   SOUND_COMBO_PACKAGE_SOUND_ASSET_MISSING: '配置包引用了尚未安装的音频，请先导入对应的 .nhsound 音频包。',
+  SOUND_PACKAGE_EMPTY: '音频库是空的，没有可导出的声音。',
   SOUND_BINDING_VALUE_INVALID: '必须同时选择有效的分类、事件和重要性。',
   SOUND_ASSET_BINDING_INVALID: '三层声音绑定数据格式不正确。',
   SOUND_BINDING_VOLUME_INVALID: '组合音量必须介于 0% 和 100% 之间。',
@@ -385,6 +386,10 @@ export default function registerSettingsRoute(app, ctx) {
   app.post('/visual-profiles/save', async (c) => {
     try { const plugin = getPlugin(); if (!plugin?.saveVisualProfile) return c.json({ ok: false, error: { code: 'VISUAL_PROFILE_API_UNAVAILABLE', message: '视觉方案 API 暂不可用。' } }, 503); return c.json({ ok: true, profile: plugin.saveVisualProfile(await readJsonBody(c)) }); }
     catch (error) { return c.json({ ok: false, error: errorPayload(error) }, 400); }
+  });
+  app.post('/visual-profiles/rename', async (c) => {
+    try { const plugin = getPlugin(); if (!plugin?.renameVisualProfile) return c.json({ ok: false, error: { code: 'VISUAL_PROFILE_API_UNAVAILABLE', message: '视觉方案 API 暂不可用。' } }, 503); return c.json({ ok: true, profile: plugin.renameVisualProfile(await readJsonBody(c)) }); }
+    catch (error) { return c.json({ ok: false, error: errorPayload(error) }, error?.code === 'VISUAL_PROFILE_REGISTRY_NOT_FOUND' ? 404 : 400); }
   });
   app.delete('/visual-profiles/:profileId', (c) => {
     try { const plugin = getPlugin(); if (!plugin?.removeVisualProfile) return c.json({ ok: false, error: { code: 'VISUAL_PROFILE_API_UNAVAILABLE', message: '视觉方案 API 暂不可用。' } }, 503); return c.json({ ok: true, ...plugin.removeVisualProfile(c.req.param('profileId')) }); }

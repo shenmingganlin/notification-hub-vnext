@@ -1,13 +1,16 @@
 #include "controller.hpp"
 
 #include "window.hpp"
+#include "overlay.hpp"
 #include "layout.hpp"
+#include "follow.hpp"
 #include "ticker.hpp"
 #include "work_area.hpp"
 #include "../protocol/message.hpp"
 
 #include <algorithm>
 #include <array>
+#include <cstdint>
 #include <cctype>
 #include <chrono>
 #include <cmath>
@@ -39,17 +42,25 @@ bool is_ticker_profile(std::string_view profile_id) {
     return profile_id == "ticker" || profile_id == "danmaku";
 }
 
+bool card_is_ticker(const SceneCardState& card) {
+    if (card.visual.ticker_specified) return true;
+    return card.behavior_specified && is_ticker_profile(card.behavior_profile_id);
+}
+
 #ifdef _WIN32
 PaintBox card_paint_box(int x, int y, int width, int height, const VisualStyle& visual) {
     return paint_box_from_hit_box(x, y, width, height, clamp_paint_overflow(visual.paint_overflow));
 }
 
+std::uint64_t g_card_window_move_count = 0;
+std::uint64_t g_scene_change_emit_count = 0;
+
 bool apply_card_window_pos(HWND hwnd, int x, int y, int width, int height, bool size_changed, const VisualStyle& visual = {}) {
     if (hwnd == nullptr) return false;
     const auto paint = card_paint_box(x, y, width, height, visual);
     UINT flags = SWP_NOACTIVATE | SWP_NOZORDER;
-    if (!size_changed) flags |= SWP_NOSIZE;
-    return SetWindowPos(
+    if (!size_changed) flags |= SWP_NOSIZE | SWP_NOREDRAW | SWP_NOSENDCHANGING | SWP_NOCOPYBITS | SWP_ASYNCWINDOWPOS;
+    const bool moved = SetWindowPos(
         hwnd,
         nullptr,
         paint.x,
@@ -57,8 +68,107 @@ bool apply_card_window_pos(HWND hwnd, int x, int y, int width, int height, bool 
         size_changed ? paint.width : 0,
         size_changed ? paint.height : 0,
         flags) != FALSE;
+    if (moved) ++g_card_window_move_count;
+    return moved;
 }
 #endif
+
+bool apply_stack_card_placement(
+    SceneCardState& card,
+    SceneWindow& window,
+    const StackCardPlacement& placement,
+    bool follow,
+    std::unordered_map<std::string, StackFollow>& follows,
+    std::string& error_code,
+    std::string& error_message,
+    std::string_view geom_fail,
+    std::string_view draw_fail) {
+    const bool size_changed = card.window.width != placement.width || card.window.height != placement.height;
+#ifdef _WIN32
+    const bool dragging = window.is_dragging();
+#else
+    const bool dragging = false;
+#endif
+    const bool existing = follows.find(placement.id) != follows.end();
+    if (!follow) {
+        follows.erase(placement.id);
+    } else {
+        auto& chase = follows[placement.id];
+        chase.target_x = static_cast<double>(placement.x);
+        chase.target_y = static_cast<double>(placement.y);
+        if (!existing) {
+            chase.state.x = chase.target_x;
+            chase.state.y = chase.target_y;
+            chase.state.vx = 0.0;
+            chase.state.vy = 0.0;
+        } else if (dragging) {
+            chase.state.x = static_cast<double>(card.window.x);
+            chase.state.y = static_cast<double>(card.window.y);
+            chase.state.vx = 0.0;
+            chase.state.vy = 0.0;
+        }
+    }
+    const bool jump = !follow || !existing;
+    const bool move_window = jump && !dragging;
+    if (move_window) {
+        card.window = SceneWindowState{placement.x, placement.y, placement.width, placement.height};
+    } else {
+        card.window.width = placement.width;
+        card.window.height = placement.height;
+    }
+#ifdef _WIN32
+    const auto hwnd = static_cast<HWND>(window.native_handle());
+    if (hwnd == nullptr) {
+        error_code = "RUNTIME_SCENE_WINDOW_APPLY_FAILED";
+        error_message = std::string(geom_fail);
+        return false;
+    }
+    if (move_window || size_changed) {
+        const int x = move_window ? placement.x : card.window.x;
+        const int y = move_window ? placement.y : card.window.y;
+        const auto paint = card_paint_box(x, y, placement.width, placement.height, card.visual);
+        UINT flags = SWP_NOACTIVATE;
+        if (!size_changed) flags |= SWP_NOSIZE;
+        if (!move_window) flags |= SWP_NOMOVE;
+        if (SetWindowPos(
+            hwnd,
+            HWND_TOPMOST,
+            paint.x,
+            paint.y,
+            size_changed ? paint.width : 0,
+            size_changed ? paint.height : 0,
+            flags) == FALSE) {
+            error_code = "RUNTIME_SCENE_WINDOW_APPLY_FAILED";
+            error_message = std::string(geom_fail);
+            return false;
+        }
+        if (move_window) ++g_card_window_move_count;
+    }
+#endif
+    if (size_changed && (!window.resize_render_target(placement.width, placement.height) || !window.paint())) {
+        error_code = "RUNTIME_SCENE_WINDOW_APPLY_FAILED";
+        error_message = std::string(draw_fail);
+        return false;
+    }
+    return true;
+}
+
+void prune_stack_follows(
+    std::unordered_map<std::string, StackFollow>& follows,
+    const std::vector<StackCardPlacement>& placements,
+    bool follow) {
+    if (!follow) {
+        follows.clear();
+        return;
+    }
+    std::unordered_set<std::string> live;
+    live.reserve(placements.size());
+    for (const auto& placement : placements) live.insert(placement.id);
+    for (auto it = follows.begin(); it != follows.end();) {
+        if (!live.contains(it->first)) it = follows.erase(it);
+        else ++it;
+    }
+}
 
 bool visual_asset_file_is_trusted(std::string_view root_dir, const VisualAssetRecord& asset) {
 #ifdef _WIN32
@@ -163,7 +273,8 @@ std::string card_json(const SceneCardState& card) {
                 + ",\"closeButtonPosition\":" + json_string(card.visual.close_button_position)
                 + ",\"timeoutMs\":" + std::to_string(card.visual.dismiss_timeout_ms)
                 + (card.visual.hover_highlight ? ",\"hoverHighlight\":true" : std::string())
-                + (card.visual.auto_dismiss ? ",\"autoDismiss\":true" : std::string()) + "}"
+                + (card.visual.auto_dismiss ? ",\"autoDismiss\":true" : std::string())
+                + (!card.visual.hold_drag ? ",\"holdDrag\":false" : std::string()) + "}"
                 + ",\"appearance\":{\"size\":" + json_string(card.visual.size)
                 + ",\"aspectRatio\":" + json_string(card.visual.aspect_ratio)
                 + ",\"backgroundColor\":" + json_string(card.visual.background_color)
@@ -387,14 +498,47 @@ public:
         std::string& error_message);
 
     std::unordered_map<std::string, TickerMotion> ticker_motions;
+    std::unordered_map<std::string, StackFollow> stack_follows;
     bool ticker_ticking{};
     std::chrono::steady_clock::time_point last_tick{};
     int ticker_heartbeat_ms{16};
+
+    bool has_active_follow() const {
+        if (active_layout.settle != StackSettle::Follow) return false;
+        for (const auto& entry : stack_follows) {
+            const auto window_it = card_windows.find(entry.first);
+            if (window_it == card_windows.end() || window_it->second == nullptr) continue;
+#ifdef _WIN32
+            if (window_it->second->is_dragging()) continue;
+#endif
+            const auto& chase = entry.second;
+            const double dx = chase.target_x - chase.state.x;
+            const double dy = chase.target_y - chase.state.y;
+            const double speed2 = chase.state.vx * chase.state.vx + chase.state.vy * chase.state.vy;
+            if ((dx * dx + dy * dy) > kFollowPosEps * kFollowPosEps
+                || speed2 > kFollowVelEps * kFollowVelEps) {
+                return true;
+            }
+        }
+        return false;
+    }
 
     std::unique_ptr<SceneWindow> window;
     SceneWindowState state{};
     std::unordered_map<std::string, SceneCardState> cards;
     std::unordered_map<std::string, std::unique_ptr<SceneWindow>> card_windows;
+#ifdef _WIN32
+    std::unique_ptr<TickerOverlay> ticker_overlay;
+    CardRenderer overlay_painter;
+    bool overlay_painter_ready{};
+    bool ensure_ticker_overlay();
+    bool paint_ticker_sprite(const SceneCardState& card);
+    bool move_ticker_sprite(const SceneCardState& card, bool commit_now);
+    void drop_ticker_sprite(std::string_view id);
+    bool sync_overlay_hover();
+    void raise_stack_above_overlay();
+    std::string overlay_hover_id;
+#endif
     std::vector<std::string> card_order;
     std::unordered_map<std::string, FlightChannelState> flight_channels;
     std::vector<std::string> flight_channel_order;
@@ -430,6 +574,151 @@ public:
         return true;
     }
 };
+
+#ifdef _WIN32
+bool RuntimeSceneController::Impl::ensure_ticker_overlay() {
+    int left = 0;
+    int top = 0;
+    int width = 0;
+    int height = 0;
+    if (has_active_layout && active_layout.work_area_width > 0 && active_layout.work_area_height > 0) {
+        left = active_layout.work_area_left;
+        top = active_layout.work_area_top;
+        width = active_layout.work_area_width;
+        height = active_layout.work_area_height;
+    } else if (active_work_area.rect.width > 0 && active_work_area.rect.height > 0) {
+        left = active_work_area.rect.left;
+        top = active_work_area.rect.top;
+        width = active_work_area.rect.width;
+        height = active_work_area.rect.height;
+    } else {
+        const auto area = query_primary_work_area();
+        left = area.rect.left;
+        top = area.rect.top;
+        width = area.rect.width;
+        height = area.rect.height;
+    }
+    if (width <= 0 || height <= 0) return false;
+    if (ticker_overlay == nullptr) ticker_overlay = std::make_unique<TickerOverlay>();
+    if (!ticker_overlay->create(left, top, width, height)) return false;
+    if (!overlay_painter_ready) {
+        if (!overlay_painter.initialize(ticker_overlay->native_handle(), 64, 64)) return false;
+        overlay_painter_ready = true;
+    }
+    bool click_through = true;
+    for (const auto& id : card_order) {
+        const auto it = cards.find(id);
+        if (it == cards.end()) continue;
+        if (it->second.visual.ticker_specified && !it->second.visual.ticker_click_through) {
+            click_through = false;
+            break;
+        }
+    }
+    ticker_overlay->set_click_through(click_through);
+    raise_stack_above_overlay();
+    return sync_overlay_hover();
+}
+
+bool RuntimeSceneController::Impl::paint_ticker_sprite(const SceneCardState& card) {
+    if (!ensure_ticker_overlay()) return false;
+    const auto paint = card_paint_box(
+        card.window.x, card.window.y, card.window.width, card.window.height, card.visual);
+    if (!overlay_painter.resize(paint.width, paint.height)) return false;
+    const bool hovered = overlay_should_highlight(
+        ticker_overlay->click_through(),
+        ticker_overlay->hovered_id(),
+        card.id,
+        card.visual.hover_highlight);
+    if (!overlay_painter.draw_buffer(
+            widen(card.title),
+            widen(card.body),
+            card.visual,
+            false,
+            card.parts,
+            hovered,
+            widen(card.assistant_name))) {
+        return false;
+    }
+    const void* bits = nullptr;
+    int pitch = 0;
+    int buffer_width = 0;
+    int buffer_height = 0;
+    if (!overlay_painter.buffer_bits(bits, pitch, buffer_width, buffer_height)) return false;
+    if (ticker_overlay->has_sprite(card.id)
+        && ticker_overlay->update_pixels(card.id, buffer_width, buffer_height, bits, pitch)) {
+        return ticker_overlay->commit();
+    }
+    if (!ticker_overlay->add_sprite(card.id, buffer_width, buffer_height, bits, pitch)) return false;
+    if (!ticker_overlay->set_offset(card.id, paint.x, paint.y)) return false;
+    return ticker_overlay->commit();
+}
+
+bool RuntimeSceneController::Impl::move_ticker_sprite(const SceneCardState& card, bool commit_now) {
+    if (ticker_overlay == nullptr || !ticker_overlay->has_sprite(card.id)) {
+        return paint_ticker_sprite(card);
+    }
+    const auto paint = card_paint_box(
+        card.window.x, card.window.y, card.window.width, card.window.height, card.visual);
+    if (!ticker_overlay->set_offset(card.id, paint.x, paint.y)) return false;
+    return commit_now ? ticker_overlay->commit() : true;
+}
+
+bool RuntimeSceneController::Impl::sync_overlay_hover() {
+    if (ticker_overlay == nullptr) {
+        overlay_hover_id.clear();
+        return true;
+    }
+    const auto next = ticker_overlay->click_through() ? std::string{} : ticker_overlay->hovered_id();
+    if (next == overlay_hover_id) return true;
+    const auto previous = overlay_hover_id;
+    overlay_hover_id = next;
+    bool ok = true;
+    if (!previous.empty()) {
+        const auto it = cards.find(previous);
+        if (it != cards.end() && it->second.visual.hover_highlight) {
+            ok = paint_ticker_sprite(it->second) && ok;
+        }
+    }
+    if (!next.empty() && next != previous) {
+        const auto it = cards.find(next);
+        if (it != cards.end() && it->second.visual.hover_highlight) {
+            ok = paint_ticker_sprite(it->second) && ok;
+        }
+    }
+    return ok;
+}
+
+void RuntimeSceneController::Impl::drop_ticker_sprite(std::string_view id) {
+    if (ticker_overlay == nullptr) return;
+    if (overlay_hover_id == id) overlay_hover_id.clear();
+    if (ticker_overlay->hovered_id() == id) ticker_overlay->clear_hover();
+    ticker_overlay->remove_sprite(id);
+    ticker_overlay->commit();
+    if (ticker_overlay->empty()) {
+        ticker_overlay->destroy();
+        overlay_painter.reset();
+        overlay_painter_ready = false;
+        overlay_hover_id.clear();
+    }
+}
+
+void RuntimeSceneController::Impl::raise_stack_above_overlay() {
+    if (ticker_overlay == nullptr || !ticker_overlay->is_created()) return;
+    for (const auto& entry : card_windows) {
+        if (entry.second == nullptr) continue;
+        const auto hwnd = static_cast<HWND>(entry.second->native_handle());
+        if (hwnd == nullptr) continue;
+        SetWindowPos(
+            hwnd,
+            HWND_TOPMOST,
+            0,
+            0,
+            0,
+            0,
+            SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOREDRAW | SWP_NOSENDCHANGING);
+    }
+}
+#endif
 
 bool RuntimeSceneController::Impl::place_ticker_channel(
     const FlightChannelState& channel,
@@ -479,8 +768,7 @@ bool RuntimeSceneController::Impl::place_ticker_channel(
 
     for (const auto& id : channel.card_order) {
         auto card_it = cards.find(id);
-        auto window_it = card_windows.find(id);
-        if (card_it == cards.end() || window_it == card_windows.end() || window_it->second == nullptr) continue;
+        if (card_it == cards.end()) continue;
 
         auto motion_it = ticker_motions.find(id);
         if (motion_it == ticker_motions.end()) {
@@ -584,21 +872,26 @@ bool RuntimeSceneController::Impl::place_ticker_channel(
             || card_it->second.window.height != height;
         card_it->second.window = SceneWindowState{x, y, width, height};
 #ifdef _WIN32
-        const auto hwnd = static_cast<HWND>(window_it->second->native_handle());
-        if (!apply_card_window_pos(hwnd, x, y, width, height, size_changed, card_it->second.visual)) {
+        if (size_changed) {
+            if (!paint_ticker_sprite(card_it->second)) {
+                error_code = "RUNTIME_SCENE_WINDOW_APPLY_FAILED";
+                error_message = "Ticker overlay could not paint the card surface";
+                return false;
+            }
+        } else if (!move_ticker_sprite(card_it->second, false)) {
             error_code = "RUNTIME_SCENE_WINDOW_APPLY_FAILED";
-            error_message = "Ticker channel layout could not apply card geometry";
+            error_message = "Ticker overlay could not move the card sprite";
             return false;
         }
 #endif
-        // 关键性能点：内容未变时只移动，不重绘。弹幕每拍重画一次会把性能拖垮。
-        if (size_changed
-            && (!window_it->second->resize_render_target(width, height) || !window_it->second->paint())) {
-            error_code = "RUNTIME_SCENE_WINDOW_APPLY_FAILED";
-            error_message = "Ticker channel layout could not resize the card surface";
-            return false;
-        }
     }
+#ifdef _WIN32
+    if (ticker_overlay != nullptr && !ticker_overlay->commit()) {
+        error_code = "RUNTIME_SCENE_WINDOW_APPLY_FAILED";
+        error_message = "Ticker overlay could not commit sprite offsets";
+        return false;
+    }
+#endif
     return true;
 }
 
@@ -675,7 +968,7 @@ bool RuntimeSceneController::apply_window_state(
             true});
         if (!impl_->window->create() || !impl_->window->show()) {
             error_code = "RUNTIME_SCENE_WINDOW_APPLY_FAILED";
-            error_message = "Runtime scene window could not be created or shown";
+            error_message = "Runtime scene window could not be created or shown; " + impl_->window->create_error();
             impl_->window.reset();
             return false;
         }
@@ -727,6 +1020,61 @@ bool RuntimeSceneController::create_card(
         return false;
     }
 
+    auto resolved_parts = card.parts;
+    for (auto& part : resolved_parts) {
+        impl_->resolve_part_wallpaper(part);
+        impl_->resolve_part_font(part);
+    }
+    const auto resolved_visual = impl_->resolve_visual(card.visual);
+    auto stored_card = card;
+    stored_card.parts = std::move(resolved_parts);
+    stored_card.visual = resolved_visual;
+    stored_card.layout_width = card.layout_width > 0 ? card.layout_width : card.window.width;
+    stored_card.layout_height = card.layout_height > 0 ? card.layout_height : card.window.height;
+
+    const auto rollback_card = [&]() {
+        if (!impl_->card_order.empty() && impl_->card_order.back() == card.id) impl_->card_order.pop_back();
+        impl_->card_windows.erase(card.id);
+        impl_->cards.erase(card.id);
+#ifdef _WIN32
+        impl_->drop_ticker_sprite(card.id);
+#endif
+        impl_->rebuild_flight_channels();
+    };
+    const auto reapply_active_layout = [&]() {
+        if (!impl_->has_active_layout) return true;
+        auto reapply_options = impl_->active_layout;
+        if (impl_->active_layout_uses_provider) {
+            reapply_options.work_area_width = 0;
+            reapply_options.work_area_height = 0;
+            reapply_options.dpi_scale = 1.0f;
+            reapply_options.work_area_left = 0;
+            reapply_options.work_area_top = 0;
+            reapply_options.work_area_is_fallback = false;
+            reapply_options.work_area_source.clear();
+        }
+        return apply_stack_layout(reapply_options, error_code, error_message);
+    };
+
+    if (card_is_ticker(stored_card)) {
+        impl_->cards.emplace(card.id, stored_card);
+        impl_->card_order.push_back(card.id);
+        impl_->rebuild_flight_channels();
+#ifdef _WIN32
+        if (!impl_->has_active_layout && !impl_->paint_ticker_sprite(impl_->cards.at(card.id))) {
+            rollback_card();
+            error_code = "RUNTIME_SCENE_WINDOW_APPLY_FAILED";
+            error_message = "scene.create could not paint the ticker overlay sprite";
+            return false;
+        }
+#endif
+        if (!reapply_active_layout()) {
+            rollback_card();
+            return false;
+        }
+        return true;
+    }
+
     auto window = std::make_unique<SceneWindow>(WindowConfig{
         widen(card.title),
         widen(card.body),
@@ -736,18 +1084,12 @@ bool RuntimeSceneController::create_card(
         card.window.x,
         card.window.y,
         true});
-    auto resolved_parts = card.parts;
-    for (auto& part : resolved_parts) {
-        impl_->resolve_part_wallpaper(part);
-        impl_->resolve_part_font(part);
-    }
-    window->update_parts(resolved_parts);
+    window->update_parts(stored_card.parts);
     window->update_assistant_name(widen(card.assistant_name));
-    const auto resolved_visual = impl_->resolve_visual(card.visual);
     window->update_visual(resolved_visual);
     if (!window->create()) {
         error_code = "RUNTIME_SCENE_WINDOW_APPLY_FAILED";
-        error_message = "scene.create could not create the card window";
+        error_message = "scene.create could not create the card window; " + window->create_error();
         return false;
     }
     auto* created_window = window.get();
@@ -777,48 +1119,24 @@ bool RuntimeSceneController::create_card(
         error_message = "scene.create could not draw the card surface";
         return false;
     }
-    auto stored_card = card;
-    stored_card.parts = std::move(resolved_parts);
-    stored_card.visual = resolved_visual;
-    stored_card.layout_width = card.layout_width > 0 ? card.layout_width : card.window.width;
-    stored_card.layout_height = card.layout_height > 0 ? card.layout_height : card.window.height;
     impl_->cards.emplace(card.id, stored_card);
     impl_->card_windows.emplace(card.id, std::move(window));
     impl_->card_order.push_back(card.id);
     impl_->rebuild_flight_channels();
 
-    if (impl_->has_active_layout) {
-        auto reapply_options = impl_->active_layout;
-        if (impl_->active_layout_uses_provider) {
-            reapply_options.work_area_width = 0;
-            reapply_options.work_area_height = 0;
-            reapply_options.dpi_scale = 1.0f;
-            reapply_options.work_area_left = 0;
-            reapply_options.work_area_top = 0;
-            reapply_options.work_area_is_fallback = false;
-            reapply_options.work_area_source.clear();
-        }
-        std::string layout_error_code;
-        std::string layout_error_message;
-        if (!apply_stack_layout(reapply_options, layout_error_code, layout_error_message)) {
-            impl_->card_order.pop_back();
-            impl_->card_windows.erase(card.id);
-            impl_->cards.erase(card.id);
-            impl_->rebuild_flight_channels();
-            error_code = layout_error_code;
-            error_message = layout_error_message;
-            return false;
-        }
+    if (!reapply_active_layout()) {
+        rollback_card();
+        return false;
     }
     if (!created_window->show()) {
-        impl_->card_order.pop_back();
-        impl_->card_windows.erase(card.id);
-        impl_->cards.erase(card.id);
-        impl_->rebuild_flight_channels();
+        rollback_card();
         error_code = "RUNTIME_SCENE_WINDOW_APPLY_FAILED";
         error_message = "scene.create could not show the card window at its final position";
         return false;
     }
+#ifdef _WIN32
+    impl_->raise_stack_above_overlay();
+#endif
     return true;
 }
 
@@ -836,49 +1154,12 @@ bool RuntimeSceneController::update_card(
         error_message = "scene.update requires title and a valid window state";
         return false;
     }
-    auto window_it = impl_->card_windows.find(card.id);
-    if (window_it == impl_->card_windows.end() || window_it->second == nullptr) {
-        error_code = "RUNTIME_SCENE_WINDOW_APPLY_FAILED";
-        error_message = "scene.update card window is unavailable";
-        return false;
-    }
-    auto& window = window_it->second;
-    window->update_content(widen(card.title), widen(card.body));
-    window->update_assistant_name(widen(card.assistant_name));
     auto resolved_parts = card.parts;
     for (auto& part : resolved_parts) {
         impl_->resolve_part_wallpaper(part);
         impl_->resolve_part_font(part);
     }
-    window->update_parts(resolved_parts);
     const auto resolved_visual = impl_->resolve_visual(card.visual);
-    window->update_visual(resolved_visual);
-#ifdef _WIN32
-    const auto hwnd = static_cast<HWND>(window->native_handle());
-    const auto update_paint = card_paint_box(card.window.x, card.window.y, card.window.width, card.window.height, resolved_visual);
-    if (hwnd == nullptr || SetWindowPos(
-        hwnd,
-        HWND_TOPMOST,
-        update_paint.x,
-        update_paint.y,
-        update_paint.width,
-        update_paint.height,
-        SWP_NOACTIVATE | SWP_SHOWWINDOW) == FALSE) {
-        error_code = "RUNTIME_SCENE_WINDOW_APPLY_FAILED";
-        error_message = "scene.update could not apply card geometry";
-        return false;
-    }
-#endif
-    if (!window->resize_render_target(card.window.width, card.window.height)) {
-        error_code = "RUNTIME_SCENE_WINDOW_APPLY_FAILED";
-        error_message = "scene.update could not resize the card renderer target";
-        return false;
-    }
-    if (!window->paint()) {
-        error_code = "RUNTIME_SCENE_WINDOW_APPLY_FAILED";
-        error_message = "scene.update could not draw the card surface";
-        return false;
-    }
     auto stored_card = card;
     stored_card.parts = std::move(resolved_parts);
     stored_card.visual = resolved_visual;
@@ -909,6 +1190,57 @@ bool RuntimeSceneController::update_card(
     const auto previous_channel_id = previous_state.has_value()
         ? Impl::channel_id_for(*previous_state)
         : std::string{};
+    const bool ticker = card_is_ticker(stored_card)
+        || (previous_state.has_value() && card_is_ticker(*previous_state));
+#ifdef _WIN32
+    if (ticker && impl_->ticker_motions.contains(card.id) && previous_state.has_value()) {
+        stored_card.window.x = previous_state->window.x;
+        stored_card.window.y = previous_state->window.y;
+    }
+#endif
+    if (!ticker) {
+        auto window_it = impl_->card_windows.find(card.id);
+        if (window_it == impl_->card_windows.end() || window_it->second == nullptr) {
+            error_code = "RUNTIME_SCENE_WINDOW_APPLY_FAILED";
+            error_message = "scene.update card window is unavailable";
+            return false;
+        }
+        auto& window = window_it->second;
+        window->update_content(widen(card.title), widen(card.body));
+        window->update_assistant_name(widen(card.assistant_name));
+        window->update_parts(stored_card.parts);
+        window->update_visual(resolved_visual);
+#ifdef _WIN32
+        const auto hwnd = static_cast<HWND>(window->native_handle());
+        const auto update_paint = card_paint_box(
+            card.window.x, card.window.y, card.window.width, card.window.height, resolved_visual);
+        if (hwnd == nullptr || SetWindowPos(
+            hwnd,
+            HWND_TOPMOST,
+            update_paint.x,
+            update_paint.y,
+            update_paint.width,
+            update_paint.height,
+            SWP_NOACTIVATE | SWP_SHOWWINDOW) == FALSE) {
+            error_code = "RUNTIME_SCENE_WINDOW_APPLY_FAILED";
+            error_message = "scene.update could not apply card geometry";
+            return false;
+        }
+#endif
+        if (!window->resize_render_target(card.window.width, card.window.height)) {
+            error_code = "RUNTIME_SCENE_WINDOW_APPLY_FAILED";
+            error_message = "scene.update could not resize the card renderer target";
+            return false;
+        }
+        if (!window->paint()) {
+            error_code = "RUNTIME_SCENE_WINDOW_APPLY_FAILED";
+            error_message = "scene.update could not draw the card surface";
+            return false;
+        }
+#ifdef _WIN32
+        impl_->raise_stack_above_overlay();
+#endif
+    }
     impl_->cards[card.id] = stored_card;
     impl_->rebuild_flight_channels();
     const auto channel_changed = previous_channel_id != Impl::channel_id_for(stored_card);
@@ -932,6 +1264,16 @@ bool RuntimeSceneController::update_card(
             error_message = layout_error_message;
             return false;
         }
+    } else if (ticker) {
+#ifdef _WIN32
+        if (!impl_->paint_ticker_sprite(impl_->cards.at(card.id))) {
+            if (previous_state.has_value()) impl_->cards[card.id] = *previous_state;
+            impl_->rebuild_flight_channels();
+            error_code = "RUNTIME_SCENE_WINDOW_APPLY_FAILED";
+            error_message = "scene.update could not paint the ticker overlay sprite";
+            return false;
+        }
+#endif
     }
     return true;
 }
@@ -948,11 +1290,19 @@ bool RuntimeSceneController::dismiss_card(
     }
 
     const auto card_id = std::string(id);
-    auto removed_card = std::move(impl_->card_windows.at(card_id));
+    std::unique_ptr<SceneWindow> removed_card;
+    auto window_it = impl_->card_windows.find(card_id);
+    if (window_it != impl_->card_windows.end()) {
+        removed_card = std::move(window_it->second);
+        impl_->card_windows.erase(window_it);
+    }
     const auto removed_state = impl_->cards.at(card_id);
     const auto removed_order = impl_->card_order;
-    impl_->card_windows.erase(card_id);
+#ifdef _WIN32
+    impl_->drop_ticker_sprite(card_id);
+#endif
     impl_->cards.erase(card_id);
+    impl_->stack_follows.erase(card_id);
     impl_->card_order.erase(
         std::remove(impl_->card_order.begin(), impl_->card_order.end(), id),
         impl_->card_order.end());
@@ -973,9 +1323,12 @@ bool RuntimeSceneController::dismiss_card(
         std::string layout_error_message;
         if (!apply_stack_layout(reapply_options, layout_error_code, layout_error_message)) {
             impl_->cards.emplace(card_id, removed_state);
-            impl_->card_windows.emplace(card_id, std::move(removed_card));
+            if (removed_card != nullptr) impl_->card_windows.emplace(card_id, std::move(removed_card));
             impl_->card_order = removed_order;
             impl_->rebuild_flight_channels();
+#ifdef _WIN32
+            if (card_is_ticker(removed_state)) impl_->paint_ticker_sprite(removed_state);
+#endif
             error_code = layout_error_code;
             error_message = "scene.dismiss removed card but could not reflow remaining cards: " + layout_error_message;
             impl_->pending_change_metadata_json = change_json(
@@ -983,6 +1336,7 @@ bool RuntimeSceneController::dismiss_card(
             return false;
         }
     }
+    impl_->ticker_motions.erase(card_id);
     const bool abnormal_destruction = reason == "window-destroyed";
     impl_->pending_change_metadata_json = change_json(
         reason, "card", card_id, abnormal_destruction, abnormal_destruction);
@@ -1109,6 +1463,7 @@ bool RuntimeSceneController::apply_channel_layout(
                 error_message = "Stack layout failed: " + layout.message;
                 return false;
             }
+            const bool follow = stack_options.settle == StackSettle::Follow;
             for (const auto& placement : layout.placements) {
                 auto card_it = impl_->cards.find(placement.id);
                 auto window_it = impl_->card_windows.find(placement.id);
@@ -1117,34 +1472,22 @@ bool RuntimeSceneController::apply_channel_layout(
                     error_message = "Behavior channel layout card window is unavailable";
                     return false;
                 }
-                const bool size_changed = card_it->second.window.width != placement.width
-                    || card_it->second.window.height != placement.height;
-                card_it->second.window = SceneWindowState{placement.x, placement.y, placement.width, placement.height};
-                auto& window = window_it->second;
-#ifdef _WIN32
-                const auto hwnd = static_cast<HWND>(window->native_handle());
-                const auto layout_paint = card_paint_box(placement.x, placement.y, placement.width, placement.height, card_it->second.visual);
-                UINT flags = SWP_NOACTIVATE;
-                if (!size_changed) flags |= SWP_NOSIZE;
-                if (hwnd == nullptr || SetWindowPos(
-                    hwnd,
-                    HWND_TOPMOST,
-                    layout_paint.x,
-                    layout_paint.y,
-                    size_changed ? layout_paint.width : 0,
-                    size_changed ? layout_paint.height : 0,
-                    flags) == FALSE) {
-                    error_code = "RUNTIME_SCENE_WINDOW_APPLY_FAILED";
-                    error_message = "Behavior channel layout could not apply card geometry";
-                    return false;
-                }
-#endif
-                if (size_changed && (!window->resize_render_target(placement.width, placement.height) || !window->paint())) {
-                    error_code = "RUNTIME_SCENE_WINDOW_APPLY_FAILED";
-                    error_message = "Behavior channel layout could not redraw the card surface";
+                if (!apply_stack_card_placement(
+                    card_it->second,
+                    *window_it->second,
+                    placement,
+                    follow,
+                    impl_->stack_follows,
+                    error_code,
+                    error_message,
+                    "Behavior channel layout could not apply card geometry",
+                    "Behavior channel layout could not redraw the card surface")) {
                     return false;
                 }
             }
+            prune_stack_follows(impl_->stack_follows, layout.placements, follow);
+        } else {
+            prune_stack_follows(impl_->stack_follows, {}, options.settle == StackSettle::Follow);
         }
         impl_->active_work_area = effective_work_area;
         options.mode = requested_options.mode;
@@ -1172,6 +1515,7 @@ bool RuntimeSceneController::apply_channel_layout(
         impl_->active_layout = options;
         impl_->has_active_layout = true;
         impl_->active_layout_uses_provider = !has_explicit_work_area;
+        impl_->stack_follows.clear();
         return true;
     }
 
@@ -1191,6 +1535,7 @@ bool RuntimeSceneController::apply_channel_layout(
         error_message = layout.message;
         return false;
     }
+    const bool follow = options.settle == StackSettle::Follow;
     for (const auto& placement : layout.placements) {
         auto card_it = impl_->cards.find(placement.id);
         auto window_it = impl_->card_windows.find(placement.id);
@@ -1199,46 +1544,29 @@ bool RuntimeSceneController::apply_channel_layout(
             error_message = "stack layout card window is unavailable";
             return false;
         }
-            auto& card = card_it->second;
-        const bool size_changed = card.window.width != placement.width || card.window.height != placement.height;
-        card.window = SceneWindowState{placement.x, placement.y, placement.width, placement.height};
-        auto& window = window_it->second;
-#ifdef _WIN32
-        const auto hwnd = static_cast<HWND>(window->native_handle());
-        const auto stack_paint = card_paint_box(placement.x, placement.y, placement.width, placement.height, card.visual);
-        UINT flags = SWP_NOACTIVATE;
-        if (!size_changed) flags |= SWP_NOSIZE;
-        if (hwnd == nullptr || SetWindowPos(
-            hwnd,
-            HWND_TOPMOST,
-            stack_paint.x,
-            stack_paint.y,
-            size_changed ? stack_paint.width : 0,
-            size_changed ? stack_paint.height : 0,
-            flags) == FALSE) {
-            error_code = "RUNTIME_SCENE_WINDOW_APPLY_FAILED";
-            error_message = "stack layout could not apply card geometry";
+        const bool ticker = is_ticker_profile(Impl::profile_id_for(card_it->second));
+        if (!apply_stack_card_placement(
+            card_it->second,
+            *window_it->second,
+            placement,
+            follow && !ticker,
+            impl_->stack_follows,
+            error_code,
+            error_message,
+            "stack layout could not apply card geometry",
+            "stack layout could not draw the card surface")) {
             return false;
         }
-#endif
-        if (size_changed) {
-            if (!window->resize_render_target(placement.width, placement.height)) {
-                error_code = "RUNTIME_SCENE_WINDOW_APPLY_FAILED";
-                error_message = "stack layout could not resize the card renderer target";
-                return false;
-            }
-            if (!window->paint()) {
-                error_code = "RUNTIME_SCENE_WINDOW_APPLY_FAILED";
-                error_message = "stack layout could not draw the card surface";
-                return false;
-            }
-        }
     }
+    prune_stack_follows(impl_->stack_follows, layout.placements, follow);
     impl_->active_work_area = effective_work_area;
     options.mode = requested_options.mode;
     impl_->active_layout = options;
     impl_->has_active_layout = true;
     impl_->active_layout_uses_provider = !has_explicit_work_area;
+#ifdef _WIN32
+    impl_->raise_stack_above_overlay();
+#endif
     return true;
 }
 
@@ -1331,7 +1659,9 @@ std::string RuntimeSceneController::layout_json() const {
         + ",\"marginTop\":" + std::to_string(options.margin_top)
         + ",\"marginBottom\":" + std::to_string(options.margin_bottom)
         + ",\"wrap\":" + json_string(options.wrap == StackWrap::Off ? "off"
-            : options.wrap == StackWrap::Snake ? "snake" : "parallel") + "}";
+            : options.wrap == StackWrap::Snake ? "snake"
+            : options.wrap == StackWrap::Coil ? "coil" : "parallel")
+        + ",\"newest\":" + json_string(options.newest == StackNewest::Next ? "next" : "dock") + "}";
 }
 
 std::string RuntimeSceneController::work_area_json() const {
@@ -1354,6 +1684,10 @@ std::string RuntimeSceneController::work_area_json() const {
 }
 
 std::string RuntimeSceneController::scene_state_snapshot_json() const {
+    return scene_state_snapshot_json(cards_json());
+}
+
+std::string RuntimeSceneController::scene_state_snapshot_json(const std::string& cards) const {
     SceneWindowState state{};
     const bool scene_window_alive = impl_ != nullptr
         && impl_->window != nullptr
@@ -1382,7 +1716,7 @@ std::string RuntimeSceneController::scene_state_snapshot_json() const {
             result += json_string(id);
         }
     }
-    result += "],\"cards\":" + cards_json();
+    result += "],\"cards\":" + cards;
     if (impl_ != nullptr && impl_->has_explicit_flight_channels()) {
         // Protocol JSON keeps behaviorChannels as the alias; internal type is FlightChannelState.
         result += ",\"behaviorChannels\":[";
@@ -1479,10 +1813,12 @@ std::string RuntimeSceneController::cards_result_json(bool deduplicated) const {
 
 bool RuntimeSceneController::pump_messages() {
     bool changed = false;
+    bool pumped_any = false;
 #ifdef _WIN32
     if (impl_ == nullptr) return false;
     MSG message{};
     while (PeekMessageW(&message, nullptr, 0, 0, PM_REMOVE)) {
+        pumped_any = true;
         TranslateMessage(&message);
         DispatchMessageW(&message);
     }
@@ -1506,7 +1842,7 @@ bool RuntimeSceneController::pump_messages() {
         impl_->window.reset();
     }
 
-    if (impl_->window != nullptr && impl_->window->is_created()) {
+    if (pumped_any && impl_->window != nullptr && impl_->window->is_created()) {
         int x = 0;
         int y = 0;
         if (impl_->window->get_window_position(x, y)) {
@@ -1517,10 +1853,43 @@ bool RuntimeSceneController::pump_messages() {
     }
 
     std::vector<std::string> dismissed_cards;
+#ifdef _WIN32
+    if (impl_->ticker_overlay != nullptr) {
+        int click_x = 0;
+        int click_y = 0;
+        const auto clicked_id = impl_->ticker_overlay->take_click(click_x, click_y);
+        if (!clicked_id.empty()) {
+            const auto card_it = impl_->cards.find(clicked_id);
+            if (card_it != impl_->cards.end()) {
+                const auto& visual = card_it->second.visual;
+                const auto anywhere = visual.dismiss_mode == "anywhere";
+                const auto close_button = visual.dismiss_mode == "closeButton"
+                    || visual.dismiss_mode == "buttonOnly";
+                bool should_dismiss = anywhere;
+                if (!should_dismiss && close_button) {
+                    const auto local_x = static_cast<float>(click_x - card_it->second.window.x);
+                    const auto local_y = static_cast<float>(click_y - card_it->second.window.y);
+                    should_dismiss = point_inside_close_button(
+                        local_x,
+                        local_y,
+                        static_cast<float>(card_it->second.window.width),
+                        static_cast<float>(card_it->second.window.height));
+                }
+                if (should_dismiss) dismissed_cards.push_back(clicked_id);
+            }
+        }
+        impl_->sync_overlay_hover();
+    }
+#endif
     for (const auto& id : impl_->card_order) {
         const auto card_it = impl_->cards.find(id);
+        if (card_it == impl_->cards.end()) {
+            dismissed_cards.push_back(id);
+            continue;
+        }
+        if (card_is_ticker(card_it->second)) continue;
         const auto window_it = impl_->card_windows.find(id);
-        if (card_it == impl_->cards.end() || window_it == impl_->card_windows.end() || window_it->second == nullptr) {
+        if (window_it == impl_->card_windows.end() || window_it->second == nullptr) {
             dismissed_cards.push_back(id);
             continue;
         }
@@ -1529,13 +1898,21 @@ bool RuntimeSceneController::pump_messages() {
             dismissed_cards.push_back(id);
             continue;
         }
+        const bool ticker = is_ticker_profile(Impl::profile_id_for(card_it->second));
+        const bool follow = impl_->stack_follows.find(id) != impl_->stack_follows.end();
+        if (!window->is_dragging() && (ticker || follow)) continue;
         int x = 0;
         int y = 0;
         if (window->get_window_position(x, y)) {
             paint_origin_to_hit_origin(x, y, window->paint_overflow());
-            if (card_it->second.window.x != x || card_it->second.window.y != y) changed = true;
-            card_it->second.window.x = x;
-            card_it->second.window.y = y;
+            if (card_it->second.window.x != x || card_it->second.window.y != y) {
+                // Ticker/follow motion is a local time function. Emitting scene.changed every
+                // pixel move floods the pipe, recovery snapshot, and Hana main thread.
+                // Drag still emits because the continue above skipped only non-drag follow.
+                if (!ticker) changed = true;
+                card_it->second.window.x = x;
+                card_it->second.window.y = y;
+            }
         }
     }
 
@@ -1558,38 +1935,80 @@ bool RuntimeSceneController::pump_messages() {
             }
         }
     }
+    if (changed) ++g_scene_change_emit_count;
     return changed;
+}
+
+std::string RuntimeSceneController::perf_json() const {
+    std::uint64_t paints = scene_window_paint_count();
+#ifdef _WIN32
+    if (impl_ != nullptr && impl_->ticker_overlay != nullptr) {
+        paints += impl_->ticker_overlay->paint_count();
+    }
+#endif
+    return std::string("{\"paints\":") + std::to_string(paints)
+        + ",\"moves\":" + std::to_string(g_card_window_move_count)
+        + ",\"sceneChanges\":" + std::to_string(g_scene_change_emit_count) + "}";
 }
 
 bool RuntimeSceneController::tick_animation() {
 #ifdef _WIN32
     if (impl_ == nullptr) return false;
-    // 无 ticker 卡片 → 心跳停摆，空闲零开销（契约 §2.5）。
-    if (impl_->ticker_motions.empty()) {
+    // 无 ticker 且无未到位 follow → 心跳停摆，空闲零开销（契约 §2.5）。
+    if (impl_->ticker_motions.empty() && !impl_->has_active_follow()) {
         impl_->ticker_ticking = false;
         return false;
     }
 
     const auto now = std::chrono::steady_clock::now();
+    double dt = 1.0 / 60.0;
     if (impl_->ticker_ticking) {
         const auto since_last = std::chrono::duration_cast<std::chrono::milliseconds>(
             now - impl_->last_tick).count();
         if (since_last < impl_->ticker_heartbeat_ms) return false;
+        dt = static_cast<double>(since_last) / 1000.0;
     }
     impl_->last_tick = now;
     impl_->ticker_ticking = true;
+    if (!impl_->sync_overlay_hover()) return false;
 
     auto changed = false;
     std::vector<std::string> exiting;
     exiting.reserve(impl_->ticker_motions.size());
-    for (const auto& entry : impl_->ticker_motions) {
+    struct TickerMove {
+        HWND hwnd{};
+        int paint_x{};
+        int paint_y{};
+        SceneCardState* card{};
+        int x{};
+        int y{};
+    };
+    struct OverlayMove {
+        SceneCardState* card{};
+        int x{};
+        int y{};
+    };
+    std::vector<TickerMove> moves;
+    std::vector<OverlayMove> overlay_moves;
+    moves.reserve(impl_->stack_follows.size());
+    overlay_moves.reserve(impl_->ticker_motions.size());
+    for (auto& entry : impl_->ticker_motions) {
         const auto& card_id = entry.first;
-        const auto& motion = entry.second;
+        auto& motion = entry.second;
         auto card_it = impl_->cards.find(card_id);
-        const auto window_it = impl_->card_windows.find(card_id);
-        if (card_it == impl_->cards.end() || window_it == impl_->card_windows.end()
-            || window_it->second == nullptr) {
+        if (card_it == impl_->cards.end()) {
             exiting.push_back(card_id);
+            continue;
+        }
+
+        const bool paused = impl_->ticker_overlay != nullptr && overlay_should_pause(
+            impl_->ticker_overlay->click_through(),
+            impl_->ticker_overlay->hovered_id(),
+            card_id,
+            card_it->second.visual.ticker_hover_pause);
+        const auto shift_ms = ticker_spawn_shift_ms(dt * 1000.0, paused);
+        if (shift_ms > 0.0) {
+            motion.spawn += std::chrono::microseconds(static_cast<std::int64_t>(shift_ms * 1000.0));
             continue;
         }
 
@@ -1602,12 +2021,7 @@ bool RuntimeSceneController::tick_animation() {
         const auto height = card_it->second.window.height;
 
         if (card_it->second.window.x != x || card_it->second.window.y != y) {
-            const auto hwnd = static_cast<HWND>(window_it->second->native_handle());
-            if (apply_card_window_pos(hwnd, x, y, width, height, false, card_it->second.visual)) {
-                card_it->second.window.x = x;
-                card_it->second.window.y = y;
-                changed = true;
-            }
+            overlay_moves.push_back(OverlayMove{&card_it->second, x, y});
         }
         // 出屏回收（契约 §8）：含 24px 缓冲，避免窗口边缘被「切一半」留在屏上。
         // 方向用出生时记下的 fly_right，中途改设置不掉头。
@@ -1616,6 +2030,103 @@ bool RuntimeSceneController::tick_animation() {
             : ticker_is_offscreen(static_cast<double>(x + width), motion.lane_left, motion.exit_margin_px);
         if (offscreen) {
             exiting.push_back(card_id);
+        }
+    }
+
+    if (impl_->active_layout.settle == StackSettle::Follow) {
+        for (auto& entry : impl_->stack_follows) {
+            const auto& card_id = entry.first;
+            auto& chase = entry.second;
+            auto card_it = impl_->cards.find(card_id);
+            const auto window_it = impl_->card_windows.find(card_id);
+            if (card_it == impl_->cards.end() || window_it == impl_->card_windows.end()
+                || window_it->second == nullptr) {
+                continue;
+            }
+            if (window_it->second->is_dragging()) {
+                chase.state.x = static_cast<double>(card_it->second.window.x);
+                chase.state.y = static_cast<double>(card_it->second.window.y);
+                chase.state.vx = 0.0;
+                chase.state.vy = 0.0;
+                continue;
+            }
+            const auto step = tick_follow(chase.state, chase.target_x, chase.target_y, dt);
+            chase.state = step.state;
+            const auto x = static_cast<int>(std::lround(chase.state.x));
+            const auto y = static_cast<int>(std::lround(chase.state.y));
+            if (card_it->second.window.x != x || card_it->second.window.y != y) {
+                const auto hwnd = static_cast<HWND>(window_it->second->native_handle());
+                if (hwnd == nullptr || IsWindow(hwnd) == FALSE) continue;
+                const auto paint = card_paint_box(
+                    x, y, card_it->second.window.width, card_it->second.window.height, card_it->second.visual);
+                moves.push_back(TickerMove{hwnd, paint.x, paint.y, &card_it->second, x, y});
+            }
+        }
+    }
+
+    if (!overlay_moves.empty()) {
+        bool overlay_moved = true;
+        for (const auto& move : overlay_moves) {
+            move.card->window.x = move.x;
+            move.card->window.y = move.y;
+            if (!impl_->move_ticker_sprite(*move.card, false)) {
+                overlay_moved = false;
+                break;
+            }
+        }
+        if (overlay_moved && impl_->ticker_overlay != nullptr && impl_->ticker_overlay->commit()) {
+            g_card_window_move_count += static_cast<std::uint64_t>(overlay_moves.size());
+            changed = true;
+        }
+    }
+
+    if (!moves.empty()) {
+        HDWP hdwp = BeginDeferWindowPos(static_cast<int>(moves.size()));
+        bool deferred = hdwp != nullptr;
+        if (hdwp != nullptr) {
+            for (const auto& move : moves) {
+                const HDWP next = DeferWindowPos(
+                    hdwp,
+                    move.hwnd,
+                    nullptr,
+                    move.paint_x,
+                    move.paint_y,
+                    0,
+                    0,
+                    SWP_NOACTIVATE | SWP_NOZORDER | SWP_NOSIZE | SWP_NOREDRAW
+                        | SWP_NOSENDCHANGING | SWP_NOCOPYBITS | SWP_ASYNCWINDOWPOS);
+                if (next == nullptr) {
+                    deferred = false;
+                    break;
+                }
+                hdwp = next;
+            }
+            // HDWP 是 USER 对象。Begin 成功后无论 Defer 是否失败都必须 End，
+            // 否则漏 1 个句柄；堆到 10000 后 CreateWindowEx 会 1158。
+            if (EndDeferWindowPos(hdwp) == FALSE) deferred = false;
+        }
+        if (deferred) {
+            g_card_window_move_count += static_cast<std::uint64_t>(moves.size());
+            for (const auto& move : moves) {
+                move.card->window.x = move.x;
+                move.card->window.y = move.y;
+            }
+            changed = true;
+        } else {
+            for (const auto& move : moves) {
+                if (apply_card_window_pos(
+                        move.hwnd,
+                        move.x,
+                        move.y,
+                        move.card->window.width,
+                        move.card->window.height,
+                        false,
+                        move.card->visual)) {
+                    move.card->window.x = move.x;
+                    move.card->window.y = move.y;
+                    changed = true;
+                }
+            }
         }
     }
 
@@ -1631,6 +2142,14 @@ bool RuntimeSceneController::tick_animation() {
 #else
     return false;
 #endif
+}
+
+bool RuntimeSceneController::has_ticker_motion() const noexcept {
+    return impl_ != nullptr && (!impl_->ticker_motions.empty() || impl_->has_active_follow());
+}
+
+unsigned RuntimeSceneController::pump_idle_ms() const noexcept {
+    return has_ticker_motion() ? 16u : 32u;
 }
 
 bool RuntimeSceneController::has_window() const noexcept {

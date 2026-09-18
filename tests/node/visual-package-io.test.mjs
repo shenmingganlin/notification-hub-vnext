@@ -10,7 +10,9 @@ import { createVisualProfileRegistry } from '../../plugin/domain/visual-profile-
 import { createEventBindingRegistry } from '../../plugin/domain/event-binding-registry.js';
 import { createVisualAssetLibrary } from '../../plugin/domain/visual-asset-library.js';
 import { createVisualAssetStorage } from '../../plugin/domain/visual-asset-storage.js';
+import { createFontAssetLibrary } from '../../plugin/domain/font-asset-library.js';
 import { exportVisualPackage, previewImportVisualPackage, importVisualPackage, generatePackageId } from '../../plugin/domain/visual-package-io.js';
+import { ttfNamed } from './font-asset-fixture.mjs';
 
 // ---- Helpers ----
 
@@ -49,6 +51,36 @@ function createTestRegistries() {
   return { profileRegistry, bindingRegistry };
 }
 
+function createMemoryFontStorage() {
+  const files = new Map();
+  return {
+    files,
+    async put(id, format, data) { files.set(`${id}.${format}`, Buffer.from(data)); },
+    async remove(id, format) { files.delete(`${id}.${format}`); },
+    async resolveAssetPath(id, format) { return `font-assets/${id}.${format}`; }
+  };
+}
+
+function createFontedProfile(profileRegistry, id, name, fontAssetId) {
+  return profileRegistry.register({
+    profileId: id,
+    name,
+    profile: {
+      global: { enabled: true, preset: 'minimal', intensity: 'balanced' },
+      card: {
+        activeType: 'minimal',
+        types: {
+          minimal: {
+            appearance: { size: 'medium' },
+            parts: { title: { fill: '#f2fff9', fontAssetId }, body: { fill: '#d7ece3', fontAssetId } }
+          }
+        }
+      }
+    },
+    source: 'local'
+  });
+}
+
 function createTestProfile(profileRegistry, id, name, cardOverrides) {
   const profile = {
     global: { enabled: true, preset: 'minimal', intensity: 'balanced' },
@@ -84,6 +116,24 @@ test('export produces a valid ZIP with manifest and profile', async () => {
   assert.ok(entryNames.some((name) => name.startsWith('settings/profiles/')), 'profile files are missing');
 });
 
+test('export writes every selected profile into one zip', async () => {
+  const { profileRegistry, bindingRegistry } = createTestRegistries();
+  createTestProfile(profileRegistry, 'look-a', '晨间');
+  createTestProfile(profileRegistry, 'look-b', '夜间');
+  const zipBuffer = await exportVisualPackage({
+    profileRegistry,
+    bindingRegistry,
+    profileIds: ['look-a', 'look-b'],
+    meta: { packageName: '视觉配置' }
+  });
+  const zip = new AdmZip(zipBuffer);
+  const entryNames = zip.getEntries().map((e) => e.entryName);
+  assert.ok(entryNames.includes('settings/profiles/look-a.json'));
+  assert.ok(entryNames.includes('settings/profiles/look-b.json'));
+  const manifest = JSON.parse(zip.getEntry('manifest.json').getData().toString('utf-8'));
+  assert.equal(manifest.packageName, '视觉配置');
+});
+
 test('export includes event bindings when profiles are bound', async () => {
   const { profileRegistry, bindingRegistry } = createTestRegistries();
   createTestProfile(profileRegistry, 'test-binding-export', 'Binding Test');
@@ -94,7 +144,7 @@ test('export includes event bindings when profiles are bound', async () => {
   assert.ok(entryNames.includes('settings/event-bindings.json'), 'event-bindings.json is missing');
 });
 
-test('export includes asset files when profile references an asset', async () => {
+test('export writes asset fingerprints and never embeds library files', async () => {
   const dir = createTempDir('visual-pkg-export-asset-');
   try {
     const storage = createVisualAssetStorage(dir.path);
@@ -106,7 +156,11 @@ test('export includes asset files when profile references an asset', async () =>
     const zipBuffer = await exportVisualPackage({ profileRegistry, bindingRegistry, assetLibrary, storage });
     const zip = new AdmZip(zipBuffer);
     const entryNames = zip.getEntries().map((e) => e.entryName);
-    assert.ok(entryNames.some((name) => name.startsWith('assets/') && name.includes(asset.assetId)), 'asset file is missing');
+    assert.equal(entryNames.some((name) => name.startsWith('assets/')), false);
+    assert.ok(entryNames.includes('settings/assets.json'));
+    const fingerprints = JSON.parse(zip.getEntry('settings/assets.json').getData().toString('utf-8'));
+    assert.equal(fingerprints.assets[0].assetId, asset.assetId);
+    assert.equal(fingerprints.assets[0].sha256, asset.sha256);
   } finally {
     dir.cleanup();
   }
@@ -227,6 +281,29 @@ test('import with overwrite strategy replaces existing profiles', async () => {
   assert.equal(profileRegistry.get('overwrite-profile').name, 'New Name');
 });
 
+test('overwrite of in-use profile replaces look and keeps event references', async () => {
+  const { profileRegistry, bindingRegistry } = createTestRegistries();
+  createTestProfile(profileRegistry, 'u5f39-u5e55', '弹幕');
+  bindingRegistry.apply({ profileId: 'u5f39-u5e55', eventIds: ['chat.assistant_reply.completed'] });
+  const exportRegistry = createVisualProfileRegistry();
+  const exportBindingRegistry = createEventBindingRegistry({ profileRegistry: exportRegistry });
+  createTestProfile(exportRegistry, 'u5f39-u5e55', '弹幕改', { backgroundColor: '#123456' });
+  const zipBuffer = await exportVisualPackage({ profileRegistry: exportRegistry, bindingRegistry: exportBindingRegistry });
+  const report = await importVisualPackage({
+    zipBuffer,
+    profileRegistry,
+    bindingRegistry,
+    strategy: 'overwrite',
+    applyBindings: false
+  });
+  assert.equal(report.failed, undefined);
+  assert.equal(report.profiles.registered.length, 1);
+  assert.equal(profileRegistry.get('u5f39-u5e55').name, '弹幕改');
+  assert.equal(profileRegistry.get('u5f39-u5e55').profile.card.types.minimal.appearance.backgroundColor, '#123456');
+  assert.deepEqual(profileRegistry.references('u5f39-u5e55'), ['chat.assistant_reply.completed']);
+  assert.equal(bindingRegistry.get('chat.assistant_reply.completed').visualProfileId, 'u5f39-u5e55');
+});
+
 test('import with no conflicts registers profiles directly', async () => {
   const { profileRegistry, bindingRegistry } = createTestRegistries();
   createTestProfile(profileRegistry, 'existing-pkg', 'Existing');
@@ -251,14 +328,13 @@ test('import registers bindings when profiles are imported', async () => {
   assert.ok(bindingRegistry.list().some((b) => b.visualProfileId === 'binding-profile'));
 });
 
-test('import with assets registers them in the asset library', async () => {
-  const dir = createTempDir('visual-pkg-import-asset-');
+test('import reconnects matching local art by fingerprint and never copies zip binaries', async () => {
+  const sourceDir = createTempDir('visual-pkg-import-asset-src-');
+  const targetDir = createTempDir('visual-pkg-import-asset-dst-');
   try {
-    const storage = createVisualAssetStorage(dir.path);
-    const assetLibrary = createVisualAssetLibrary({ storage });
-    const exportStorage = createVisualAssetStorage(dir.path);
-    const exportAssetLibrary = createVisualAssetLibrary({ storage: exportStorage });
     const pngBuffer = createMinimalPngBuffer();
+    const exportStorage = createVisualAssetStorage(sourceDir.path);
+    const exportAssetLibrary = createVisualAssetLibrary({ storage: exportStorage });
     const asset = await exportAssetLibrary.importBuffer({ name: 'test-import.png', kind: 'background', buffer: pngBuffer, tags: [] });
     const exportRegistry = createVisualProfileRegistry();
     const exportBindingRegistry = createEventBindingRegistry({ profileRegistry: exportRegistry });
@@ -267,18 +343,22 @@ test('import with assets registers them in the asset library', async () => {
       profileRegistry: exportRegistry, bindingRegistry: exportBindingRegistry,
       assetLibrary: exportAssetLibrary, storage: exportStorage
     });
+    const targetStorage = createVisualAssetStorage(targetDir.path);
+    const targetAssets = createVisualAssetLibrary({ storage: targetStorage });
+    const local = await targetAssets.importBuffer({ assetId: 'local-copy', name: 'local.png', kind: 'background', buffer: pngBuffer, tags: [] });
     const importRegistry = createVisualProfileRegistry();
     const importBindingRegistry = createEventBindingRegistry({ profileRegistry: importRegistry });
     const report = await importVisualPackage({
       zipBuffer, profileRegistry: importRegistry, bindingRegistry: importBindingRegistry,
-      assetLibrary, storage, strategy: 'copy'
+      assetLibrary: targetAssets, storage: targetStorage, strategy: 'copy'
     });
-    assert.ok(report.assets.imported.length >= 1 || report.assets.skipped.length >= 0);
-    const importedAsset = assetLibrary.get(asset.assetId);
-    assert.ok(importedAsset);
-    assert.equal(importedAsset.name, 'test-import.png');
+    assert.equal(report.failed, undefined);
+    assert.equal(report.assets.imported.length, 0);
+    assert.equal(importRegistry.get('asset-import-profile').profile.card.types.minimal.appearance.backgroundAssetId, local.assetId);
+    assert.equal(targetAssets.list().length, 1);
   } finally {
-    dir.cleanup();
+    sourceDir.cleanup();
+    targetDir.cleanup();
   }
 });
 
@@ -345,7 +425,7 @@ test('strategy skips are exposed as warning issues in the import report', async 
   assert.equal(report.issueSummary.errors, 0);
 });
 
-test('failed profile import rolls back newly imported assets and files', async () => {
+test('failed profile import does not copy zip binaries into the local library', async () => {
   const sourceDir = createTempDir('visual-pkg-rollback-source-');
   const targetDir = createTempDir('visual-pkg-rollback-target-');
   try {
@@ -364,13 +444,12 @@ test('failed profile import rolls back newly imported assets and files', async (
     const targetBindings = createEventBindingRegistry({ profileRegistry: targetProfiles });
     targetProfiles.register = () => { throw Object.assign(new Error('injected profile failure'), { code: 'INJECTED_PROFILE_FAILURE' }); };
 
-    const report = await importVisualPackage({ zipBuffer, profileRegistry: targetProfiles, bindingRegistry: targetBindings, assetLibrary: targetAssets, storage: targetStorage });
+    const report = await importVisualPackage({ zipBuffer, profileRegistry: targetProfiles, bindingRegistry: targetBindings, assetLibrary: targetAssets, storage: targetStorage, clearMissingAssets: true });
 
     assert.equal(report.rolledBack, true);
     assert.equal(report.failedStage, 'profiles');
     assert.deepEqual(targetProfiles.list(), []);
     assert.deepEqual(targetAssets.list(), []);
-    await assert.rejects(() => targetStorage.read('rollback-asset', 'png'));
   } finally {
     sourceDir.cleanup();
     targetDir.cleanup();
@@ -456,9 +535,180 @@ test('export rejects missing profileRegistry', async () => {
   await assert.rejects(() => exportVisualPackage({ bindingRegistry: {} }), { code: 'VISUAL_PACKAGE_IO_INVALID' });
 });
 
+test('preview reports missing art without treating zip binaries as the library', async () => {
+  const sourceProfiles = createVisualProfileRegistry();
+  const sourceBindings = createEventBindingRegistry({ profileRegistry: sourceProfiles });
+  createTestProfile(sourceProfiles, 'missing-preview', 'Missing Preview', { backgroundAssetId: 'ghost-art' });
+  const zipBuffer = await exportVisualPackage({ profileRegistry: sourceProfiles, bindingRegistry: sourceBindings });
+  const targetProfiles = createVisualProfileRegistry();
+  const preview = await previewImportVisualPackage({ zipBuffer, profileRegistry: targetProfiles });
+  assert.equal(preview.assetCount, 1);
+  assert.equal(preview.missingAssetCount, 1);
+  assert.equal(preview.missingAssets[0].assetId, 'ghost-art');
+  assert.equal(preview.embeddedAssetCount, 0);
+});
+
+test('clearMissingAssets imports with empty background slots', async () => {
+  const sourceProfiles = createVisualProfileRegistry();
+  const sourceBindings = createEventBindingRegistry({ profileRegistry: sourceProfiles });
+  createTestProfile(sourceProfiles, 'clear-art-profile', 'Clear Art', { backgroundAssetId: 'ghost-art' });
+  const zipBuffer = await exportVisualPackage({ profileRegistry: sourceProfiles, bindingRegistry: sourceBindings });
+  const targetDir = createTempDir('visual-pkg-clear-missing-');
+  try {
+    const targetStorage = createVisualAssetStorage(targetDir.path);
+    const targetAssets = createVisualAssetLibrary({ storage: targetStorage });
+    const targetProfiles = createVisualProfileRegistry();
+    const targetBindings = createEventBindingRegistry({ profileRegistry: targetProfiles });
+    const report = await importVisualPackage({
+      zipBuffer, profileRegistry: targetProfiles, bindingRegistry: targetBindings,
+      assetLibrary: targetAssets, storage: targetStorage, clearMissingAssets: true
+    });
+    assert.equal(report.failed, undefined);
+    assert.equal(report.clearMissingAssets, true);
+    assert.equal(targetProfiles.get('clear-art-profile').profile.card.types.minimal.appearance.backgroundAssetId, null);
+    assert.deepEqual(targetAssets.list(), []);
+  } finally {
+    targetDir.cleanup();
+  }
+});
+
+test('applyBindings false keeps local event bindings untouched', async () => {
+  const sourceProfiles = createVisualProfileRegistry();
+  const sourceBindings = createEventBindingRegistry({ profileRegistry: sourceProfiles });
+  createTestProfile(sourceProfiles, 'binding-off-profile', 'Binding Off');
+  sourceBindings.apply({ profileId: 'binding-off-profile', eventIds: ['chat.assistant_reply.completed'] });
+  const zipBuffer = await exportVisualPackage({ profileRegistry: sourceProfiles, bindingRegistry: sourceBindings });
+  const targetProfiles = createVisualProfileRegistry();
+  const targetBindings = createEventBindingRegistry({ profileRegistry: targetProfiles });
+  const report = await importVisualPackage({
+    zipBuffer, profileRegistry: targetProfiles, bindingRegistry: targetBindings, applyBindings: false
+  });
+  assert.equal(report.failed, undefined);
+  assert.equal(report.applyBindings, false);
+  assert.equal(report.bindings.imported.length, 0);
+  assert.deepEqual(targetBindings.list(), []);
+});
+
+test('skip plus applyBindings steals events onto the local profile', async () => {
+  const targetProfiles = createVisualProfileRegistry();
+  const targetBindings = createEventBindingRegistry({ profileRegistry: targetProfiles });
+  createTestProfile(targetProfiles, 'kept-profile', 'Local Look');
+  const sourceProfiles = createVisualProfileRegistry();
+  const sourceBindings = createEventBindingRegistry({ profileRegistry: sourceProfiles });
+  createTestProfile(sourceProfiles, 'kept-profile', 'Imported Look');
+  sourceBindings.apply({ profileId: 'kept-profile', eventIds: ['chat.assistant_reply.completed'] });
+  const zipBuffer = await exportVisualPackage({ profileRegistry: sourceProfiles, bindingRegistry: sourceBindings });
+  const report = await importVisualPackage({
+    zipBuffer, profileRegistry: targetProfiles, bindingRegistry: targetBindings, strategy: 'skip', applyBindings: true
+  });
+  assert.equal(report.profiles.registered.length, 0);
+  assert.equal(targetProfiles.get('kept-profile').name, 'Local Look');
+  assert.equal(targetBindings.list()[0].visualProfileId, 'kept-profile');
+});
+
+test('import ignores embedded asset binaries from old packages', async () => {
+  const sourceProfiles = createVisualProfileRegistry();
+  const sourceBindings = createEventBindingRegistry({ profileRegistry: sourceProfiles });
+  createTestProfile(sourceProfiles, 'legacy-embedded', 'Legacy');
+  const exported = await exportVisualPackage({ profileRegistry: sourceProfiles, bindingRegistry: sourceBindings });
+  const zip = new AdmZip(exported);
+  zip.addFile('assets/legacy.png', createMinimalPngBuffer());
+  const targetDir = createTempDir('visual-pkg-ignore-embedded-');
+  try {
+    const targetStorage = createVisualAssetStorage(targetDir.path);
+    const targetAssets = createVisualAssetLibrary({ storage: targetStorage });
+    const targetProfiles = createVisualProfileRegistry();
+    const targetBindings = createEventBindingRegistry({ profileRegistry: targetProfiles });
+    const report = await importVisualPackage({
+      zipBuffer: zip.toBuffer(), profileRegistry: targetProfiles, bindingRegistry: targetBindings,
+      assetLibrary: targetAssets, storage: targetStorage
+    });
+    assert.equal(report.failed, undefined);
+    assert.ok(report.issues.some((issue) => issue.code === 'ASSET_EMBEDDED_IGNORED'));
+    assert.deepEqual(targetAssets.list(), []);
+  } finally {
+    targetDir.cleanup();
+  }
+});
+
+test('overwrite of visual.default is refused', async () => {
+  const targetProfiles = createVisualProfileRegistry();
+  const targetBindings = createEventBindingRegistry({ profileRegistry: targetProfiles });
+  createTestProfile(targetProfiles, 'visual.default', '默认视觉方案');
+  const sourceProfiles = createVisualProfileRegistry();
+  const sourceBindings = createEventBindingRegistry({ profileRegistry: sourceProfiles });
+  createTestProfile(sourceProfiles, 'visual.default', '外来默认');
+  const zipBuffer = await exportVisualPackage({ profileRegistry: sourceProfiles, bindingRegistry: sourceBindings });
+  const report = await importVisualPackage({
+    zipBuffer, profileRegistry: targetProfiles, bindingRegistry: targetBindings, strategy: 'overwrite'
+  });
+  assert.equal(report.failed, true);
+  assert.equal(report.error.code, 'VISUAL_PROFILE_REGISTRY_PROTECTED');
+  assert.equal(targetProfiles.get('visual.default').name, '默认视觉方案');
+});
+
 test('generatePackageId returns a non-empty string', () => {
   const id = generatePackageId();
   assert.equal(typeof id, 'string');
   assert.ok(id.length > 0);
   assert.ok(id.startsWith('visual-package-'));
+});
+
+test('export writes font fingerprints and never embeds font files', async () => {
+  const { profileRegistry, bindingRegistry } = createTestRegistries();
+  const fonts = createFontAssetLibrary({ storage: createMemoryFontStorage() });
+  const font = await fonts.importBuffer({ name: 'mint.ttf', buffer: ttfNamed('Mint Sans', 'Mint Sans') });
+  createFontedProfile(profileRegistry, 'font-profile', 'Fonted', font.assetId);
+  const zipBuffer = await exportVisualPackage({ profileRegistry, bindingRegistry, fontLibrary: fonts });
+  const zip = new AdmZip(zipBuffer);
+  assert.ok(zip.getEntry('settings/fonts.json'));
+  assert.equal(zip.getEntries().some((entry) => /\.(ttf|otf)$/i.test(entry.entryName)), false);
+  const metadata = JSON.parse(zip.getEntry('settings/fonts.json').getData().toString('utf-8'));
+  assert.equal(metadata.assets[0].assetId, font.assetId);
+  assert.equal(metadata.assets[0].sha256, font.sha256);
+  assert.equal(metadata.assets[0].name, 'Mint Sans');
+});
+
+test('preview reports missing fonts without treating zip binaries as the library', async () => {
+  const sourceProfiles = createVisualProfileRegistry();
+  const sourceBindings = createEventBindingRegistry({ profileRegistry: sourceProfiles });
+  createFontedProfile(sourceProfiles, 'missing-font-preview', 'Missing Font Preview', 'ghost-font');
+  const zipBuffer = await exportVisualPackage({ profileRegistry: sourceProfiles, bindingRegistry: sourceBindings });
+  const targetProfiles = createVisualProfileRegistry();
+  const preview = await previewImportVisualPackage({ zipBuffer, profileRegistry: targetProfiles });
+  assert.equal(preview.fontCount, 1);
+  assert.equal(preview.missingFontCount, 1);
+  assert.equal(preview.missingFonts[0].assetId, 'ghost-font');
+});
+
+test('missing font dependency is reported and rolls back the imported profile', async () => {
+  const sourceProfiles = createVisualProfileRegistry();
+  const sourceBindings = createEventBindingRegistry({ profileRegistry: sourceProfiles });
+  createFontedProfile(sourceProfiles, 'missing-font-profile', 'Missing Font', 'ghost-font');
+  const zipBuffer = await exportVisualPackage({ profileRegistry: sourceProfiles, bindingRegistry: sourceBindings });
+  const targetProfiles = createVisualProfileRegistry();
+  const targetBindings = createEventBindingRegistry({ profileRegistry: targetProfiles });
+  const report = await importVisualPackage({ zipBuffer, profileRegistry: targetProfiles, bindingRegistry: targetBindings });
+  assert.equal(report.failed, true);
+  assert.equal(report.rolledBack, true);
+  assert.ok(report.issues.some((issue) => issue.code === 'FONT_DEPENDENCY_MISSING' && issue.id === 'ghost-font'));
+  assert.deepEqual(targetProfiles.list(), []);
+});
+
+test('clearMissingFonts imports with empty font slots', async () => {
+  const sourceProfiles = createVisualProfileRegistry();
+  const sourceBindings = createEventBindingRegistry({ profileRegistry: sourceProfiles });
+  createFontedProfile(sourceProfiles, 'clear-font-profile', 'Clear Font', 'ghost-font');
+  const zipBuffer = await exportVisualPackage({ profileRegistry: sourceProfiles, bindingRegistry: sourceBindings });
+  const targetProfiles = createVisualProfileRegistry();
+  const targetBindings = createEventBindingRegistry({ profileRegistry: targetProfiles });
+  const report = await importVisualPackage({
+    zipBuffer, profileRegistry: targetProfiles, bindingRegistry: targetBindings, clearMissingFonts: true
+  });
+  assert.equal(report.failed, undefined);
+  assert.equal(report.clearMissingFonts, true);
+  const parts = targetProfiles.get('clear-font-profile').profile.card.types.minimal.parts;
+  assert.equal(parts.title.fill, '#f2fff9');
+  assert.equal(parts.title.fontAssetId ?? null, null);
+  assert.equal(parts.body.fontAssetId ?? null, null);
 });

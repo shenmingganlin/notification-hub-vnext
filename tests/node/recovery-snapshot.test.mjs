@@ -168,13 +168,35 @@ test('recovery snapshot rejects unsupported commands and malformed files', async
       payload: { layout: 'stack', direction: 'down', anchor: 'top-right', spacing: 8, marginLeft: 99, settle: 'snap' }
     })
   );
-  assert.throws(
+  assert.doesNotThrow(
     () => addRecoveryEntry(snapshot, {
       key: 'follow-mode',
       type: 'scene.set-mode',
       payload: { layout: 'stack', direction: 'down', anchor: 'top-right', spacing: 8, settle: 'follow' }
+    })
+  );
+  assert.throws(
+    () => addRecoveryEntry(snapshot, {
+      key: 'orbit-mode',
+      type: 'scene.set-mode',
+      payload: { layout: 'stack', direction: 'down', anchor: 'top-right', spacing: 8, settle: 'orbit' }
     }),
-    (error) => error.code === 'CHARTER_SETTLE_UNSUPPORTED'
+    (error) => error.code === 'CHARTER_SETTLE_UNSUPPORTED' && error.details.expected === 'snap|follow'
+  );
+  assert.doesNotThrow(
+    () => addRecoveryEntry(snapshot, {
+      key: 'newest-next',
+      type: 'scene.set-mode',
+      payload: { layout: 'stack', direction: 'down', anchor: 'top-right', spacing: 8, newest: 'next' }
+    })
+  );
+  assert.throws(
+    () => addRecoveryEntry(snapshot, {
+      key: 'newest-orbit',
+      type: 'scene.set-mode',
+      payload: { layout: 'stack', direction: 'down', anchor: 'top-right', spacing: 8, newest: 'orbit' }
+    }),
+    (error) => error.code === 'CHARTER_NEWEST_UNSUPPORTED' && error.details.expected === 'dock|next'
   );
   assert.throws(
     () => addRecoveryEntry(snapshot, {

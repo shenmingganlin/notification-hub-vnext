@@ -88,6 +88,23 @@ test('duplicate soundId follows explicit reject, keep-existing, and replace poli
   }
 });
 
+test('import writes assets without applying package profile through commit', async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'nh-sound-import-'));
+  try {
+    let committedArgs;
+    const result = await importSoundPackage({
+      packageValue: makePackage(),
+      assetRoot: root,
+      registry: createSoundAssetRegistry(),
+      commit: async (...args) => { committedArgs = args; }
+    });
+    assert.equal(result.importedAssets, 1);
+    assert.deepEqual(committedArgs, []);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test('import accepts serialized .nhsound text as well as a parsed package', async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), 'nh-sound-import-'));
   try {

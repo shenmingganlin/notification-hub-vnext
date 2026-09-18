@@ -318,7 +318,7 @@ bool parse_visual_style(std::string_view payload, size_t& position, scene::Visua
         } else if (key == "appearance" && !seen_appearance) {
             if (!parse_object([&](const std::string& nested) { double number{}; if (nested == "size") return parse_json_string_token(payload, position, visual.size); if (nested == "aspectRatio") return parse_json_string_token(payload, position, visual.aspect_ratio); if (nested == "backgroundColor") return parse_json_string_token(payload, position, visual.background_color); if (nested == "backgroundAssetId") return parse_json_string_token(payload, position, visual.background_asset_id); if (nested == "backgroundFit") return parse_json_string_token(payload, position, visual.background_fit); if (nested == "backgroundPadding") { if (!parse_number(number)) return false; visual.background_padding = static_cast<float>(number); return true; } if (nested == "borderRadius") { if (!parse_number(number)) return false; visual.border_radius = static_cast<int>(number); return true; } if (nested == "opacity") { if (!parse_number(number)) return false; visual.opacity = static_cast<float>(number); return true; } if (nested == "borderWidth") { if (!parse_number(number)) return false; visual.border_width = static_cast<int>(number); return true; } if (nested == "borderColor") return parse_json_string_token(payload, position, visual.border_color); if (nested == "paintOverflow") { if (!parse_number(number)) return false; visual.paint_overflow = static_cast<int>(number); return true; } if (nested == "backgroundScale") { if (!parse_number(number)) return false; visual.background_scale = static_cast<float>(number); visual.background_transform_specified = true; return true; } if (nested == "backgroundX") { if (!parse_number(number)) return false; visual.background_x = static_cast<float>(number); visual.background_transform_specified = true; return true; } if (nested == "backgroundY") { if (!parse_number(number)) return false; visual.background_y = static_cast<float>(number); visual.background_transform_specified = true; return true; } return false; })) return false; seen_appearance = true;
         } else if (key == "interaction" && !seen_interaction) {
-            if (!parse_object([&](const std::string& nested) { double number{}; if (nested == "dismissMode") return parse_json_string_token(payload, position, visual.dismiss_mode); if (nested == "closeButtonPosition") return parse_json_string_token(payload, position, visual.close_button_position); if (nested == "timeoutMs") { if (!parse_number(number)) return false; visual.dismiss_timeout_ms = static_cast<int>(number); return true; } if (nested == "hoverHighlight") return parse_json_bool_token(payload, position, visual.hover_highlight); if (nested == "autoDismiss") return parse_json_bool_token(payload, position, visual.auto_dismiss); return false; })) return false; seen_interaction = true;
+            if (!parse_object([&](const std::string& nested) { double number{}; if (nested == "dismissMode") return parse_json_string_token(payload, position, visual.dismiss_mode); if (nested == "closeButtonPosition") return parse_json_string_token(payload, position, visual.close_button_position); if (nested == "timeoutMs") { if (!parse_number(number)) return false; visual.dismiss_timeout_ms = static_cast<int>(number); return true; } if (nested == "hoverHighlight") return parse_json_bool_token(payload, position, visual.hover_highlight); if (nested == "autoDismiss") return parse_json_bool_token(payload, position, visual.auto_dismiss); if (nested == "holdDrag") return parse_json_bool_token(payload, position, visual.hold_drag); return false; })) return false; seen_interaction = true;
         } else if (key == "ticker" && !seen_ticker) {
             if (!parse_object([&](const std::string& nested) { double number{}; if (nested == "speedPxPerSec") { if (!parse_number(number)) return false; visual.ticker_speed_px_per_second = static_cast<int>(number); return true; } if (nested == "band") return parse_json_string_token(payload, position, visual.ticker_band); if (nested == "bandRatio") { if (!parse_number(number)) return false; visual.ticker_band_ratio = number; return true; } if (nested == "trackCount") { if (!parse_number(number)) return false; visual.ticker_track_count = static_cast<int>(number); return true; } if (nested == "trackGapPx") { if (!parse_number(number)) return false; visual.ticker_track_gap_px = static_cast<int>(number); return true; } if (nested == "minGapPx") { if (!parse_number(number)) return false; visual.ticker_min_gap_px = static_cast<int>(number); return true; } if (nested == "clickThrough") return parse_json_bool_token(payload, position, visual.ticker_click_through); if (nested == "hoverPause") return parse_json_bool_token(payload, position, visual.ticker_hover_pause); if (nested == "overflow") return parse_json_string_token(payload, position, visual.ticker_overflow); if (nested == "direction") return parse_json_string_token(payload, position, visual.ticker_direction); return false; })) return false;
             visual.ticker_specified = true; seen_ticker = true;
@@ -799,11 +799,13 @@ bool parse_scene_mode_payload(std::string_view payload, scene::StackLayoutOption
     bool seen_margin_bottom = false;
     bool seen_wrap = false;
     bool seen_settle = false;
+    bool seen_newest = false;
     std::string layout;
     std::string direction;
     std::string anchor;
     std::string wrap;
     std::string settle;
+    std::string newest;
     while (true) {
         skip();
         if (position < payload.size() && payload[position] == '}') {
@@ -812,7 +814,7 @@ bool parse_scene_mode_payload(std::string_view payload, scene::StackLayoutOption
         }
         std::string key;
         if (!parse_json_string_token(payload, position, key) || !consume(':')) return false;
-        if (key == "layout" || key == "direction" || key == "anchor" || key == "wrap" || key == "settle") {
+        if (key == "layout" || key == "direction" || key == "anchor" || key == "wrap" || key == "settle" || key == "newest") {
             std::string value;
             if (!parse_json_string_token(payload, position, value)) return false;
             if (key == "layout" && !seen_layout) { layout = std::move(value); seen_layout = true; }
@@ -820,6 +822,7 @@ bool parse_scene_mode_payload(std::string_view payload, scene::StackLayoutOption
             else if (key == "anchor" && !seen_anchor) { anchor = std::move(value); seen_anchor = true; }
             else if (key == "wrap" && !seen_wrap) { wrap = std::move(value); seen_wrap = true; }
             else if (key == "settle" && !seen_settle) { settle = std::move(value); seen_settle = true; }
+            else if (key == "newest" && !seen_newest) { newest = std::move(value); seen_newest = true; }
             else return false;
         } else if (key == "spacing" || key == "workAreaWidth" || key == "workAreaHeight" || key == "dpiScale"
             || key == "marginLeft" || key == "marginRight" || key == "marginTop" || key == "marginBottom") {
@@ -868,10 +871,18 @@ bool parse_scene_mode_payload(std::string_view payload, scene::StackLayoutOption
     if (!seen_wrap || wrap == "parallel") options.wrap = scene::StackWrap::Parallel;
     else if (wrap == "off") options.wrap = scene::StackWrap::Off;
     else if (wrap == "snake") options.wrap = scene::StackWrap::Snake;
+    else if (wrap == "coil") options.wrap = scene::StackWrap::Coil;
     else return false;
     if (!seen_settle || settle == "snap") options.settle = scene::StackSettle::Snap;
+    else if (settle == "follow") options.settle = scene::StackSettle::Follow;
     else {
         error_code = "CHARTER_SETTLE_UNSUPPORTED";
+        return false;
+    }
+    if (!seen_newest || newest == "dock") options.newest = scene::StackNewest::Dock;
+    else if (newest == "next") options.newest = scene::StackNewest::Next;
+    else {
+        error_code = "CHARTER_NEWEST_UNSUPPORTED";
         return false;
     }
     return true;
@@ -1092,7 +1103,7 @@ int run_named_pipe_server(std::string_view pipe_name, bool drop_after_health, bo
                 break;
             }
             if (bytes_available == 0) {
-                Sleep(1);
+                MsgWaitForMultipleObjects(0, nullptr, FALSE, scene_controller.pump_idle_ms(), QS_ALLINPUT);
                 continue;
             }
             DWORD bytes_read = 0;
@@ -1207,7 +1218,9 @@ int run_named_pipe_server(std::string_view pipe_name, bool drop_after_health, bo
                             ? (layout_error.empty() ? "LAYOUT_INVALID" : layout_error)
                             : (is_charter_command ? "CHARTER_INVALID" : "RUNTIME_SCENE_STATE_INVALID"));
                     const std::string error_message = error_code == "CHARTER_SETTLE_UNSUPPORTED"
-                        ? "stack settle must be snap"
+                        ? "stack settle must be snap or follow"
+                        : error_code == "CHARTER_NEWEST_UNSUPPORTED"
+                        ? "stack newest must be dock or next"
                         : (is_card_command
                             ? "scene card payload is invalid"
                             : (is_layout_command
@@ -1425,7 +1438,10 @@ int run_named_pipe_server(std::string_view pipe_name, bool drop_after_health, bo
                 else if (parsed.message.type == "scene.update" && !is_card_update) result_json = scene_controller.state_result_json(deduplicated);
                 else if (parsed.message.type == "scene.dismiss") result_json = scene_controller.dismiss_result_json(deduplicated, requested_dismiss_id);
                 else if (parsed.message.type == "scene.create" || is_card_update || is_layout_command) result_json = scene_controller.cards_result_json(deduplicated);
-                else if (parsed.message.type == "health") result_json = std::string("{\"status\":\"accepted\",\"deduplicated\":") + (deduplicated ? "true" : "false") + ",\"sceneState\":" + scene_controller.state_json() + ",\"sceneCards\":" + scene_controller.cards_json() + ",\"sceneStateSnapshot\":" + scene_controller.scene_state_snapshot_json() + ",\"layout\":" + scene_controller.layout_json() + ",\"workArea\":" + scene_controller.work_area_json() + "}";
+                else if (parsed.message.type == "health") {
+                    const auto cards = scene_controller.cards_json();
+                    result_json = std::string("{\"status\":\"accepted\",\"deduplicated\":") + (deduplicated ? "true" : "false") + ",\"sceneState\":" + scene_controller.state_json() + ",\"sceneCards\":" + cards + ",\"sceneStateSnapshot\":" + scene_controller.scene_state_snapshot_json(cards) + ",\"layout\":" + scene_controller.layout_json() + ",\"workArea\":" + scene_controller.work_area_json() + ",\"perf\":" + scene_controller.perf_json() + "}";
+                }
                 else result_json = generic_result;
                 if (!send_payload(pipe, protocol::serialize_ack(parsed.message, result_json))) {
                     std::cerr << "TRANSPORT_PIPE_WRITE_FAILED: " << GetLastError() << "\n";

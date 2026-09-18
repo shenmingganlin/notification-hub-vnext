@@ -118,23 +118,35 @@ test('native visual payload falls back for categories outside the Native visual 
 
 test('spaceToNativeStackLayout maps top anchors up and bottom anchors down without workArea keys', () => {
   const top = spaceToNativeStackLayout({ anchor: 'top-left', gap: 12 });
-  assert.deepEqual(top, { layout: 'stack', direction: 'up', wrap: 'parallel', anchor: 'top-left', spacing: 12, marginLeft: 18, marginRight: 0, marginTop: 18, marginBottom: 0, settle: 'snap' });
+  assert.deepEqual(top, { layout: 'stack', direction: 'up', wrap: 'parallel', newest: 'dock', anchor: 'top-left', spacing: 12, marginLeft: 18, marginRight: 18, marginTop: 18, marginBottom: 18, settle: 'follow' });
   assert.equal('workAreaWidth' in top, false);
   assert.equal('workAreaHeight' in top, false);
   assert.equal('dpiScale' in top, false);
   const bottom = spaceToNativeStackLayout({ anchor: 'bottom-right' });
-  assert.deepEqual(bottom, { layout: 'stack', direction: 'down', wrap: 'parallel', anchor: 'bottom-right', spacing: 8, marginLeft: 0, marginRight: 18, marginTop: 0, marginBottom: 18, settle: 'snap' });
-  assert.equal(spaceToNativeStackLayout({ anchor: 'bottom-right', settle: 'follow' }).settle, 'snap');
+  assert.deepEqual(bottom, { layout: 'stack', direction: 'down', wrap: 'parallel', newest: 'dock', anchor: 'bottom-right', spacing: 8, marginLeft: 18, marginRight: 18, marginTop: 18, marginBottom: 18, settle: 'follow' });
+  const farSides = spaceToNativeStackLayout({ anchor: 'bottom-right', marginLeft: 40, marginRight: 10, marginTop: 8, marginBottom: 12, wrap: 'coil' });
+  assert.equal(farSides.marginLeft, 40);
+  assert.equal(farSides.marginRight, 10);
+  assert.equal(farSides.marginTop, 8);
+  assert.equal(farSides.marginBottom, 12);
+  assert.equal(spaceToNativeStackLayout({ anchor: 'bottom-right', settle: 'follow' }).settle, 'follow');
+  assert.equal(spaceToNativeStackLayout({ anchor: 'bottom-right', settle: 'snap' }).settle, 'snap');
   assert.equal(spaceToNativeStackLayout({ anchor: 'top-right', gap: 0 }).direction, 'up');
   assert.equal(spaceToNativeStackLayout({ anchor: 'top-right', gap: 0 }).spacing, 0);
   assert.equal(spaceToNativeStackLayout({ anchor: 'bottom-left', gap: 24 }).direction, 'down');
   assert.equal(spaceToNativeStackLayout({ anchor: 'bottom-right', grow: 'left' }).direction, 'right');
   assert.equal(spaceToNativeStackLayout({ anchor: 'top-left', grow: 'right' }).direction, 'left');
   assert.equal(spaceToNativeStackLayout({ anchor: 'top-left', grow: 'up' }).direction, 'up');
-  assert.equal(spaceToNativeStackLayout({ anchor: 'top-left', grow: 'right', wrap: 'snake' }).direction, 'right');
+  assert.equal(spaceToNativeStackLayout({ anchor: 'top-left', grow: 'right', wrap: 'snake', newest: 'next' }).direction, 'right');
+  assert.equal(spaceToNativeStackLayout({ anchor: 'top-left', grow: 'right', wrap: 'snake' }).direction, 'left');
   assert.equal(spaceToNativeStackLayout({ anchor: 'top-left', grow: 'right', wrap: 'snake' }).wrap, 'snake');
+  assert.equal(spaceToNativeStackLayout({ anchor: 'top-left', grow: 'down', wrap: 'coil' }).wrap, 'coil');
+  assert.equal(spaceToNativeStackLayout({ anchor: 'top-left', grow: 'down', wrap: 'coil' }).direction, 'up');
+  assert.equal(spaceToNativeStackLayout({ anchor: 'top-left', grow: 'down', wrap: 'coil', newest: 'next' }).direction, 'down');
   assert.equal(spaceToNativeStackLayout({ anchor: 'bottom-right', wrap: 'off' }).wrap, 'off');
   assert.equal(spaceToNativeStackLayout({ anchor: 'bottom-right', wrap: 'off' }).direction, 'down');
+  assert.equal(spaceToNativeStackLayout({ anchor: 'bottom-right', grow: 'up', newest: 'next' }).direction, 'up');
+  assert.equal(spaceToNativeStackLayout({ anchor: 'bottom-right', newest: 'next' }).newest, 'next');
 });
 
 test('native visual payload projects autoDismiss on as a Native bool and keeps it off ticker', () => {
@@ -158,6 +170,15 @@ test('native visual payload keeps fill opacity 0 so the plate can be fully clear
   assert.equal(tiny.appearance.opacity, 0.004);
   const kept = projectNativeVisualPayload({ appearance: { opacity: 0.42 } });
   assert.equal(kept.appearance.opacity, 0.42);
+});
+
+test('native visual payload omits default hold-drag and projects off as a Native bool', () => {
+  const omitted = projectNativeVisualPayload({ interaction: { holdDrag: 'on' } });
+  assert.equal('holdDrag' in omitted.interaction, false);
+  const missing = projectNativeVisualPayload({ interaction: {} });
+  assert.equal('holdDrag' in missing.interaction, false);
+  const off = projectNativeVisualPayload({ interaction: { holdDrag: 'off' } });
+  assert.equal(off.interaction.holdDrag, false);
 });
 
 test('native visual payload hydrates legacy timeout dismiss into closeButton plus autoDismiss', () => {

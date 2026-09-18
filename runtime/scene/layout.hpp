@@ -27,11 +27,18 @@ enum class LayoutMode {
 enum class StackWrap {
     Parallel,
     Off,
-    Snake
+    Snake,
+    Coil
 };
 
 enum class StackSettle {
-    Snap
+    Snap,
+    Follow
+};
+
+enum class StackNewest {
+    Dock,
+    Next
 };
 
 struct StackCardInput {
@@ -58,6 +65,7 @@ struct StackLayoutOptions {
     int margin_bottom{};
     StackWrap wrap{StackWrap::Parallel};
     StackSettle settle{StackSettle::Snap};
+    StackNewest newest{StackNewest::Dock};
 };
 
 struct StackCardPlacement {
