@@ -43,12 +43,14 @@ test('CMake and protocol use the current release version without runtime workspa
   assert.equal(createHello({ requestId: 'req-version', traceId: 'trace-version' }).payload.clientVersion, canonicalVersion);
 });
 
-test('README documents the canonical current version and excludes historical diagnostics', () => {
+test('README documents the trial version and excludes historical diagnostics', () => {
   const readme = read('README.md');
-  assert.match(readme, /Current stable baseline: `0\.1\.8`/);
-  assert.match(readme, /Current stable version: `0\.1\.8`/);
-  assert.match(readme, /VERSION.*canonical|canonical.*VERSION/i);
-  assert.match(readme, /historical.*diagnostic|诊断.*历史|历史.*artifact/i);
+  assert.match(readme, /试用版/);
+  assert.match(readme, /0\.1\.8/);
+  assert.match(readme, /VERSION/);
+  assert.match(readme, /历史诊断/);
+  assert.doesNotMatch(readme, /Current stable baseline/);
+  assert.doesNotMatch(readme, /Current stable version/);
 });
 
 test('release script rejects historical path discovery and emits an audit manifest', () => {
